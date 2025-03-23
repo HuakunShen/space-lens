@@ -1,0 +1,15 @@
+{
+  "name": "space-lens-darwin-universal",
+  "version": "0.0.0",
+  "os": [
+    "darwin"
+  ],
+  "main": "space-lens.darwin-universal.node",
+  "files": [
+    "space-lens.darwin-universal.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  }
+}
