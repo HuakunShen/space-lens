@@ -3,6 +3,10 @@
   "version": "0.0.2",
   "main": "index.js",
   "types": "index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HuakunShen/space-lens"
+  },
   "napi": {
     "name": "space-lens",
     "triples": {
