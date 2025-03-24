@@ -7,6 +7,15 @@ use du_dust::{self, display_node::DisplayNode as DuDisplayNode, Node as DuNode};
 use std::path::PathBuf;
 
 #[napi(object)]
+pub struct DirectoryTreeOptions {
+  pub directories: Vec<String>,
+  #[napi(js_name = "ignoreHidden")]
+  pub ignore_hidden: Option<bool>,
+  #[napi(js_name = "fullPath")]
+  pub full_path: Option<bool>,
+}
+
+#[napi(object)]
 pub struct Node {
   pub name: String,
   #[napi(js_name = "size")]
@@ -15,14 +24,28 @@ pub struct Node {
   pub depth: u32,
 }
 
-impl From<DuNode> for Node {
-  fn from(node: DuNode) -> Self {
+impl Node {
+  fn from_du_node(node: DuNode, full_path: bool) -> Self {
+    let name = if full_path {
+      node.name.to_string_lossy().to_string()
+    } else {
+      node.name.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| node.name.to_string_lossy().to_string())
+    };
+    
     Node {
-      name: node.name.to_string_lossy().to_string(),
+      name,
       size: node.size as i64,
-      children: node.children.into_iter().map(Node::from).collect(),
+      children: node.children.into_iter().map(|child| Node::from_du_node(child, full_path)).collect(),
       depth: node.depth as u32,
     }
+  }
+}
+
+impl From<DuNode> for Node {
+  fn from(node: DuNode) -> Self {
+    Node::from_du_node(node, false)
   }
 }
 
@@ -37,7 +60,9 @@ pub struct DisplayNode {
 impl From<DuDisplayNode> for DisplayNode {
   fn from(node: DuDisplayNode) -> Self {
     DisplayNode {
-      name: node.name.to_string_lossy().to_string(),
+      name: node.name.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| node.name.to_string_lossy().to_string()),
       size: node.size as i64,
       children: node.children.into_iter().map(DisplayNode::from).collect(),
     }
@@ -45,10 +70,13 @@ impl From<DuDisplayNode> for DisplayNode {
 }
 
 #[napi]
-pub fn build_directory_tree(directories: Vec<String>, ignore_hidden: bool) -> Vec<Node> {
-  du_dust::build_directory_tree(directories, ignore_hidden)
+pub fn build_directory_tree(options: DirectoryTreeOptions) -> Vec<Node> {
+  let ignore_hidden = options.ignore_hidden.unwrap_or(false);
+  let full_path = options.full_path.unwrap_or(false);
+  
+  du_dust::build_directory_tree(options.directories, ignore_hidden)
     .into_iter()
-    .map(Node::from)
+    .map(|node| Node::from_du_node(node, full_path))
     .collect()
 }
 
