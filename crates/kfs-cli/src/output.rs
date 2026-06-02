@@ -132,6 +132,10 @@ pub fn format_watch_stats(stats: &WatchRunStats) -> String {
     )
 }
 
+pub fn format_bench_stats(candidate_count: usize, result_count: usize, elapsed_ms: u128) -> String {
+    format!("candidates={candidate_count} results={result_count} elapsed_ms={elapsed_ms}")
+}
+
 fn escape_json(value: &str) -> String {
     let mut escaped = String::new();
     for ch in value.chars() {
@@ -264,6 +268,14 @@ mod tests {
         assert_eq!(
             text,
             "events=3 created=1 modified=1 deleted=1 dirty=false errors=0 elapsed_ms=42"
+        );
+    }
+
+    #[test]
+    fn formats_bench_stats() {
+        assert_eq!(
+            format_bench_stats(5, 2, 17),
+            "candidates=5 results=2 elapsed_ms=17"
         );
     }
 }

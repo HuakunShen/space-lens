@@ -15,12 +15,18 @@ use kfs_core::{
     SearchResult, SearchRoot,
 };
 use kfs_crawler::{crawl, CrawlOptions};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, params_from_iter, types::Value, Connection, OptionalExtension};
 
 pub type RebuildStats = IndexRebuildStats;
 pub type RefreshStats = IndexRefreshStats;
 pub type RepairStats = IndexRepairStats;
 pub type RootStatus = IndexRootStatus;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexedSearchOutcome {
+    pub candidate_count: usize,
+    pub results: Vec<SearchResult>,
+}
 
 #[derive(Debug)]
 pub struct SqliteIndex {
@@ -253,9 +259,21 @@ impl SqliteIndex {
         config: &SearchConfig,
         query: &SearchQuery,
     ) -> rusqlite::Result<Vec<SearchResult>> {
+        Ok(self.search_with_metrics(config, query)?.results)
+    }
+
+    pub fn search_with_metrics(
+        &self,
+        config: &SearchConfig,
+        query: &SearchQuery,
+    ) -> rusqlite::Result<IndexedSearchOutcome> {
         let mut entry_ids = matching_entry_ids(&self.conn, config, query)?;
+        let candidate_count = entry_ids.len();
         if entry_ids.is_empty() {
-            return Ok(Vec::new());
+            return Ok(IndexedSearchOutcome {
+                candidate_count,
+                results: Vec::new(),
+            });
         }
         entry_ids.sort_unstable();
 
@@ -286,7 +304,10 @@ impl SqliteIndex {
                 .then_with(|| left.path.cmp(&right.path))
         });
         results.truncate(query.limit);
-        Ok(results)
+        Ok(IndexedSearchOutcome {
+            candidate_count,
+            results,
+        })
     }
 
     pub fn status(&self) -> rusqlite::Result<Vec<RootStatus>> {
@@ -328,6 +349,7 @@ impl SqliteIndex {
               id INTEGER PRIMARY KEY,
               root_id INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
               path TEXT NOT NULL,
+              path_lower TEXT NOT NULL DEFAULT '',
               name TEXT NOT NULL,
               name_lower TEXT NOT NULL,
               extension TEXT,
@@ -365,7 +387,17 @@ impl SqliteIndex {
             CREATE INDEX IF NOT EXISTS idx_terms_term ON terms(term);
             CREATE INDEX IF NOT EXISTS idx_terms_entry ON terms(entry_id);
             ",
-        )
+        )?;
+        ensure_entries_path_lower_column(&self.conn)?;
+        self.conn.execute(
+            "UPDATE entries SET path_lower = lower(path) WHERE path_lower = ''",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entries_root_deleted_path_lower ON entries(root_id, deleted, path_lower)",
+            [],
+        )?;
+        Ok(())
     }
 }
 
@@ -467,11 +499,12 @@ fn insert_entry_tx(
         .map(|value| value.to_ascii_lowercase());
     tx.execute(
         "INSERT INTO entries
-         (root_id, path, name, name_lower, extension, kind, size, mtime, hidden, ignored, sensitive, deleted, indexed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12)",
+         (root_id, path, path_lower, name, name_lower, extension, kind, size, mtime, hidden, ignored, sensitive, deleted, indexed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13)",
         params![
             root_id,
             entry.path.to_string_lossy(),
+            entry.path.to_string_lossy().to_ascii_lowercase(),
             name,
             name.to_ascii_lowercase(),
             extension,
@@ -507,20 +540,22 @@ fn update_entry_tx(
     tx.execute(
         "UPDATE entries
          SET path = ?1,
-             name = ?2,
-             name_lower = ?3,
-             extension = ?4,
-             kind = ?5,
-             size = ?6,
-             mtime = ?7,
-             hidden = ?8,
-             ignored = ?9,
-             sensitive = ?10,
+             path_lower = ?2,
+             name = ?3,
+             name_lower = ?4,
+             extension = ?5,
+             kind = ?6,
+             size = ?7,
+             mtime = ?8,
+             hidden = ?9,
+             ignored = ?10,
+             sensitive = ?11,
              deleted = 0,
-             indexed_at = ?11
-         WHERE id = ?12",
+             indexed_at = ?12
+         WHERE id = ?13",
         params![
             entry.path.to_string_lossy(),
+            entry.path.to_string_lossy().to_ascii_lowercase(),
             name,
             name.to_ascii_lowercase(),
             extension,
@@ -619,16 +654,25 @@ fn matching_entry_ids(
     }
 
     let query_terms = tokenize(&query.query);
+    let root_filter = placeholders(root_ids.len());
+    let root_values = root_ids
+        .iter()
+        .copied()
+        .map(Value::from)
+        .collect::<Vec<_>>();
     let mut intersection: Option<HashSet<i64>> = None;
     for term in query_terms {
-        let mut stmt = conn.prepare(
+        let (term_clause, mut values) = term_prefix_clause(&term);
+        values.extend(root_values.iter().cloned());
+        let sql = format!(
             "SELECT DISTINCT e.id
              FROM terms t
              JOIN entries e ON e.id = t.entry_id
-             WHERE t.term LIKE ?1 AND e.deleted = 0",
-        )?;
+             WHERE {term_clause} AND e.deleted = 0 AND e.root_id IN ({root_filter})"
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let ids = stmt
-            .query_map(params![format!("{term}%")], |row| row.get::<_, i64>(0))?
+            .query_map(params_from_iter(values.iter()), |row| row.get::<_, i64>(0))?
             .collect::<rusqlite::Result<HashSet<_>>>()?;
         intersection = Some(match intersection {
             Some(existing) => existing.intersection(&ids).copied().collect(),
@@ -637,27 +681,69 @@ fn matching_entry_ids(
     }
 
     let Some(ids) = intersection else {
-        let mut stmt = conn.prepare("SELECT id FROM entries WHERE deleted = 0")?;
+        let sql =
+            format!("SELECT id FROM entries WHERE deleted = 0 AND root_id IN ({root_filter})");
+        let mut stmt = conn.prepare(&sql)?;
         return stmt
-            .query_map([], |row| row.get::<_, i64>(0))?
+            .query_map(params_from_iter(root_values.iter()), |row| {
+                row.get::<_, i64>(0)
+            })?
             .collect::<rusqlite::Result<Vec<_>>>();
     };
+    Ok(ids.into_iter().collect())
+}
 
-    let root_id_set = root_ids.into_iter().collect::<HashSet<_>>();
-    let mut filtered = Vec::new();
-    for id in ids {
-        let root_id = conn
-            .query_row(
-                "SELECT root_id FROM entries WHERE id = ?1",
-                params![id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?;
-        if root_id.is_some_and(|root_id| root_id_set.contains(&root_id)) {
-            filtered.push(id);
+fn placeholders(count: usize) -> String {
+    std::iter::repeat_n("?", count)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn term_prefix_clause(term: &str) -> (String, Vec<Value>) {
+    if let Some(upper_bound) = ascii_prefix_upper_bound(term) {
+        (
+            "t.term >= ? AND t.term < ?".to_string(),
+            vec![Value::from(term.to_string()), Value::from(upper_bound)],
+        )
+    } else {
+        (
+            "t.term LIKE ?".to_string(),
+            vec![Value::from(format!("{term}%"))],
+        )
+    }
+}
+
+fn ascii_prefix_upper_bound(prefix: &str) -> Option<String> {
+    if prefix.is_empty() || !prefix.is_ascii() {
+        return None;
+    }
+    let mut bytes = prefix.as_bytes().to_vec();
+    for index in (0..bytes.len()).rev() {
+        if bytes[index] < 0x7f {
+            bytes[index] += 1;
+            bytes.truncate(index + 1);
+            return String::from_utf8(bytes).ok();
         }
     }
-    Ok(filtered)
+    None
+}
+
+fn ensure_entries_path_lower_column(conn: &Connection) -> rusqlite::Result<()> {
+    if !column_exists(conn, "entries", "path_lower")? {
+        conn.execute(
+            "ALTER TABLE entries ADD COLUMN path_lower TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+fn column_exists(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<HashSet<_>>>()?;
+    Ok(columns.contains(column))
 }
 
 fn root_ids_for_config(conn: &Connection, config: &SearchConfig) -> rusqlite::Result<Vec<i64>> {
@@ -881,5 +967,67 @@ mod tests {
         assert_eq!(stats.dirty_roots, 1);
         assert_eq!(stats.repaired_roots, 1);
         assert!(!status[0].dirty);
+    }
+
+    #[test]
+    fn search_with_metrics_reports_narrowed_candidate_count() {
+        let root = temp_dir("metrics");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("needleunique-target.md"), "needle\n").unwrap();
+        fs::write(root.join("other-target.md"), "other\n").unwrap();
+
+        let mut index = SqliteIndex::open_memory().unwrap();
+        let config = SearchConfig {
+            roots: vec![SearchRoot::new(&root)],
+        };
+        index.rebuild(&config).unwrap();
+        let outcome = index
+            .search_with_metrics(&config, &SearchQuery::new("needleunique"))
+            .unwrap();
+        remove_dir_all_if_exists(&root).unwrap();
+
+        assert_eq!(outcome.candidate_count, 1);
+        assert_eq!(outcome.results.len(), 1);
+        assert!(outcome.results[0].path.ends_with("needleunique-target.md"));
+    }
+
+    #[test]
+    fn ascii_prefix_upper_bound_advances_last_ascii_byte() {
+        assert_eq!(ascii_prefix_upper_bound("abc"), Some("abd".to_string()));
+        assert_eq!(ascii_prefix_upper_bound("abz"), Some("ab{".to_string()));
+        assert_eq!(ascii_prefix_upper_bound("é"), None);
+    }
+
+    #[test]
+    fn migrate_adds_path_lower_before_creating_path_lower_index() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE entries (
+              id INTEGER PRIMARY KEY,
+              root_id INTEGER NOT NULL,
+              path TEXT NOT NULL,
+              name TEXT NOT NULL,
+              name_lower TEXT NOT NULL,
+              extension TEXT,
+              kind INTEGER NOT NULL,
+              size INTEGER,
+              mtime INTEGER,
+              hidden INTEGER NOT NULL DEFAULT 0,
+              ignored INTEGER NOT NULL DEFAULT 0,
+              sensitive INTEGER NOT NULL DEFAULT 0,
+              deleted INTEGER NOT NULL DEFAULT 0,
+              indexed_at INTEGER NOT NULL,
+              UNIQUE(root_id, path)
+            );
+            ",
+        )
+        .unwrap();
+        let index = SqliteIndex { conn };
+
+        index.migrate().unwrap();
+
+        let has_path_lower = column_exists(&index.conn, "entries", "path_lower").unwrap();
+        assert!(has_path_lower);
     }
 }

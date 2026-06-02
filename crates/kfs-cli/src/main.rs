@@ -18,9 +18,16 @@ use kfs_index_sqlite::SqliteIndex;
 use kfs_provider_spotlight::SpotlightProvider;
 use kfs_watcher::{run_polling_watch, WatchOptions};
 use output::{
-    format_explain_text, format_rebuild_stats, format_refresh_stats, format_repair_stats,
-    format_results_json, format_results_text, format_status, format_watch_stats,
+    format_bench_stats, format_explain_text, format_rebuild_stats, format_refresh_stats,
+    format_repair_stats, format_results_json, format_results_text, format_status,
+    format_watch_stats,
 };
+
+#[derive(Debug, Clone)]
+struct SearchRun {
+    results: Vec<SearchResult>,
+    candidate_count: usize,
+}
 
 fn main() -> ExitCode {
     match run(std::env::args().skip(1).collect()) {
@@ -42,7 +49,7 @@ fn run(raw_args: Vec<String>) -> Result<String, String> {
 
     match spec.command {
         CommandSpec::Search { query, json } => {
-            let results = search_with_provider(
+            let search = search_with_provider(
                 &config,
                 &core,
                 &query,
@@ -50,9 +57,9 @@ fn run(raw_args: Vec<String>) -> Result<String, String> {
                 spec.db_path.as_deref(),
             )?;
             if json {
-                Ok(format_results_json(&results))
+                Ok(format_results_json(&search.results))
             } else {
-                Ok(format_results_text(&results))
+                Ok(format_results_text(&search.results))
             }
         }
         CommandSpec::Explain { path, query } => {
@@ -61,17 +68,17 @@ fn run(raw_args: Vec<String>) -> Result<String, String> {
         }
         CommandSpec::Bench { query } => {
             let started = Instant::now();
-            let results = search_with_provider(
+            let search = search_with_provider(
                 &config,
                 &core,
                 &query,
                 spec.provider,
                 spec.db_path.as_deref(),
             )?;
-            Ok(format!(
-                "results={} elapsed_ms={}",
-                results.len(),
-                started.elapsed().as_millis()
+            Ok(format_bench_stats(
+                search.candidate_count,
+                search.results.len(),
+                started.elapsed().as_millis(),
             ))
         }
         CommandSpec::Index(command) => run_index_command(&config, spec.db_path.as_deref(), command),
@@ -87,7 +94,7 @@ fn search_with_provider(
     query: &SearchQuery,
     provider: SearchProvider,
     db_path: Option<&Path>,
-) -> Result<Vec<SearchResult>, String> {
+) -> Result<SearchRun, String> {
     match provider {
         SearchProvider::Spotlight => search_spotlight(config, core, query),
         SearchProvider::Sqlite => {
@@ -96,9 +103,9 @@ fn search_with_provider(
         }
         SearchProvider::Auto => {
             if let Some(path) = db_path {
-                let results = search_sqlite(config, query, path)?;
-                if !results.is_empty() {
-                    return Ok(results);
+                let search = search_sqlite(config, query, path)?;
+                if !search.results.is_empty() {
+                    return Ok(search);
                 }
             }
             search_spotlight(config, core, query)
@@ -110,23 +117,31 @@ fn search_spotlight(
     config: &SearchConfig,
     core: &SearchEngineCore,
     query: &SearchQuery,
-) -> Result<Vec<SearchResult>, String> {
+) -> Result<SearchRun, String> {
     let provider = SpotlightProvider::default();
     let candidates = provider
         .search_candidates(config, query)
         .map_err(|err| err.to_string())?;
-    Ok(core.search_candidates(query, candidates))
+    let candidate_count = candidates.len();
+    Ok(SearchRun {
+        results: core.search_candidates(query, candidates),
+        candidate_count,
+    })
 }
 
 fn search_sqlite(
     config: &SearchConfig,
     query: &SearchQuery,
     db_path: &Path,
-) -> Result<Vec<SearchResult>, String> {
+) -> Result<SearchRun, String> {
     let index = SqliteIndex::open(db_path).map_err(|err| err.to_string())?;
-    index
-        .search_index(config, query)
-        .map_err(|err| err.to_string())
+    let outcome = index
+        .search_with_metrics(config, query)
+        .map_err(|err| err.to_string())?;
+    Ok(SearchRun {
+        results: outcome.results,
+        candidate_count: outcome.candidate_count,
+    })
 }
 
 fn run_index_command(
@@ -174,4 +189,64 @@ fn run_watch_command(
         }
     }
     Ok(format_watch_stats(&stats))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    #[test]
+    fn bench_reports_candidate_and_result_counts_for_sqlite() {
+        let root = temp_dir("bench-root");
+        let db_path = temp_dir("bench-db").with_extension("sqlite");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("needlebench-target.md"), "needle\n").unwrap();
+        fs::write(root.join("other-target.md"), "other\n").unwrap();
+
+        run(vec![
+            "index".to_string(),
+            "rebuild".to_string(),
+            "--root".to_string(),
+            root.to_string_lossy().into_owned(),
+            "--db".to_string(),
+            db_path.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+        let output = run(vec![
+            "bench".to_string(),
+            "needlebench".to_string(),
+            "--root".to_string(),
+            root.to_string_lossy().into_owned(),
+            "--provider".to_string(),
+            "sqlite".to_string(),
+            "--db".to_string(),
+            db_path.to_string_lossy().into_owned(),
+        ])
+        .unwrap();
+
+        cleanup(&root, &db_path);
+
+        assert!(output.contains("candidates=1"));
+        assert!(output.contains("results=1"));
+        assert!(output.contains("elapsed_ms="));
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("kfs-cli-{name}-{nonce}"))
+    }
+
+    fn cleanup(root: &Path, db_path: &Path) {
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_file(db_path);
+        let _ = fs::remove_file(db_path.with_extension("sqlite-shm"));
+        let _ = fs::remove_file(db_path.with_extension("sqlite-wal"));
+    }
 }

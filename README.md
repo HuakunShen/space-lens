@@ -29,6 +29,7 @@ cargo run -p kfs-cli -- search "package json" --root ~/Dev --limit 5 --json
 cargo run -p kfs-cli -- index rebuild --root . --db /tmp/kfs.sqlite
 cargo run -p kfs-cli -- index refresh --root . --db /tmp/kfs.sqlite
 cargo run -p kfs-cli -- watch --root . --db /tmp/kfs.sqlite --duration-ms 1000
+cargo run -p kfs-cli -- bench "Cargo toml" --root . --provider sqlite --db /tmp/kfs.sqlite
 cargo run -p kfs-cli -- search "Cargo toml" --root . --provider sqlite --db /tmp/kfs.sqlite --json
 ```
 
