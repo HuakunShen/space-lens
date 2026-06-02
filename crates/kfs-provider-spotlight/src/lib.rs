@@ -7,7 +7,10 @@ use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 
-use kfs_core::{ranking::tokenize, EntryKind, SearchCandidate, SearchConfig, SearchQuery};
+use kfs_core::{
+    ranking::tokenize, BackendError, CandidateProvider, EntryKind, SearchCandidate, SearchConfig,
+    SearchQuery,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput {
@@ -82,6 +85,20 @@ impl<R: CommandRunner> SpotlightProvider<R> {
                 })
                 .collect())
         }
+    }
+}
+
+impl<R: CommandRunner> CandidateProvider for SpotlightProvider<R> {
+    fn provider_name(&self) -> &'static str {
+        "spotlight"
+    }
+
+    fn search_candidates(
+        &self,
+        config: &SearchConfig,
+        query: &SearchQuery,
+    ) -> Result<Vec<SearchCandidate>, BackendError> {
+        self.search(config, query).map_err(BackendError::from)
     }
 }
 
@@ -171,7 +188,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn search_maps_runner_output_to_spotlight_candidates() {
+    fn trait_search_maps_runner_output_to_spotlight_candidates() {
         #[derive(Debug, Clone, Copy)]
         struct FakeRunner;
 
@@ -192,7 +209,7 @@ mod tests {
             roots: vec![SearchRoot::new("/Users/alice/Dev")],
         };
         let candidates = provider
-            .search(&config, &SearchQuery::new("package"))
+            .search_candidates(&config, &SearchQuery::new("package"))
             .unwrap();
 
         assert_eq!(candidates.len(), 1);

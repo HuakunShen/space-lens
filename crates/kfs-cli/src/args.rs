@@ -1,7 +1,8 @@
 //! Minimal argument parser for the local `kfs` CLI.
 //!
-//! This avoids adding CLI dependencies while the Rust prototype is still being
-//! shaped and keeps parsing behavior easy to unit test.
+//! The parser intentionally stays dependency-free while the Rust prototype is
+//! being shaped. Keeping it small also makes provider and index command
+//! behavior easy to test.
 
 use std::path::PathBuf;
 
@@ -10,7 +11,16 @@ use kfs_core::{SearchQuery, SearchRoot};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedArgs {
     pub roots: Vec<SearchRoot>,
+    pub db_path: Option<PathBuf>,
+    pub provider: SearchProvider,
     pub command: CommandSpec,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchProvider {
+    Spotlight,
+    Sqlite,
+    Auto,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +36,13 @@ pub enum CommandSpec {
     Bench {
         query: SearchQuery,
     },
+    Index(IndexCommand),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndexCommand {
+    Rebuild,
+    Status,
 }
 
 pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
@@ -37,6 +54,7 @@ pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         "search" => parse_search(&args[1..]),
         "explain" => parse_explain(&args[1..]),
         "bench" => parse_bench(&args[1..]),
+        "index" => parse_index(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -44,10 +62,12 @@ pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
 fn parse_search(args: &[String]) -> Result<ParsedArgs, String> {
     let (query_text, rest) = first_value(args, "search requires a query")?;
     let mut parsed = parse_common(rest)?;
-    let query = parsed.query(query_text)?;
+    let query = parsed.query(query_text);
     let json = parsed.json;
     Ok(ParsedArgs {
         roots: parsed.take_roots()?,
+        db_path: parsed.db_path,
+        provider: parsed.provider,
         command: CommandSpec::Search { query, json },
     })
 }
@@ -58,6 +78,8 @@ fn parse_explain(args: &[String]) -> Result<ParsedArgs, String> {
     let query = parsed.query_text.take().map(SearchQuery::new);
     Ok(ParsedArgs {
         roots: parsed.take_roots()?,
+        db_path: parsed.db_path,
+        provider: parsed.provider,
         command: CommandSpec::Explain {
             path: PathBuf::from(path),
             query,
@@ -68,10 +90,36 @@ fn parse_explain(args: &[String]) -> Result<ParsedArgs, String> {
 fn parse_bench(args: &[String]) -> Result<ParsedArgs, String> {
     let (query_text, rest) = first_value(args, "bench requires a query")?;
     let mut parsed = parse_common(rest)?;
-    let query = parsed.query(query_text)?;
+    let query = parsed.query(query_text);
     Ok(ParsedArgs {
         roots: parsed.take_roots()?,
+        db_path: parsed.db_path,
+        provider: parsed.provider,
         command: CommandSpec::Bench { query },
+    })
+}
+
+fn parse_index(args: &[String]) -> Result<ParsedArgs, String> {
+    let Some(subcommand) = args.first() else {
+        return Err("index requires rebuild or status".to_string());
+    };
+    let mut parsed = parse_common(&args[1..])?;
+    let (roots, command) = match subcommand.as_str() {
+        "rebuild" => {
+            parsed.require_db()?;
+            (parsed.take_roots()?, IndexCommand::Rebuild)
+        }
+        "status" => {
+            parsed.require_db()?;
+            (Vec::new(), IndexCommand::Status)
+        }
+        unknown => return Err(format!("unknown index command: {unknown}")),
+    };
+    Ok(ParsedArgs {
+        roots,
+        db_path: parsed.db_path,
+        provider: parsed.provider,
+        command: CommandSpec::Index(command),
     })
 }
 
@@ -88,7 +136,7 @@ fn first_value<'a>(
     Ok((value.as_str(), &args[1..]))
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct CommonArgs {
     roots: Vec<SearchRoot>,
     limit: Option<usize>,
@@ -97,6 +145,24 @@ struct CommonArgs {
     include_ignored: bool,
     extensions: Vec<String>,
     query_text: Option<String>,
+    db_path: Option<PathBuf>,
+    provider: SearchProvider,
+}
+
+impl Default for CommonArgs {
+    fn default() -> Self {
+        Self {
+            roots: Vec::new(),
+            limit: None,
+            json: false,
+            include_hidden: false,
+            include_ignored: false,
+            extensions: Vec::new(),
+            query_text: None,
+            db_path: None,
+            provider: SearchProvider::Spotlight,
+        }
+    }
 }
 
 impl CommonArgs {
@@ -107,7 +173,14 @@ impl CommonArgs {
         Ok(std::mem::take(&mut self.roots))
     }
 
-    fn query(&mut self, query_text: &str) -> Result<SearchQuery, String> {
+    fn require_db(&self) -> Result<(), String> {
+        if self.db_path.is_none() {
+            return Err("--db is required for this command".to_string());
+        }
+        Ok(())
+    }
+
+    fn query(&mut self, query_text: &str) -> SearchQuery {
         let mut query = SearchQuery::new(query_text);
         if let Some(limit) = self.limit {
             query.limit = limit;
@@ -115,7 +188,7 @@ impl CommonArgs {
         query.include_hidden = self.include_hidden;
         query.include_ignored = self.include_ignored;
         query.extensions = std::mem::take(&mut self.extensions);
-        Ok(query)
+        query
     }
 }
 
@@ -130,6 +203,20 @@ fn parse_common(args: &[String]) -> Result<CommonArgs, String> {
                     .get(index)
                     .ok_or_else(|| "--root requires a path".to_string())?;
                 parsed.roots.push(SearchRoot::new(value));
+            }
+            "--db" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--db requires a path".to_string())?;
+                parsed.db_path = Some(PathBuf::from(value));
+            }
+            "--provider" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--provider requires sqlite, spotlight, or auto".to_string())?;
+                parsed.provider = parse_provider(value)?;
             }
             "--limit" => {
                 index += 1;
@@ -168,8 +255,17 @@ fn parse_common(args: &[String]) -> Result<CommonArgs, String> {
     Ok(parsed)
 }
 
+fn parse_provider(value: &str) -> Result<SearchProvider, String> {
+    match value {
+        "spotlight" => Ok(SearchProvider::Spotlight),
+        "sqlite" => Ok(SearchProvider::Sqlite),
+        "auto" => Ok(SearchProvider::Auto),
+        _ => Err("--provider must be sqlite, spotlight, or auto".to_string()),
+    }
+}
+
 fn usage() -> String {
-    "usage: kfs search <query> --root <path> [--limit n] [--json] | kfs explain <path> --root <path> [--query text] | kfs bench <query> --root <path>".to_string()
+    "usage: kfs search <query> --root <path> [--provider sqlite|spotlight|auto] [--db path] [--limit n] [--json] | kfs index rebuild --root <path> --db <path> | kfs index status --db <path>".to_string()
 }
 
 #[cfg(test)]
@@ -188,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn parses_search_roots_limit_json_and_extensions() {
+    fn parses_search_roots_limit_json_provider_db_and_extensions() {
         let parsed = parse_args(&strings(&[
             "search",
             "package json",
@@ -199,10 +295,16 @@ mod tests {
             "--json",
             "--ext",
             "json",
+            "--provider",
+            "sqlite",
+            "--db",
+            "/tmp/kfs.sqlite",
         ]))
         .unwrap();
 
         assert_eq!(parsed.roots, vec![SearchRoot::new("/Users/alice/Dev")]);
+        assert_eq!(parsed.db_path, Some(PathBuf::from("/tmp/kfs.sqlite")));
+        assert_eq!(parsed.provider, SearchProvider::Sqlite);
         assert_eq!(
             parsed.command,
             CommandSpec::Search {
@@ -248,9 +350,12 @@ mod tests {
             "/Users/alice/Dev",
             "--limit",
             "3",
+            "--provider",
+            "auto",
         ]))
         .unwrap();
 
+        assert_eq!(parsed.provider, SearchProvider::Auto);
         assert_eq!(
             parsed.command,
             CommandSpec::Bench {
@@ -263,5 +368,30 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn parses_index_rebuild() {
+        let parsed = parse_args(&strings(&[
+            "index",
+            "rebuild",
+            "--root",
+            "/Users/alice/Dev",
+            "--db",
+            "/tmp/kfs.sqlite",
+        ]))
+        .unwrap();
+
+        assert_eq!(parsed.command, CommandSpec::Index(IndexCommand::Rebuild));
+        assert_eq!(parsed.roots, vec![SearchRoot::new("/Users/alice/Dev")]);
+        assert_eq!(parsed.db_path, Some(PathBuf::from("/tmp/kfs.sqlite")));
+    }
+
+    #[test]
+    fn parses_index_status() {
+        let parsed = parse_args(&strings(&["index", "status", "--db", "/tmp/kfs.sqlite"])).unwrap();
+
+        assert_eq!(parsed.command, CommandSpec::Index(IndexCommand::Status));
+        assert_eq!(parsed.db_path, Some(PathBuf::from("/tmp/kfs.sqlite")));
     }
 }

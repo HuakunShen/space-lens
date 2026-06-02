@@ -18,7 +18,7 @@ pub struct SearchRoot {
 impl SearchRoot {
     pub fn new(path: impl Into<PathBuf>) -> Self {
         Self {
-            path: expand_tilde(path.into()),
+            path: normalize_root_path(path.into()),
             enabled: true,
             priority: 0,
             include_hidden: false,
@@ -164,8 +164,33 @@ pub fn expand_tilde(path: PathBuf) -> PathBuf {
     path
 }
 
+pub fn normalize_root_path(path: PathBuf) -> PathBuf {
+    let expanded = expand_tilde(path);
+    let absolute = if expanded.is_absolute() {
+        expanded
+    } else if let Ok(current_dir) = std::env::current_dir() {
+        current_dir.join(expanded)
+    } else {
+        expanded
+    };
+    std::fs::canonicalize(&absolute).unwrap_or(absolute)
+}
+
 pub(crate) fn lowercase_extension(path: &std::path::Path) -> Option<String> {
     path.extension()
         .and_then(|value| value.to_str())
         .map(|value| value.to_ascii_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_root_normalizes_relative_paths_to_absolute_paths() {
+        let root = SearchRoot::new("relative-project");
+
+        assert!(root.path.is_absolute());
+        assert!(root.path.ends_with("relative-project"));
+    }
 }

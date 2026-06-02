@@ -21,10 +21,14 @@ impl PathPolicy {
     pub fn evaluate(&self, path: &Path, query: Option<&SearchQuery>) -> PolicyDecision {
         let path = expand_tilde(path.to_path_buf());
         let root = self.matching_root(&path);
-        let components = normal_components(&path);
-        let hidden = is_hidden(&components);
-        let ignored = is_ignored(&path, &components);
-        let sensitive = is_sensitive(&path, &components);
+        let full_components = normal_components(&path);
+        let relative_components = root
+            .and_then(|root| path.strip_prefix(&root.path).ok())
+            .map(normal_components)
+            .unwrap_or_else(|| full_components.clone());
+        let hidden = is_hidden(&relative_components);
+        let ignored = is_ignored(&path, &relative_components);
+        let sensitive = is_sensitive(&path, &full_components);
         let mut reasons = Vec::new();
 
         let mut allowed = true;
@@ -242,5 +246,35 @@ mod tests {
 
         assert!(decision.allowed);
         assert!(decision.ignored);
+    }
+
+    #[test]
+    fn explicit_root_under_hidden_parent_does_not_hide_every_child() {
+        let policy = PathPolicy::new(SearchConfig {
+            roots: vec![SearchRoot::new("/Users/alice/.codex/worktree/project")],
+        });
+
+        let decision = policy.evaluate(
+            Path::new("/Users/alice/.codex/worktree/project/src/main.rs"),
+            None,
+        );
+
+        assert!(decision.allowed);
+        assert!(!decision.hidden);
+    }
+
+    #[test]
+    fn hidden_directories_inside_explicit_root_are_still_hidden() {
+        let policy = PathPolicy::new(SearchConfig {
+            roots: vec![SearchRoot::new("/Users/alice/.codex/worktree/project")],
+        });
+
+        let decision = policy.evaluate(
+            Path::new("/Users/alice/.codex/worktree/project/.cache/file"),
+            None,
+        );
+
+        assert!(!decision.allowed);
+        assert!(decision.hidden);
     }
 }

@@ -3,7 +3,7 @@
 //! Formatting is kept separate from command execution so tests and future
 //! adapters can reuse the same stable text and JSON-like result rendering.
 
-use kfs_core::{ExplainResult, SearchResult};
+use kfs_core::{ExplainResult, IndexRebuildStats, IndexRootStatus, SearchResult};
 
 pub fn format_results_text(results: &[SearchResult]) -> String {
     if results.is_empty() {
@@ -63,6 +63,35 @@ pub fn format_explain_text(explain: &ExplainResult) -> String {
     )
 }
 
+pub fn format_rebuild_stats(stats: &IndexRebuildStats) -> String {
+    format!(
+        "roots={} entries={} skipped={} errors={}",
+        stats.roots,
+        stats.entries,
+        stats.skipped,
+        stats.errors.len()
+    )
+}
+
+pub fn format_status(status: &[IndexRootStatus]) -> String {
+    if status.is_empty() {
+        return "no indexed roots".to_string();
+    }
+    status
+        .iter()
+        .map(|root| {
+            format!(
+                "{}\tentries={}\tgeneration={}\tdirty={}",
+                root.path.to_string_lossy(),
+                root.entry_count,
+                root.generation,
+                root.dirty
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn escape_json(value: &str) -> String {
     let mut escaped = String::new();
     for ch in value.chars() {
@@ -82,7 +111,7 @@ fn escape_json(value: &str) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use kfs_core::{ExplainResult, MatchKind, SearchResult};
+    use kfs_core::{ExplainResult, IndexRebuildStats, IndexRootStatus, MatchKind, SearchResult};
 
     use super::*;
 
@@ -117,5 +146,32 @@ mod tests {
 
         assert!(text.contains("allowed=true"));
         assert!(text.contains("root=/Users/alice/Dev"));
+    }
+
+    #[test]
+    fn formats_rebuild_stats() {
+        let text = format_rebuild_stats(&IndexRebuildStats {
+            roots: 1,
+            entries: 3,
+            skipped: 2,
+            errors: Vec::new(),
+        });
+
+        assert_eq!(text, "roots=1 entries=3 skipped=2 errors=0");
+    }
+
+    #[test]
+    fn formats_status_rows() {
+        let text = format_status(&[IndexRootStatus {
+            path: PathBuf::from("/Users/alice/Dev"),
+            entry_count: 10,
+            generation: 2,
+            dirty: false,
+            last_full_scan_at: Some(1),
+            last_incremental_at: None,
+        }]);
+
+        assert!(text.contains("/Users/alice/Dev"));
+        assert!(text.contains("entries=10"));
     }
 }

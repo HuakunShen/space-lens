@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 kfs-core = { path = "../kfs-core" }
+kfs-index-sqlite = { path = "../kfs-index-sqlite" }
 kfs-provider-spotlight = { path = "../kfs-provider-spotlight" }
 
 [[bin]]

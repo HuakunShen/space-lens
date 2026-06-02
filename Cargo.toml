@@ -3,6 +3,8 @@
 resolver = "2"
 members = [
   "crates/kfs-core",
+  "crates/kfs-crawler",
+  "crates/kfs-index-sqlite",
   "crates/kfs-provider-spotlight",
   "crates/kfs-cli",
 ]
