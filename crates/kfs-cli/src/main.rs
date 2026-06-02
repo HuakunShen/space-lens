@@ -8,7 +8,7 @@ mod output;
 
 use std::path::Path;
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use args::{parse_args, CommandSpec, IndexCommand, SearchProvider};
 use kfs_core::{
@@ -16,9 +16,10 @@ use kfs_core::{
 };
 use kfs_index_sqlite::SqliteIndex;
 use kfs_provider_spotlight::SpotlightProvider;
+use kfs_watcher::{run_polling_watch, WatchOptions};
 use output::{
     format_explain_text, format_rebuild_stats, format_refresh_stats, format_repair_stats,
-    format_results_json, format_results_text, format_status,
+    format_results_json, format_results_text, format_status, format_watch_stats,
 };
 
 fn main() -> ExitCode {
@@ -74,6 +75,9 @@ fn run(raw_args: Vec<String>) -> Result<String, String> {
             ))
         }
         CommandSpec::Index(command) => run_index_command(&config, spec.db_path.as_deref(), command),
+        CommandSpec::Watch { duration_ms } => {
+            run_watch_command(&config, spec.db_path.as_deref(), duration_ms)
+        }
     }
 }
 
@@ -150,4 +154,24 @@ fn run_index_command(
             Ok(format_status(&status))
         }
     }
+}
+
+fn run_watch_command(
+    config: &SearchConfig,
+    db_path: Option<&Path>,
+    duration_ms: u64,
+) -> Result<String, String> {
+    let path = db_path.ok_or_else(|| "--db is required for watch".to_string())?;
+    let mut index = SqliteIndex::open(path).map_err(|err| err.to_string())?;
+    let options = WatchOptions::new(config.clone())
+        .with_duration(Duration::from_millis(duration_ms))
+        .with_poll_interval(Duration::from_millis(100));
+    let stats = run_polling_watch(&options, |_event| index.refresh_index(config).map(|_| ()))
+        .map_err(|err| err.to_string())?;
+    if stats.dirty {
+        for root in config.roots.iter().filter(|root| root.enabled) {
+            index.mark_root_dirty(root).map_err(|err| err.to_string())?;
+        }
+    }
+    Ok(format_watch_stats(&stats))
 }

@@ -7,6 +7,7 @@ use kfs_core::{
     ExplainResult, IndexRebuildStats, IndexRefreshStats, IndexRepairStats, IndexRootStatus,
     SearchResult,
 };
+use kfs_watcher::WatchRunStats;
 
 pub fn format_results_text(results: &[SearchResult]) -> String {
     if results.is_empty() {
@@ -118,6 +119,19 @@ pub fn format_status(status: &[IndexRootStatus]) -> String {
         .join("\n")
 }
 
+pub fn format_watch_stats(stats: &WatchRunStats) -> String {
+    format!(
+        "events={} created={} modified={} deleted={} dirty={} errors={} elapsed_ms={}",
+        stats.events,
+        stats.created,
+        stats.modified,
+        stats.deleted,
+        stats.dirty,
+        stats.errors.len(),
+        stats.elapsed_ms
+    )
+}
+
 fn escape_json(value: &str) -> String {
     let mut escaped = String::new();
     for ch in value.chars() {
@@ -141,6 +155,7 @@ mod tests {
         ExplainResult, IndexRebuildStats, IndexRefreshStats, IndexRepairStats, IndexRootStatus,
         MatchKind, SearchResult,
     };
+    use kfs_watcher::WatchRunStats;
 
     use super::*;
 
@@ -232,5 +247,23 @@ mod tests {
         });
 
         assert_eq!(text, "roots=2 dirty_roots=1 repaired_roots=1 errors=0");
+    }
+
+    #[test]
+    fn formats_watch_stats() {
+        let text = format_watch_stats(&WatchRunStats {
+            events: 3,
+            created: 1,
+            modified: 1,
+            deleted: 1,
+            dirty: false,
+            errors: Vec::new(),
+            elapsed_ms: 42,
+        });
+
+        assert_eq!(
+            text,
+            "events=3 created=1 modified=1 deleted=1 dirty=false errors=0 elapsed_ms=42"
+        );
     }
 }

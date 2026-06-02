@@ -79,6 +79,7 @@ dependencies = [
  "kfs-core",
  "kfs-index-sqlite",
  "kfs-provider-spotlight",
+ "kfs-watcher",
 ]
 
 [[package]]
@@ -106,6 +107,14 @@ name = "kfs-provider-spotlight"
 version = "0.1.0"
 dependencies = [
  "kfs-core",
+]
+
+[[package]]
+name = "kfs-watcher"
+version = "0.1.0"
+dependencies = [
+ "kfs-core",
+ "kfs-crawler",
 ]
 
 [[package]]

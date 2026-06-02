@@ -37,6 +37,9 @@ pub enum CommandSpec {
         query: SearchQuery,
     },
     Index(IndexCommand),
+    Watch {
+        duration_ms: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +60,7 @@ pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         "explain" => parse_explain(&args[1..]),
         "bench" => parse_bench(&args[1..]),
         "index" => parse_index(&args[1..]),
+        "watch" => parse_watch(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -133,6 +137,18 @@ fn parse_index(args: &[String]) -> Result<ParsedArgs, String> {
     })
 }
 
+fn parse_watch(args: &[String]) -> Result<ParsedArgs, String> {
+    let mut parsed = parse_common(args)?;
+    parsed.require_db()?;
+    let duration_ms = parsed.require_duration_ms()?;
+    Ok(ParsedArgs {
+        roots: parsed.take_roots()?,
+        db_path: parsed.db_path,
+        provider: parsed.provider,
+        command: CommandSpec::Watch { duration_ms },
+    })
+}
+
 fn first_value<'a>(
     args: &'a [String],
     error: &'static str,
@@ -155,6 +171,7 @@ struct CommonArgs {
     include_ignored: bool,
     extensions: Vec<String>,
     query_text: Option<String>,
+    duration_ms: Option<u64>,
     db_path: Option<PathBuf>,
     provider: SearchProvider,
 }
@@ -169,6 +186,7 @@ impl Default for CommonArgs {
             include_ignored: false,
             extensions: Vec::new(),
             query_text: None,
+            duration_ms: None,
             db_path: None,
             provider: SearchProvider::Spotlight,
         }
@@ -188,6 +206,11 @@ impl CommonArgs {
             return Err("--db is required for this command".to_string());
         }
         Ok(())
+    }
+
+    fn require_duration_ms(&self) -> Result<u64, String> {
+        self.duration_ms
+            .ok_or_else(|| "--duration-ms is required for watch".to_string())
     }
 
     fn query(&mut self, query_text: &str) -> SearchQuery {
@@ -239,6 +262,17 @@ fn parse_common(args: &[String]) -> Result<CommonArgs, String> {
                         .map_err(|_| "--limit must be a positive integer".to_string())?,
                 );
             }
+            "--duration-ms" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--duration-ms requires a number".to_string())?;
+                parsed.duration_ms = Some(
+                    value
+                        .parse::<u64>()
+                        .map_err(|_| "--duration-ms must be a positive integer".to_string())?,
+                );
+            }
             "--json" => parsed.json = true,
             "--include-hidden" => parsed.include_hidden = true,
             "--include-ignored" => parsed.include_ignored = true,
@@ -275,7 +309,7 @@ fn parse_provider(value: &str) -> Result<SearchProvider, String> {
 }
 
 fn usage() -> String {
-    "usage: kfs search <query> --root <path> [--provider sqlite|spotlight|auto] [--db path] [--limit n] [--json] | kfs index rebuild|refresh|repair --root <path> --db <path> | kfs index status --db <path>".to_string()
+    "usage: kfs search <query> --root <path> [--provider sqlite|spotlight|auto] [--db path] [--limit n] [--json] | kfs index rebuild|refresh|repair --root <path> --db <path> | kfs index status --db <path> | kfs watch --root <path> --db <path> --duration-ms n".to_string()
 }
 
 #[cfg(test)]
@@ -437,5 +471,36 @@ mod tests {
         assert_eq!(parsed.command, CommandSpec::Index(IndexCommand::Repair));
         assert_eq!(parsed.roots, vec![SearchRoot::new("/Users/alice/Dev")]);
         assert_eq!(parsed.db_path, Some(PathBuf::from("/tmp/kfs.sqlite")));
+    }
+
+    #[test]
+    fn parses_watch_with_required_duration() {
+        let parsed = parse_args(&strings(&[
+            "watch",
+            "--root",
+            "/Users/alice/Dev",
+            "--db",
+            "/tmp/kfs.sqlite",
+            "--duration-ms",
+            "250",
+        ]))
+        .unwrap();
+
+        assert_eq!(parsed.command, CommandSpec::Watch { duration_ms: 250 });
+        assert_eq!(parsed.roots, vec![SearchRoot::new("/Users/alice/Dev")]);
+    }
+
+    #[test]
+    fn watch_requires_duration_to_stay_bounded() {
+        let err = parse_args(&strings(&[
+            "watch",
+            "--root",
+            "/Users/alice/Dev",
+            "--db",
+            "/tmp/kfs.sqlite",
+        ]))
+        .unwrap_err();
+
+        assert_eq!(err, "--duration-ms is required for watch");
     }
 }

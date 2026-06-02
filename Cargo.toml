@@ -5,6 +5,7 @@ members = [
   "crates/kfs-core",
   "crates/kfs-crawler",
   "crates/kfs-index-sqlite",
+  "crates/kfs-watcher",
   "crates/kfs-provider-spotlight",
   "crates/kfs-cli",
 ]
