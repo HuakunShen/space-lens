@@ -42,6 +42,8 @@ pub enum CommandSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexCommand {
     Rebuild,
+    Refresh,
+    Repair,
     Status,
 }
 
@@ -108,6 +110,14 @@ fn parse_index(args: &[String]) -> Result<ParsedArgs, String> {
         "rebuild" => {
             parsed.require_db()?;
             (parsed.take_roots()?, IndexCommand::Rebuild)
+        }
+        "refresh" => {
+            parsed.require_db()?;
+            (parsed.take_roots()?, IndexCommand::Refresh)
+        }
+        "repair" => {
+            parsed.require_db()?;
+            (parsed.take_roots()?, IndexCommand::Repair)
         }
         "status" => {
             parsed.require_db()?;
@@ -265,7 +275,7 @@ fn parse_provider(value: &str) -> Result<SearchProvider, String> {
 }
 
 fn usage() -> String {
-    "usage: kfs search <query> --root <path> [--provider sqlite|spotlight|auto] [--db path] [--limit n] [--json] | kfs index rebuild --root <path> --db <path> | kfs index status --db <path>".to_string()
+    "usage: kfs search <query> --root <path> [--provider sqlite|spotlight|auto] [--db path] [--limit n] [--json] | kfs index rebuild|refresh|repair --root <path> --db <path> | kfs index status --db <path>".to_string()
 }
 
 #[cfg(test)]
@@ -392,6 +402,40 @@ mod tests {
         let parsed = parse_args(&strings(&["index", "status", "--db", "/tmp/kfs.sqlite"])).unwrap();
 
         assert_eq!(parsed.command, CommandSpec::Index(IndexCommand::Status));
+        assert_eq!(parsed.db_path, Some(PathBuf::from("/tmp/kfs.sqlite")));
+    }
+
+    #[test]
+    fn parses_index_refresh() {
+        let parsed = parse_args(&strings(&[
+            "index",
+            "refresh",
+            "--root",
+            "/Users/alice/Dev",
+            "--db",
+            "/tmp/kfs.sqlite",
+        ]))
+        .unwrap();
+
+        assert_eq!(parsed.command, CommandSpec::Index(IndexCommand::Refresh));
+        assert_eq!(parsed.roots, vec![SearchRoot::new("/Users/alice/Dev")]);
+        assert_eq!(parsed.db_path, Some(PathBuf::from("/tmp/kfs.sqlite")));
+    }
+
+    #[test]
+    fn parses_index_repair() {
+        let parsed = parse_args(&strings(&[
+            "index",
+            "repair",
+            "--root",
+            "/Users/alice/Dev",
+            "--db",
+            "/tmp/kfs.sqlite",
+        ]))
+        .unwrap();
+
+        assert_eq!(parsed.command, CommandSpec::Index(IndexCommand::Repair));
+        assert_eq!(parsed.roots, vec![SearchRoot::new("/Users/alice/Dev")]);
         assert_eq!(parsed.db_path, Some(PathBuf::from("/tmp/kfs.sqlite")));
     }
 }

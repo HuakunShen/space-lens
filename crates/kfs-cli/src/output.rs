@@ -3,7 +3,10 @@
 //! Formatting is kept separate from command execution so tests and future
 //! adapters can reuse the same stable text and JSON-like result rendering.
 
-use kfs_core::{ExplainResult, IndexRebuildStats, IndexRootStatus, SearchResult};
+use kfs_core::{
+    ExplainResult, IndexRebuildStats, IndexRefreshStats, IndexRepairStats, IndexRootStatus,
+    SearchResult,
+};
 
 pub fn format_results_text(results: &[SearchResult]) -> String {
     if results.is_empty() {
@@ -73,6 +76,29 @@ pub fn format_rebuild_stats(stats: &IndexRebuildStats) -> String {
     )
 }
 
+pub fn format_refresh_stats(stats: &IndexRefreshStats) -> String {
+    format!(
+        "roots={} inserted={} updated={} deleted={} unchanged={} skipped={} errors={}",
+        stats.roots,
+        stats.inserted,
+        stats.updated,
+        stats.deleted,
+        stats.unchanged,
+        stats.skipped,
+        stats.errors.len()
+    )
+}
+
+pub fn format_repair_stats(stats: &IndexRepairStats) -> String {
+    format!(
+        "roots={} dirty_roots={} repaired_roots={} errors={}",
+        stats.roots,
+        stats.dirty_roots,
+        stats.repaired_roots,
+        stats.errors.len()
+    )
+}
+
 pub fn format_status(status: &[IndexRootStatus]) -> String {
     if status.is_empty() {
         return "no indexed roots".to_string();
@@ -111,7 +137,10 @@ fn escape_json(value: &str) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use kfs_core::{ExplainResult, IndexRebuildStats, IndexRootStatus, MatchKind, SearchResult};
+    use kfs_core::{
+        ExplainResult, IndexRebuildStats, IndexRefreshStats, IndexRepairStats, IndexRootStatus,
+        MatchKind, SearchResult,
+    };
 
     use super::*;
 
@@ -173,5 +202,35 @@ mod tests {
 
         assert!(text.contains("/Users/alice/Dev"));
         assert!(text.contains("entries=10"));
+    }
+
+    #[test]
+    fn formats_refresh_stats() {
+        let text = format_refresh_stats(&IndexRefreshStats {
+            roots: 1,
+            inserted: 2,
+            updated: 3,
+            deleted: 4,
+            unchanged: 5,
+            skipped: 6,
+            errors: Vec::new(),
+        });
+
+        assert_eq!(
+            text,
+            "roots=1 inserted=2 updated=3 deleted=4 unchanged=5 skipped=6 errors=0"
+        );
+    }
+
+    #[test]
+    fn formats_repair_stats() {
+        let text = format_repair_stats(&IndexRepairStats {
+            roots: 2,
+            dirty_roots: 1,
+            repaired_roots: 1,
+            errors: Vec::new(),
+        });
+
+        assert_eq!(text, "roots=2 dirty_roots=1 repaired_roots=1 errors=0");
     }
 }

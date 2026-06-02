@@ -46,6 +46,25 @@ pub struct IndexRebuildStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexRefreshStats {
+    pub roots: usize,
+    pub inserted: usize,
+    pub updated: usize,
+    pub deleted: usize,
+    pub unchanged: usize,
+    pub skipped: usize,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexRepairStats {
+    pub roots: usize,
+    pub dirty_roots: usize,
+    pub repaired_roots: usize,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexRootStatus {
     pub path: PathBuf,
     pub entry_count: usize,
@@ -67,6 +86,10 @@ pub trait CandidateProvider {
 
 pub trait MetadataIndex {
     fn rebuild_index(&mut self, config: &SearchConfig) -> Result<IndexRebuildStats, BackendError>;
+
+    fn refresh_index(&mut self, config: &SearchConfig) -> Result<IndexRefreshStats, BackendError>;
+
+    fn repair_index(&mut self, config: &SearchConfig) -> Result<IndexRepairStats, BackendError>;
 
     fn search_index(
         &self,

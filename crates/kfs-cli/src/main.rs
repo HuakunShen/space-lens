@@ -17,8 +17,8 @@ use kfs_core::{
 use kfs_index_sqlite::SqliteIndex;
 use kfs_provider_spotlight::SpotlightProvider;
 use output::{
-    format_explain_text, format_rebuild_stats, format_results_json, format_results_text,
-    format_status,
+    format_explain_text, format_rebuild_stats, format_refresh_stats, format_repair_stats,
+    format_results_json, format_results_text, format_status,
 };
 
 fn main() -> ExitCode {
@@ -136,6 +136,14 @@ fn run_index_command(
         IndexCommand::Rebuild => {
             let stats = index.rebuild_index(config).map_err(|err| err.to_string())?;
             Ok(format_rebuild_stats(&stats))
+        }
+        IndexCommand::Refresh => {
+            let stats = index.refresh_index(config).map_err(|err| err.to_string())?;
+            Ok(format_refresh_stats(&stats))
+        }
+        IndexCommand::Repair => {
+            let stats = index.repair_index(config).map_err(|err| err.to_string())?;
+            Ok(format_repair_stats(&stats))
         }
         IndexCommand::Status => {
             let status = index.status().map_err(|err| err.to_string())?;

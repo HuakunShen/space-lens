@@ -6,9 +6,9 @@ Rust-only file search prototype for Kunkun. This workspace is intentionally inde
 
 - `kfs-core`: shared search types, path policy, explanation, and ranking.
 - `kfs-crawler`: explicit-root filesystem crawler that applies `kfs-core` policy.
-- `kfs-index-sqlite`: persistent metadata index and search over crawled entries.
+- `kfs-index-sqlite`: persistent metadata index, incremental refresh, repair, and search over crawled entries.
 - `kfs-provider-spotlight`: macOS Spotlight provider backed by `mdfind`.
-- `kfs-cli`: local CLI adapter for search, explain, and benchmark commands.
+- `kfs-cli`: local CLI adapter for search, explain, index, and benchmark commands.
 
 ## Safety
 
@@ -26,6 +26,7 @@ Sensitive paths such as `.ssh`, `.aws`, `.gcloud`, `.kube`, `.docker`, `.env`, p
 cargo run -p kfs-cli -- explain ~/Dev --root ~/Dev
 cargo run -p kfs-cli -- search "package json" --root ~/Dev --limit 5 --json
 cargo run -p kfs-cli -- index rebuild --root . --db /tmp/kfs.sqlite
+cargo run -p kfs-cli -- index refresh --root . --db /tmp/kfs.sqlite
 cargo run -p kfs-cli -- search "Cargo toml" --root . --provider sqlite --db /tmp/kfs.sqlite --json
 ```
 

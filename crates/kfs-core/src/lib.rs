@@ -10,7 +10,8 @@ pub mod policy;
 pub mod ranking;
 
 pub use backend::{
-    BackendError, CandidateProvider, IndexRebuildStats, IndexRootStatus, MetadataIndex,
+    BackendError, CandidateProvider, IndexRebuildStats, IndexRefreshStats, IndexRepairStats,
+    IndexRootStatus, MetadataIndex,
 };
 pub use engine::SearchEngineCore;
 pub use model::{

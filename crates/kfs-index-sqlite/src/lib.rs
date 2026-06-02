@@ -4,19 +4,22 @@
 //! desktop app database and can be rebuilt or queried by the CLI, daemon, or
 //! future adapters.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kfs_core::{
     ranking::{score_candidate, tokenize},
-    BackendError, EntryKind, IndexRebuildStats, IndexRootStatus, MatchKind, MetadataIndex,
-    SearchCandidate, SearchConfig, SearchQuery, SearchResult, SearchRoot,
+    BackendError, EntryKind, IndexRebuildStats, IndexRefreshStats, IndexRepairStats,
+    IndexRootStatus, MatchKind, MetadataIndex, SearchCandidate, SearchConfig, SearchQuery,
+    SearchResult, SearchRoot,
 };
 use kfs_crawler::{crawl, CrawlOptions};
 use rusqlite::{params, Connection, OptionalExtension};
 
 pub type RebuildStats = IndexRebuildStats;
+pub type RefreshStats = IndexRefreshStats;
+pub type RepairStats = IndexRepairStats;
 pub type RootStatus = IndexRootStatus;
 
 #[derive(Debug)]
@@ -27,6 +30,14 @@ pub struct SqliteIndex {
 impl MetadataIndex for SqliteIndex {
     fn rebuild_index(&mut self, config: &SearchConfig) -> Result<IndexRebuildStats, BackendError> {
         self.rebuild(config).map_err(sqlite_error)
+    }
+
+    fn refresh_index(&mut self, config: &SearchConfig) -> Result<IndexRefreshStats, BackendError> {
+        self.refresh(config).map_err(sqlite_error)
+    }
+
+    fn repair_index(&mut self, config: &SearchConfig) -> Result<IndexRepairStats, BackendError> {
+        self.repair(config).map_err(sqlite_error)
     }
 
     fn search_index(
@@ -104,6 +115,137 @@ impl SqliteIndex {
             skipped: total_skipped,
             errors,
         })
+    }
+
+    pub fn refresh(&mut self, config: &SearchConfig) -> rusqlite::Result<RefreshStats> {
+        let now = unix_now();
+        let mut inserted = 0;
+        let mut updated = 0;
+        let mut deleted = 0;
+        let mut unchanged = 0;
+        let mut total_skipped = 0;
+        let mut errors = Vec::new();
+
+        let tx = self.conn.transaction()?;
+        for root in config.roots.iter().filter(|root| root.enabled) {
+            let root_id = upsert_root_tx(&tx, root)?;
+            let mut existing = load_existing_entries_tx(&tx, root_id)?;
+            let root_config = SearchConfig {
+                roots: vec![root.clone()],
+            };
+            let options = CrawlOptions::new(root_config);
+            let (entries, stats) = crawl(&options);
+            let root_has_errors = !stats.errors.is_empty();
+            total_skipped += stats.skipped;
+            errors.extend(stats.errors);
+
+            let mut seen_paths = HashSet::new();
+            for entry in entries {
+                let path_key = entry.path.to_string_lossy().into_owned();
+                seen_paths.insert(path_key.clone());
+                if let Some(existing_entry) = existing.remove(&path_key) {
+                    if entry_changed(&existing_entry, &entry) {
+                        update_entry_tx(&tx, existing_entry.id, &entry, now)?;
+                        updated += 1;
+                    } else {
+                        unchanged += 1;
+                    }
+                } else {
+                    let entry_id = insert_entry_tx(&tx, root_id, &entry, now)?;
+                    insert_terms_tx(&tx, entry_id, &entry.path)?;
+                    inserted += 1;
+                }
+            }
+
+            for (path, existing_entry) in existing {
+                if !seen_paths.contains(&path) && !existing_entry.deleted {
+                    mark_entry_deleted_tx(&tx, existing_entry.id, now)?;
+                    deleted += 1;
+                }
+            }
+
+            tx.execute(
+                "INSERT INTO root_state (root_id, generation, last_full_scan_at, last_incremental_at, dirty, entry_count)
+                 VALUES (?1, COALESCE((SELECT generation + 1 FROM root_state WHERE root_id = ?1), 1), NULL, ?2, ?3, ?4)
+                 ON CONFLICT(root_id) DO UPDATE SET
+                   generation = root_state.generation + 1,
+                   last_incremental_at = excluded.last_incremental_at,
+                   dirty = excluded.dirty,
+                   entry_count = excluded.entry_count",
+                params![root_id, now, root_has_errors, count_entries_tx(&tx, root_id)?],
+            )?;
+        }
+        tx.commit()?;
+
+        Ok(RefreshStats {
+            roots: config.roots.iter().filter(|root| root.enabled).count(),
+            inserted,
+            updated,
+            deleted,
+            unchanged,
+            skipped: total_skipped,
+            errors,
+        })
+    }
+
+    pub fn repair(&mut self, config: &SearchConfig) -> rusqlite::Result<RepairStats> {
+        let configured_roots = config
+            .roots
+            .iter()
+            .filter(|root| root.enabled)
+            .cloned()
+            .collect::<Vec<_>>();
+        let configured_paths = configured_roots
+            .iter()
+            .map(|root| root.path.clone())
+            .collect::<HashSet<_>>();
+        let dirty_paths = self
+            .status()?
+            .into_iter()
+            .filter(|status| status.dirty && configured_paths.contains(&status.path))
+            .map(|status| status.path)
+            .collect::<HashSet<_>>();
+        let dirty_roots = dirty_paths.len();
+        if dirty_roots == 0 {
+            return Ok(RepairStats {
+                roots: configured_roots.len(),
+                dirty_roots: 0,
+                repaired_roots: 0,
+                errors: Vec::new(),
+            });
+        }
+
+        let repair_config = SearchConfig {
+            roots: configured_roots
+                .into_iter()
+                .filter(|root| dirty_paths.contains(&root.path))
+                .collect(),
+        };
+        let refresh_stats = self.refresh(&repair_config)?;
+        let repaired_roots = self
+            .status()?
+            .into_iter()
+            .filter(|status| dirty_paths.contains(&status.path) && !status.dirty)
+            .count();
+
+        Ok(RepairStats {
+            roots: config.roots.iter().filter(|root| root.enabled).count(),
+            dirty_roots,
+            repaired_roots,
+            errors: refresh_stats.errors,
+        })
+    }
+
+    pub fn mark_root_dirty(&mut self, root: &SearchRoot) -> rusqlite::Result<()> {
+        let tx = self.conn.transaction()?;
+        let root_id = upsert_root_tx(&tx, root)?;
+        tx.execute(
+            "INSERT INTO root_state (root_id, generation, last_full_scan_at, last_incremental_at, dirty, entry_count)
+             VALUES (?1, COALESCE((SELECT generation FROM root_state WHERE root_id = ?1), 0), NULL, NULL, 1, ?2)
+             ON CONFLICT(root_id) DO UPDATE SET dirty = 1",
+            params![root_id, count_entries_tx(&tx, root_id)?],
+        )?;
+        tx.commit()
     }
 
     pub fn search(
@@ -234,6 +376,18 @@ struct EntryRow {
     root_priority: i32,
 }
 
+#[derive(Debug, Clone)]
+struct ExistingEntry {
+    id: i64,
+    kind: EntryKind,
+    size: Option<i64>,
+    mtime: Option<i64>,
+    hidden: bool,
+    ignored: bool,
+    sensitive: bool,
+    deleted: bool,
+}
+
 fn upsert_root_tx(tx: &rusqlite::Transaction<'_>, root: &SearchRoot) -> rusqlite::Result<i64> {
     let now = unix_now();
     tx.execute(
@@ -259,6 +413,39 @@ fn upsert_root_tx(tx: &rusqlite::Transaction<'_>, root: &SearchRoot) -> rusqlite
         params![root.path.to_string_lossy()],
         |row| row.get(0),
     )
+}
+
+fn load_existing_entries_tx(
+    tx: &rusqlite::Transaction<'_>,
+    root_id: i64,
+) -> rusqlite::Result<HashMap<String, ExistingEntry>> {
+    let mut stmt = tx.prepare(
+        "SELECT path, id, kind, size, mtime, hidden, ignored, sensitive, deleted
+         FROM entries
+         WHERE root_id = ?1",
+    )?;
+    let rows = stmt.query_map(params![root_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            ExistingEntry {
+                id: row.get(1)?,
+                kind: int_to_kind(row.get(2)?),
+                size: row.get(3)?,
+                mtime: row.get(4)?,
+                hidden: row.get::<_, i64>(5)? != 0,
+                ignored: row.get::<_, i64>(6)? != 0,
+                sensitive: row.get::<_, i64>(7)? != 0,
+                deleted: row.get::<_, i64>(8)? != 0,
+            },
+        ))
+    })?;
+
+    let mut entries = HashMap::new();
+    for row in rows {
+        let (path, entry) = row?;
+        entries.insert(path, entry);
+    }
+    Ok(entries)
 }
 
 fn insert_entry_tx(
@@ -289,7 +476,7 @@ fn insert_entry_tx(
             name.to_ascii_lowercase(),
             extension,
             kind_to_int(entry.kind),
-            entry.size.and_then(|size| i64::try_from(size).ok()),
+            entry_size_i64(entry),
             entry.mtime,
             entry.decision.hidden,
             entry.decision.ignored,
@@ -298,6 +485,70 @@ fn insert_entry_tx(
         ],
     )?;
     Ok(tx.last_insert_rowid())
+}
+
+fn update_entry_tx(
+    tx: &rusqlite::Transaction<'_>,
+    entry_id: i64,
+    entry: &kfs_crawler::CrawledEntry,
+    indexed_at: i64,
+) -> rusqlite::Result<()> {
+    let name = entry
+        .path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_string();
+    let extension = entry
+        .path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+    tx.execute(
+        "UPDATE entries
+         SET path = ?1,
+             name = ?2,
+             name_lower = ?3,
+             extension = ?4,
+             kind = ?5,
+             size = ?6,
+             mtime = ?7,
+             hidden = ?8,
+             ignored = ?9,
+             sensitive = ?10,
+             deleted = 0,
+             indexed_at = ?11
+         WHERE id = ?12",
+        params![
+            entry.path.to_string_lossy(),
+            name,
+            name.to_ascii_lowercase(),
+            extension,
+            kind_to_int(entry.kind),
+            entry_size_i64(entry),
+            entry.mtime,
+            entry.decision.hidden,
+            entry.decision.ignored,
+            entry.decision.sensitive,
+            indexed_at,
+            entry_id
+        ],
+    )?;
+    tx.execute("DELETE FROM terms WHERE entry_id = ?1", params![entry_id])?;
+    insert_terms_tx(tx, entry_id, &entry.path)
+}
+
+fn mark_entry_deleted_tx(
+    tx: &rusqlite::Transaction<'_>,
+    entry_id: i64,
+    indexed_at: i64,
+) -> rusqlite::Result<()> {
+    tx.execute(
+        "UPDATE entries SET deleted = 1, indexed_at = ?1 WHERE id = ?2",
+        params![indexed_at, entry_id],
+    )?;
+    tx.execute("DELETE FROM terms WHERE entry_id = ?1", params![entry_id])?;
+    Ok(())
 }
 
 fn insert_terms_tx(
@@ -333,6 +584,20 @@ fn insert_terms_tx(
         }
     }
     Ok(())
+}
+
+fn entry_changed(existing: &ExistingEntry, entry: &kfs_crawler::CrawledEntry) -> bool {
+    existing.deleted
+        || existing.kind != entry.kind
+        || existing.size != entry_size_i64(entry)
+        || existing.mtime != entry.mtime
+        || existing.hidden != entry.decision.hidden
+        || existing.ignored != entry.decision.ignored
+        || existing.sensitive != entry.decision.sensitive
+}
+
+fn entry_size_i64(entry: &kfs_crawler::CrawledEntry) -> Option<i64> {
+    entry.size.and_then(|size| i64::try_from(size).ok())
 }
 
 fn count_entries_tx(tx: &rusqlite::Transaction<'_>, root_id: i64) -> rusqlite::Result<i64> {
@@ -544,6 +809,77 @@ mod tests {
         assert_eq!(status.len(), 1);
         assert_eq!(status[0].path, expected_root);
         assert!(status[0].entry_count >= 1);
+        assert!(!status[0].dirty);
+    }
+
+    #[test]
+    fn refresh_indexes_added_files_and_marks_missing_files_deleted() {
+        let root = temp_dir("refresh");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("old-file.md"), "old\n").unwrap();
+
+        let mut index = SqliteIndex::open_memory().unwrap();
+        let config = SearchConfig {
+            roots: vec![SearchRoot::new(&root)],
+        };
+        index.rebuild(&config).unwrap();
+        fs::remove_file(root.join("old-file.md")).unwrap();
+        fs::write(root.join("new-file.md"), "new\n").unwrap();
+
+        let stats = index.refresh(&config).unwrap();
+        let old_results = index
+            .search(&config, &SearchQuery::new("old file"))
+            .unwrap();
+        let new_results = index
+            .search(&config, &SearchQuery::new("new file"))
+            .unwrap();
+        remove_dir_all_if_exists(&root).unwrap();
+
+        assert!(stats.inserted >= 1);
+        assert!(stats.deleted >= 1);
+        assert!(old_results.is_empty());
+        assert_eq!(new_results.len(), 1);
+    }
+
+    #[test]
+    fn refresh_updates_changed_file_metadata() {
+        let root = temp_dir("refresh-update");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("same-file.md"), "a\n").unwrap();
+
+        let mut index = SqliteIndex::open_memory().unwrap();
+        let config = SearchConfig {
+            roots: vec![SearchRoot::new(&root)],
+        };
+        index.rebuild(&config).unwrap();
+        fs::write(root.join("same-file.md"), "longer content\n").unwrap();
+
+        let stats = index.refresh(&config).unwrap();
+        remove_dir_all_if_exists(&root).unwrap();
+
+        assert!(stats.updated >= 1);
+    }
+
+    #[test]
+    fn repair_refreshes_dirty_roots() {
+        let root = temp_dir("repair");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("repair-file.md"), "repair\n").unwrap();
+
+        let mut index = SqliteIndex::open_memory().unwrap();
+        let config = SearchConfig {
+            roots: vec![SearchRoot::new(&root)],
+        };
+        index.rebuild(&config).unwrap();
+        index.mark_root_dirty(&config.roots[0]).unwrap();
+        assert!(index.status().unwrap()[0].dirty);
+
+        let stats = index.repair(&config).unwrap();
+        let status = index.status().unwrap();
+        remove_dir_all_if_exists(&root).unwrap();
+
+        assert_eq!(stats.dirty_roots, 1);
+        assert_eq!(stats.repaired_roots, 1);
         assert!(!status[0].dirty);
     }
 }
