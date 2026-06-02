@@ -6,7 +6,7 @@
 //! handlers or replace the transport.
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -22,6 +22,8 @@ pub struct DaemonConfig {
     pub addr: String,
     pub duration: Option<Duration>,
     pub max_requests: Option<usize>,
+    pub allowed_roots: Vec<SearchRoot>,
+    pub allow_non_loopback: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +67,7 @@ struct SearchResultDto {
 }
 
 pub fn serve(config: DaemonConfig) -> Result<DaemonRunStats, BackendError> {
+    validate_bind_addr(&config)?;
     let listener = TcpListener::bind(&config.addr).map_err(BackendError::from)?;
     listener.set_nonblocking(true).map_err(BackendError::from)?;
     let addr = listener
@@ -92,7 +95,7 @@ pub fn serve(config: DaemonConfig) -> Result<DaemonRunStats, BackendError> {
 
         match listener.accept() {
             Ok((stream, _addr)) => {
-                handle_connection(&mut index, stream)?;
+                handle_connection(&mut index, stream, &config.allowed_roots)?;
                 requests += 1;
             }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
@@ -109,16 +112,24 @@ pub fn serve(config: DaemonConfig) -> Result<DaemonRunStats, BackendError> {
     })
 }
 
-fn handle_connection(index: &mut SqliteIndex, mut stream: TcpStream) -> Result<(), BackendError> {
+fn handle_connection(
+    index: &mut SqliteIndex,
+    mut stream: TcpStream,
+    allowed_roots: &[SearchRoot],
+) -> Result<(), BackendError> {
     let request = read_http_request(&mut stream)?;
     let response = match request {
-        Some(request) => handle_request(index, request),
+        Some(request) => handle_request(index, request, allowed_roots),
         None => json_response(400, json!({ "error": "empty request" })),
     };
     write_http_response(&mut stream, &response)
 }
 
-fn handle_request(index: &mut SqliteIndex, request: HttpRequest) -> HttpResponse {
+fn handle_request(
+    index: &mut SqliteIndex,
+    request: HttpRequest,
+    allowed_roots: &[SearchRoot],
+) -> HttpResponse {
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/health") => json_response(200, json!({ "ok": true })),
         ("GET", "/status") => match index.status() {
@@ -141,7 +152,10 @@ fn handle_request(index: &mut SqliteIndex, request: HttpRequest) -> HttpResponse
         },
         ("POST", "/search") => match parse_json::<SearchRequest>(&request.body) {
             Ok(search) => {
-                let config = config_from_roots(search.roots);
+                let config = match config_from_requested_roots(&search.roots, allowed_roots) {
+                    Ok(config) => config,
+                    Err(err) => return json_response(400, json!({ "error": err.message })),
+                };
                 let mut query = SearchQuery::new(search.query);
                 if let Some(limit) = search.limit {
                     query.limit = limit;
@@ -159,7 +173,7 @@ fn handle_request(index: &mut SqliteIndex, request: HttpRequest) -> HttpResponse
             }
             Err(err) => json_response(400, json!({ "error": err.message })),
         },
-        ("POST", "/index/rebuild") => match parse_roots_request(&request.body) {
+        ("POST", "/index/rebuild") => match parse_roots_request(&request.body, allowed_roots) {
             Ok(config) => match index.rebuild_index(&config) {
                 Ok(stats) => json_response(
                     200,
@@ -176,7 +190,7 @@ fn handle_request(index: &mut SqliteIndex, request: HttpRequest) -> HttpResponse
             },
             Err(err) => json_response(400, json!({ "error": err.message })),
         },
-        ("POST", "/index/refresh") => match parse_roots_request(&request.body) {
+        ("POST", "/index/refresh") => match parse_roots_request(&request.body, allowed_roots) {
             Ok(config) => match index.refresh_index(&config) {
                 Ok(stats) => json_response(
                     200,
@@ -303,8 +317,12 @@ fn write_http_response(
         .map_err(BackendError::from)
 }
 
-fn parse_roots_request(body: &[u8]) -> Result<SearchConfig, BackendError> {
-    parse_json::<RootsRequest>(body).map(|request| config_from_roots(request.roots))
+fn parse_roots_request(
+    body: &[u8],
+    allowed_roots: &[SearchRoot],
+) -> Result<SearchConfig, BackendError> {
+    let request = parse_json::<RootsRequest>(body)?;
+    config_from_requested_roots(&request.roots, allowed_roots)
 }
 
 fn parse_json<T>(body: &[u8]) -> Result<T, BackendError>
@@ -314,10 +332,62 @@ where
     serde_json::from_slice(body).map_err(|err| BackendError::new(err.to_string()))
 }
 
-fn config_from_roots(roots: Vec<String>) -> SearchConfig {
-    SearchConfig {
-        roots: roots.into_iter().map(SearchRoot::new).collect(),
+fn config_from_requested_roots(
+    roots: &[String],
+    allowed_roots: &[SearchRoot],
+) -> Result<SearchConfig, BackendError> {
+    if roots.is_empty() {
+        return Err(BackendError::new("at least one root is required"));
     }
+    let allowed = allowed_roots
+        .iter()
+        .filter(|root| root.enabled)
+        .collect::<Vec<_>>();
+    if allowed.is_empty() {
+        return Err(BackendError::new("daemon has no allowed roots"));
+    }
+
+    let mut requested_roots = Vec::with_capacity(roots.len());
+    for root in roots {
+        let requested = SearchRoot::new(root);
+        let Some(allowed_root) = allowed
+            .iter()
+            .copied()
+            .find(|allowed_root| requested.path.starts_with(&allowed_root.path))
+        else {
+            return Err(BackendError::new(format!(
+                "root is outside daemon allowed roots: {}",
+                requested.path.to_string_lossy()
+            )));
+        };
+        requested_roots.push(
+            requested
+                .include_hidden(allowed_root.include_hidden)
+                .include_ignored(allowed_root.include_ignored)
+                .with_priority(allowed_root.priority),
+        );
+    }
+
+    Ok(SearchConfig {
+        roots: requested_roots,
+    })
+}
+
+pub fn validate_bind_addr(config: &DaemonConfig) -> Result<(), BackendError> {
+    if config.allow_non_loopback || addr_is_loopback(&config.addr) {
+        return Ok(());
+    }
+    Err(BackendError::new(
+        "non-loopback daemon bind requires --allow-non-loopback",
+    ))
+}
+
+fn addr_is_loopback(addr: &str) -> bool {
+    if let Ok(socket_addr) = addr.parse::<SocketAddr>() {
+        return socket_addr.ip().is_loopback();
+    }
+    addr.split_once(':')
+        .is_some_and(|(host, _port)| host == "localhost")
 }
 
 fn json_response(status: u16, value: serde_json::Value) -> HttpResponse {
@@ -371,6 +441,7 @@ mod tests {
                 path: "/health".to_string(),
                 body: Vec::new(),
             },
+            &[],
         );
 
         assert_eq!(response.status, 200);
@@ -383,6 +454,7 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         fs::write(root.join("daemon-target.md"), "daemon\n").unwrap();
         let mut index = SqliteIndex::open_memory().unwrap();
+        let allowed_roots = vec![SearchRoot::new(&root)];
         let rebuild = handle_request(
             &mut index,
             HttpRequest {
@@ -390,6 +462,7 @@ mod tests {
                 path: "/index/rebuild".to_string(),
                 body: format!(r#"{{"roots":["{}"]}}"#, root.to_string_lossy()).into_bytes(),
             },
+            &allowed_roots,
         );
         let response = handle_request(
             &mut index,
@@ -402,6 +475,7 @@ mod tests {
                 )
                 .into_bytes(),
             },
+            &allowed_roots,
         );
         let _ = fs::remove_dir_all(&root);
 
@@ -409,6 +483,40 @@ mod tests {
         assert_eq!(response.status, 200);
         assert!(response.body.contains("daemon-target.md"));
         assert!(response.body.contains("candidate_count"));
+    }
+
+    #[test]
+    fn rejects_roots_outside_daemon_allowlist() {
+        let allowed = temp_dir("allowed");
+        let denied = temp_dir("denied");
+        fs::create_dir_all(&allowed).unwrap();
+        fs::create_dir_all(&denied).unwrap();
+        let allowed_roots = vec![SearchRoot::new(&allowed)];
+
+        let err =
+            config_from_requested_roots(&[denied.to_string_lossy().into_owned()], &allowed_roots)
+                .unwrap_err();
+
+        let _ = fs::remove_dir_all(&allowed);
+        let _ = fs::remove_dir_all(&denied);
+
+        assert!(err.message.contains("outside daemon allowed roots"));
+    }
+
+    #[test]
+    fn daemon_rejects_non_loopback_bind_without_opt_in() {
+        let config = DaemonConfig {
+            db_path: PathBuf::from("/tmp/kfs-review-daemon.sqlite"),
+            addr: "0.0.0.0:0".to_string(),
+            duration: Some(Duration::from_millis(1)),
+            max_requests: Some(0),
+            allowed_roots: Vec::new(),
+            allow_non_loopback: false,
+        };
+
+        let err = validate_bind_addr(&config).unwrap_err();
+
+        assert!(err.message.contains("non-loopback"));
     }
 
     fn temp_dir(name: &str) -> PathBuf {

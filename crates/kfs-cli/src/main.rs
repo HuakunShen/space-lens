@@ -86,9 +86,17 @@ fn run(raw_args: Vec<String>) -> Result<String, String> {
         CommandSpec::Watch { duration_ms } => {
             run_watch_command(&config, spec.db_path.as_deref(), duration_ms)
         }
-        CommandSpec::Daemon { addr, duration_ms } => {
-            run_daemon_command(spec.db_path.as_deref(), addr, duration_ms)
-        }
+        CommandSpec::Daemon {
+            addr,
+            duration_ms,
+            allow_non_loopback,
+        } => run_daemon_command(
+            &config,
+            spec.db_path.as_deref(),
+            addr,
+            duration_ms,
+            allow_non_loopback,
+        ),
     }
 }
 
@@ -196,9 +204,11 @@ fn run_watch_command(
 }
 
 fn run_daemon_command(
+    config: &SearchConfig,
     db_path: Option<&Path>,
     addr: String,
     duration_ms: Option<u64>,
+    allow_non_loopback: bool,
 ) -> Result<String, String> {
     let path = db_path.ok_or_else(|| "--db is required for daemon".to_string())?;
     let stats = serve(DaemonConfig {
@@ -206,6 +216,8 @@ fn run_daemon_command(
         addr,
         duration: duration_ms.map(Duration::from_millis),
         max_requests: None,
+        allowed_roots: config.roots.clone(),
+        allow_non_loopback,
     })
     .map_err(|err| err.to_string())?;
     Ok(format_daemon_stats(&stats))

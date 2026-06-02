@@ -86,15 +86,21 @@ impl SqliteIndex {
         let tx = self.conn.transaction()?;
         for root in config.roots.iter().filter(|root| root.enabled) {
             let root_id = upsert_root_tx(&tx, root)?;
-            tx.execute("DELETE FROM entries WHERE root_id = ?1", params![root_id])?;
-
             let root_config = SearchConfig {
                 roots: vec![root.clone()],
             };
             let options = CrawlOptions::new(root_config);
             let (entries, stats) = crawl(&options);
+            let root_has_errors = !stats.errors.is_empty();
             total_skipped += stats.skipped;
             errors.extend(stats.errors);
+
+            if root_has_errors {
+                mark_root_state_dirty_tx(&tx, root_id)?;
+                continue;
+            }
+
+            tx.execute("DELETE FROM entries WHERE root_id = ?1", params![root_id])?;
 
             for entry in entries {
                 let entry_id = insert_entry_tx(&tx, root_id, &entry, now)?;
@@ -144,6 +150,11 @@ impl SqliteIndex {
             let root_has_errors = !stats.errors.is_empty();
             total_skipped += stats.skipped;
             errors.extend(stats.errors);
+
+            if root_has_errors {
+                mark_root_state_dirty_tx(&tx, root_id)?;
+                continue;
+            }
 
             let mut seen_paths = HashSet::new();
             for entry in entries {
@@ -643,6 +654,18 @@ fn count_entries_tx(tx: &rusqlite::Transaction<'_>, root_id: i64) -> rusqlite::R
     )
 }
 
+fn mark_root_state_dirty_tx(tx: &rusqlite::Transaction<'_>, root_id: i64) -> rusqlite::Result<()> {
+    tx.execute(
+        "INSERT INTO root_state (root_id, generation, last_full_scan_at, last_incremental_at, dirty, entry_count)
+         VALUES (?1, COALESCE((SELECT generation FROM root_state WHERE root_id = ?1), 0), NULL, NULL, 1, ?2)
+         ON CONFLICT(root_id) DO UPDATE SET
+           dirty = 1,
+           entry_count = excluded.entry_count",
+        params![root_id, count_entries_tx(tx, root_id)?],
+    )?;
+    Ok(())
+}
+
 fn matching_entry_ids(
     conn: &Connection,
     config: &SearchConfig,
@@ -681,16 +704,27 @@ fn matching_entry_ids(
     }
 
     let Some(ids) = intersection else {
-        let sql =
-            format!("SELECT id FROM entries WHERE deleted = 0 AND root_id IN ({root_filter})");
-        let mut stmt = conn.prepare(&sql)?;
-        return stmt
-            .query_map(params_from_iter(root_values.iter()), |row| {
-                row.get::<_, i64>(0)
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>();
+        return all_entry_ids_for_roots(conn, &root_filter, &root_values);
     };
+    if ids.is_empty() {
+        return all_entry_ids_for_roots(conn, &root_filter, &root_values);
+    }
     Ok(ids.into_iter().collect())
+}
+
+fn all_entry_ids_for_roots(
+    conn: &Connection,
+    root_filter: &str,
+    root_values: &[Value],
+) -> rusqlite::Result<Vec<i64>> {
+    let sql = format!("SELECT id FROM entries WHERE deleted = 0 AND root_id IN ({root_filter})");
+    let mut stmt = conn.prepare(&sql)?;
+    let ids = stmt
+        .query_map(params_from_iter(root_values.iter()), |row| {
+            row.get::<_, i64>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
 }
 
 fn placeholders(count: usize) -> String {
@@ -878,6 +912,31 @@ mod tests {
     }
 
     #[test]
+    fn rebuild_preserves_existing_entries_and_marks_dirty_when_crawl_errors() {
+        let root = temp_dir("rebuild-error");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("preserved-file.md"), "old\n").unwrap();
+
+        let mut index = SqliteIndex::open_memory().unwrap();
+        let config = SearchConfig {
+            roots: vec![SearchRoot::new(&root)],
+        };
+        index.rebuild(&config).unwrap();
+        remove_dir_all_if_exists(&root).unwrap();
+
+        let stats = index.rebuild(&config).unwrap();
+        let status = index.status().unwrap();
+        let results = index
+            .search(&config, &SearchQuery::new("preserved file"))
+            .unwrap();
+
+        assert!(!stats.errors.is_empty());
+        assert_eq!(status.len(), 1);
+        assert!(status[0].dirty);
+        assert_eq!(results.len(), 1);
+    }
+
+    #[test]
     fn status_reports_rebuilt_root() {
         let root = temp_dir("status");
         fs::create_dir_all(&root).unwrap();
@@ -925,6 +984,32 @@ mod tests {
         assert!(stats.deleted >= 1);
         assert!(old_results.is_empty());
         assert_eq!(new_results.len(), 1);
+    }
+
+    #[test]
+    fn refresh_preserves_existing_entries_and_marks_dirty_when_crawl_errors() {
+        let root = temp_dir("refresh-error");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("still-indexed.md"), "old\n").unwrap();
+
+        let mut index = SqliteIndex::open_memory().unwrap();
+        let config = SearchConfig {
+            roots: vec![SearchRoot::new(&root)],
+        };
+        index.rebuild(&config).unwrap();
+        remove_dir_all_if_exists(&root).unwrap();
+
+        let stats = index.refresh(&config).unwrap();
+        let status = index.status().unwrap();
+        let results = index
+            .search(&config, &SearchQuery::new("still indexed"))
+            .unwrap();
+
+        assert!(!stats.errors.is_empty());
+        assert_eq!(stats.deleted, 0);
+        assert_eq!(status.len(), 1);
+        assert!(status[0].dirty);
+        assert_eq!(results.len(), 1);
     }
 
     #[test]
@@ -989,6 +1074,26 @@ mod tests {
         assert_eq!(outcome.candidate_count, 1);
         assert_eq!(outcome.results.len(), 1);
         assert!(outcome.results[0].path.ends_with("needleunique-target.md"));
+    }
+
+    #[test]
+    fn indexed_search_preserves_compact_substring_fallback() {
+        let root = temp_dir("substring");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/lib.rs"), "lib\n").unwrap();
+
+        let mut index = SqliteIndex::open_memory().unwrap();
+        let config = SearchConfig {
+            roots: vec![SearchRoot::new(&root)],
+        };
+        index.rebuild(&config).unwrap();
+        let outcome = index
+            .search_with_metrics(&config, &SearchQuery::new("srclib"))
+            .unwrap();
+        remove_dir_all_if_exists(&root).unwrap();
+
+        assert_eq!(outcome.results.len(), 1);
+        assert!(outcome.results[0].path.ends_with("src/lib.rs"));
     }
 
     #[test]

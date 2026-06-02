@@ -43,6 +43,7 @@ pub enum CommandSpec {
     Daemon {
         addr: String,
         duration_ms: Option<u64>,
+        allow_non_loopback: bool,
     },
 }
 
@@ -155,19 +156,20 @@ fn parse_watch(args: &[String]) -> Result<ParsedArgs, String> {
 }
 
 fn parse_daemon(args: &[String]) -> Result<ParsedArgs, String> {
-    let parsed = parse_common(args)?;
+    let mut parsed = parse_common(args)?;
     parsed.require_db()?;
     let addr = parsed
         .addr
         .clone()
         .ok_or_else(|| "--addr is required for daemon".to_string())?;
     Ok(ParsedArgs {
-        roots: Vec::new(),
+        roots: parsed.take_roots()?,
         db_path: parsed.db_path,
         provider: parsed.provider,
         command: CommandSpec::Daemon {
             addr,
             duration_ms: parsed.duration_ms,
+            allow_non_loopback: parsed.allow_non_loopback,
         },
     })
 }
@@ -196,6 +198,7 @@ struct CommonArgs {
     query_text: Option<String>,
     duration_ms: Option<u64>,
     addr: Option<String>,
+    allow_non_loopback: bool,
     db_path: Option<PathBuf>,
     provider: SearchProvider,
 }
@@ -212,6 +215,7 @@ impl Default for CommonArgs {
             query_text: None,
             duration_ms: None,
             addr: None,
+            allow_non_loopback: false,
             db_path: None,
             provider: SearchProvider::Spotlight,
         }
@@ -305,6 +309,7 @@ fn parse_common(args: &[String]) -> Result<CommonArgs, String> {
                     .ok_or_else(|| "--addr requires host:port".to_string())?;
                 parsed.addr = Some(value.clone());
             }
+            "--allow-non-loopback" => parsed.allow_non_loopback = true,
             "--json" => parsed.json = true,
             "--include-hidden" => parsed.include_hidden = true,
             "--include-ignored" => parsed.include_ignored = true,
@@ -341,7 +346,7 @@ fn parse_provider(value: &str) -> Result<SearchProvider, String> {
 }
 
 fn usage() -> String {
-    "usage: kfs search <query> --root <path> [--provider sqlite|spotlight|auto] [--db path] [--limit n] [--json] | kfs index rebuild|refresh|repair --root <path> --db <path> | kfs index status --db <path> | kfs watch --root <path> --db <path> --duration-ms n | kfs daemon --db <path> --addr host:port [--duration-ms n]".to_string()
+    "usage: kfs search <query> --root <path> [--provider sqlite|spotlight|auto] [--db path] [--limit n] [--json] | kfs index rebuild|refresh|repair --root <path> --db <path> | kfs index status --db <path> | kfs watch --root <path> --db <path> --duration-ms n | kfs daemon --root <path> --db <path> --addr host:port [--duration-ms n] [--allow-non-loopback]".to_string()
 }
 
 #[cfg(test)]
@@ -540,6 +545,8 @@ mod tests {
     fn parses_daemon_with_optional_duration() {
         let parsed = parse_args(&strings(&[
             "daemon",
+            "--root",
+            "/Users/alice/Dev",
             "--db",
             "/tmp/kfs.sqlite",
             "--addr",
@@ -553,9 +560,35 @@ mod tests {
             parsed.command,
             CommandSpec::Daemon {
                 addr: "127.0.0.1:0".to_string(),
-                duration_ms: Some(1000)
+                duration_ms: Some(1000),
+                allow_non_loopback: false
             }
         );
+        assert_eq!(parsed.roots, vec![SearchRoot::new("/Users/alice/Dev")]);
         assert_eq!(parsed.db_path, Some(PathBuf::from("/tmp/kfs.sqlite")));
+    }
+
+    #[test]
+    fn parses_daemon_non_loopback_opt_in() {
+        let parsed = parse_args(&strings(&[
+            "daemon",
+            "--root",
+            "/Users/alice/Dev",
+            "--db",
+            "/tmp/kfs.sqlite",
+            "--addr",
+            "0.0.0.0:47865",
+            "--allow-non-loopback",
+        ]))
+        .unwrap();
+
+        assert_eq!(
+            parsed.command,
+            CommandSpec::Daemon {
+                addr: "0.0.0.0:47865".to_string(),
+                duration_ms: None,
+                allow_non_loopback: true
+            }
+        );
     }
 }
