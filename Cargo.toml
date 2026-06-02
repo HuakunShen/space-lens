@@ -1,0 +1,16 @@
+# Independent Rust workspace for the Kunkun file search core prototype.
+[workspace]
+resolver = "2"
+members = [
+  "crates/kfs-core",
+  "crates/kfs-provider-spotlight",
+  "crates/kfs-cli",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/kunkunsh/kunkun"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
