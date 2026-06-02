@@ -40,6 +40,10 @@ pub enum CommandSpec {
     Watch {
         duration_ms: u64,
     },
+    Daemon {
+        addr: String,
+        duration_ms: Option<u64>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,6 +65,7 @@ pub fn parse_args(args: &[String]) -> Result<ParsedArgs, String> {
         "bench" => parse_bench(&args[1..]),
         "index" => parse_index(&args[1..]),
         "watch" => parse_watch(&args[1..]),
+        "daemon" => parse_daemon(&args[1..]),
         _ => Err(usage()),
     }
 }
@@ -149,6 +154,24 @@ fn parse_watch(args: &[String]) -> Result<ParsedArgs, String> {
     })
 }
 
+fn parse_daemon(args: &[String]) -> Result<ParsedArgs, String> {
+    let parsed = parse_common(args)?;
+    parsed.require_db()?;
+    let addr = parsed
+        .addr
+        .clone()
+        .ok_or_else(|| "--addr is required for daemon".to_string())?;
+    Ok(ParsedArgs {
+        roots: Vec::new(),
+        db_path: parsed.db_path,
+        provider: parsed.provider,
+        command: CommandSpec::Daemon {
+            addr,
+            duration_ms: parsed.duration_ms,
+        },
+    })
+}
+
 fn first_value<'a>(
     args: &'a [String],
     error: &'static str,
@@ -172,6 +195,7 @@ struct CommonArgs {
     extensions: Vec<String>,
     query_text: Option<String>,
     duration_ms: Option<u64>,
+    addr: Option<String>,
     db_path: Option<PathBuf>,
     provider: SearchProvider,
 }
@@ -187,6 +211,7 @@ impl Default for CommonArgs {
             extensions: Vec::new(),
             query_text: None,
             duration_ms: None,
+            addr: None,
             db_path: None,
             provider: SearchProvider::Spotlight,
         }
@@ -273,6 +298,13 @@ fn parse_common(args: &[String]) -> Result<CommonArgs, String> {
                         .map_err(|_| "--duration-ms must be a positive integer".to_string())?,
                 );
             }
+            "--addr" => {
+                index += 1;
+                let value = args
+                    .get(index)
+                    .ok_or_else(|| "--addr requires host:port".to_string())?;
+                parsed.addr = Some(value.clone());
+            }
             "--json" => parsed.json = true,
             "--include-hidden" => parsed.include_hidden = true,
             "--include-ignored" => parsed.include_ignored = true,
@@ -309,7 +341,7 @@ fn parse_provider(value: &str) -> Result<SearchProvider, String> {
 }
 
 fn usage() -> String {
-    "usage: kfs search <query> --root <path> [--provider sqlite|spotlight|auto] [--db path] [--limit n] [--json] | kfs index rebuild|refresh|repair --root <path> --db <path> | kfs index status --db <path> | kfs watch --root <path> --db <path> --duration-ms n".to_string()
+    "usage: kfs search <query> --root <path> [--provider sqlite|spotlight|auto] [--db path] [--limit n] [--json] | kfs index rebuild|refresh|repair --root <path> --db <path> | kfs index status --db <path> | kfs watch --root <path> --db <path> --duration-ms n | kfs daemon --db <path> --addr host:port [--duration-ms n]".to_string()
 }
 
 #[cfg(test)]
@@ -502,5 +534,28 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(err, "--duration-ms is required for watch");
+    }
+
+    #[test]
+    fn parses_daemon_with_optional_duration() {
+        let parsed = parse_args(&strings(&[
+            "daemon",
+            "--db",
+            "/tmp/kfs.sqlite",
+            "--addr",
+            "127.0.0.1:0",
+            "--duration-ms",
+            "1000",
+        ]))
+        .unwrap();
+
+        assert_eq!(
+            parsed.command,
+            CommandSpec::Daemon {
+                addr: "127.0.0.1:0".to_string(),
+                duration_ms: Some(1000)
+            }
+        );
+        assert_eq!(parsed.db_path, Some(PathBuf::from("/tmp/kfs.sqlite")));
     }
 }

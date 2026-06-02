@@ -14,13 +14,14 @@ use args::{parse_args, CommandSpec, IndexCommand, SearchProvider};
 use kfs_core::{
     CandidateProvider, MetadataIndex, SearchConfig, SearchEngineCore, SearchQuery, SearchResult,
 };
+use kfs_daemon::{serve, DaemonConfig};
 use kfs_index_sqlite::SqliteIndex;
 use kfs_provider_spotlight::SpotlightProvider;
 use kfs_watcher::{run_polling_watch, WatchOptions};
 use output::{
-    format_bench_stats, format_explain_text, format_rebuild_stats, format_refresh_stats,
-    format_repair_stats, format_results_json, format_results_text, format_status,
-    format_watch_stats,
+    format_bench_stats, format_daemon_stats, format_explain_text, format_rebuild_stats,
+    format_refresh_stats, format_repair_stats, format_results_json, format_results_text,
+    format_status, format_watch_stats,
 };
 
 #[derive(Debug, Clone)]
@@ -84,6 +85,9 @@ fn run(raw_args: Vec<String>) -> Result<String, String> {
         CommandSpec::Index(command) => run_index_command(&config, spec.db_path.as_deref(), command),
         CommandSpec::Watch { duration_ms } => {
             run_watch_command(&config, spec.db_path.as_deref(), duration_ms)
+        }
+        CommandSpec::Daemon { addr, duration_ms } => {
+            run_daemon_command(spec.db_path.as_deref(), addr, duration_ms)
         }
     }
 }
@@ -189,6 +193,22 @@ fn run_watch_command(
         }
     }
     Ok(format_watch_stats(&stats))
+}
+
+fn run_daemon_command(
+    db_path: Option<&Path>,
+    addr: String,
+    duration_ms: Option<u64>,
+) -> Result<String, String> {
+    let path = db_path.ok_or_else(|| "--db is required for daemon".to_string())?;
+    let stats = serve(DaemonConfig {
+        db_path: path.to_path_buf(),
+        addr,
+        duration: duration_ms.map(Duration::from_millis),
+        max_requests: None,
+    })
+    .map_err(|err| err.to_string())?;
+    Ok(format_daemon_stats(&stats))
 }
 
 #[cfg(test)]

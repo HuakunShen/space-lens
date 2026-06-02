@@ -7,6 +7,7 @@ use kfs_core::{
     ExplainResult, IndexRebuildStats, IndexRefreshStats, IndexRepairStats, IndexRootStatus,
     SearchResult,
 };
+use kfs_daemon::DaemonRunStats;
 use kfs_watcher::WatchRunStats;
 
 pub fn format_results_text(results: &[SearchResult]) -> String {
@@ -136,6 +137,13 @@ pub fn format_bench_stats(candidate_count: usize, result_count: usize, elapsed_m
     format!("candidates={candidate_count} results={result_count} elapsed_ms={elapsed_ms}")
 }
 
+pub fn format_daemon_stats(stats: &DaemonRunStats) -> String {
+    format!(
+        "addr={} requests={} elapsed_ms={}",
+        stats.addr, stats.requests, stats.elapsed_ms
+    )
+}
+
 fn escape_json(value: &str) -> String {
     let mut escaped = String::new();
     for ch in value.chars() {
@@ -159,6 +167,7 @@ mod tests {
         ExplainResult, IndexRebuildStats, IndexRefreshStats, IndexRepairStats, IndexRootStatus,
         MatchKind, SearchResult,
     };
+    use kfs_daemon::DaemonRunStats;
     use kfs_watcher::WatchRunStats;
 
     use super::*;
@@ -276,6 +285,18 @@ mod tests {
         assert_eq!(
             format_bench_stats(5, 2, 17),
             "candidates=5 results=2 elapsed_ms=17"
+        );
+    }
+
+    #[test]
+    fn formats_daemon_stats() {
+        assert_eq!(
+            format_daemon_stats(&DaemonRunStats {
+                addr: "127.0.0.1:1234".to_string(),
+                requests: 2,
+                elapsed_ms: 100,
+            }),
+            "addr=127.0.0.1:1234 requests=2 elapsed_ms=100"
         );
     }
 }
