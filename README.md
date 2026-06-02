@@ -10,6 +10,7 @@ Rust-only file search prototype for Kunkun. This workspace is intentionally inde
 - `kfs-daemon`: framework-free HTTP JSON service adapter.
 - `kfs-watcher`: platform-neutral watcher event model with bounded polling maintenance.
 - `kfs-provider-spotlight`: macOS Spotlight provider backed by `mdfind`.
+- `kfs-napi`: local Node-API package for consuming the SQLite index from TypeScript/Node/Electron.
 - `kfs-cli`: local CLI adapter for search, explain, index, watch, and benchmark commands.
 
 ## Safety
@@ -33,6 +34,31 @@ cargo run -p kfs-cli -- watch --root . --db /tmp/kfs.sqlite --duration-ms 1000
 cargo run -p kfs-cli -- bench "Cargo toml" --root . --provider sqlite --db /tmp/kfs.sqlite
 cargo run -p kfs-cli -- daemon --root . --db /tmp/kfs.sqlite --addr 127.0.0.1:47865
 cargo run -p kfs-cli -- search "Cargo toml" --root . --provider sqlite --db /tmp/kfs.sqlite --json
+```
+
+## Local TypeScript Package
+
+Build the local NAPI package before consuming it from Node or Electron:
+
+```bash
+pnpm --filter @kunkunsh/file-search-native build
+pnpm --filter @kunkunsh/file-search-native test
+```
+
+The build produces `crates/file-search/crates/kfs-napi/index.js`, `index.d.ts`, and a platform-specific `kfs-native.<platform>-<arch>.node` file. Rebuild on each packaging target; the native binary is not cross-platform.
+
+Example usage from a Node/Electron main-process runtime:
+
+```js
+const { FileSearchIndex } = require("@kunkunsh/file-search-native");
+
+const index = new FileSearchIndex("/tmp/kfs.sqlite");
+await index.rebuild([{ path: "/Users/hk/Dev" }]);
+const outcome = await index.search({
+  roots: [{ path: "/Users/hk/Dev" }],
+  query: "package json",
+  limit: 10,
+});
 ```
 
 If Spotlight returns an empty array for a scoped search, the provider path is still functioning; it usually means that macOS has not indexed that root or has no matching filename/path metadata for the query. The core filter/ranker can still be tested through unit tests and provider fixtures.

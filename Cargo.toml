@@ -8,6 +8,7 @@ members = [
   "crates/kfs-daemon",
   "crates/kfs-watcher",
   "crates/kfs-provider-spotlight",
+  "crates/kfs-napi",
   "crates/kfs-cli",
 ]
 
