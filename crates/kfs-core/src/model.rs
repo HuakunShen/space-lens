@@ -110,6 +110,8 @@ pub enum MatchKind {
     BasenameToken,
     PathComponent,
     Substring,
+    /// Query characters matched the filename in order after separators were removed.
+    Fuzzy,
     Extension,
     RootPriority,
 }

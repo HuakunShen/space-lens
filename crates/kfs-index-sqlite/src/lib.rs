@@ -867,6 +867,7 @@ pub fn match_names(matches: &[MatchKind]) -> Vec<&'static str> {
             MatchKind::BasenameToken => "BasenameToken",
             MatchKind::PathComponent => "PathComponent",
             MatchKind::Substring => "Substring",
+            MatchKind::Fuzzy => "Fuzzy",
             MatchKind::Extension => "Extension",
             MatchKind::RootPriority => "RootPriority",
         })
@@ -1094,6 +1095,32 @@ mod tests {
 
         assert_eq!(outcome.results.len(), 1);
         assert!(outcome.results[0].path.ends_with("src/lib.rs"));
+    }
+
+    #[test]
+    fn indexed_search_finds_compacted_ordered_queries_across_filename_tokens() {
+        let root = temp_dir("ordered-fuzzy");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("AWS Certified Solutions Architect Associate SAA-C03.pdf"),
+            "pdf\n",
+        )
+        .unwrap();
+
+        let mut index = SqliteIndex::open_memory().unwrap();
+        let config = SearchConfig {
+            roots: vec![SearchRoot::new(&root)],
+        };
+        index.rebuild(&config).unwrap();
+        let outcome = index
+            .search_with_metrics(&config, &SearchQuery::new("awspdf"))
+            .unwrap();
+        remove_dir_all_if_exists(&root).unwrap();
+
+        assert_eq!(outcome.results.len(), 1);
+        assert!(outcome.results[0]
+            .path
+            .ends_with("AWS Certified Solutions Architect Associate SAA-C03.pdf"));
     }
 
     #[test]
