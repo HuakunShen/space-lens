@@ -1,21 +1,21 @@
+
 [package]
+authors = ["LongYinan <lynweklm@gmail.com>"]
 edition = "2021"
-name = "space-lens"
-version = "0.0.0"
+name = "space_lens"
+version = "0.1.0"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-# Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
-napi = { version = "2.12.2", default-features = false, features = ["napi4"] }
-napi-derive = "2.12.2"
-du-dust = { git = "https://github.com/HuakunShen/dust.git", rev = "4a3b43092c43592dc8dd7ba875f3a299049de59d" }
+napi = "3.0.0"
+napi-derive = "3.0.0"
 ignore = "0.4"
 rayon = "1"
 
 [build-dependencies]
-napi-build = "2.0.1"
+napi-build = "2"
 
 [profile.release]
 lto = true

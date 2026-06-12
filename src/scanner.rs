@@ -31,7 +31,7 @@ pub struct ScanNode {
 type IgnoreStack = Vec<Arc<Gitignore>>;
 type SeenInodes = Arc<Mutex<HashSet<(u64, u64)>>>;
 
-pub fn scan_compact(options: ScanOptions) -> Vec<ScanNode> {
+pub fn scan_directory(options: ScanOptions) -> Vec<ScanNode> {
   let seen_inodes = Arc::new(Mutex::new(HashSet::new()));
 
   options
