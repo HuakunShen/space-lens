@@ -3,7 +3,10 @@
 #[macro_use]
 extern crate napi_derive;
 
+mod scanner;
+
 use du_dust::{self, display_node::DisplayNode as DuDisplayNode, Node as DuNode};
+use scanner::{IgnoredMode, ScanNode, ScanOptions};
 use std::path::PathBuf;
 
 #[napi(object)]
@@ -16,6 +19,19 @@ pub struct DirectoryTreeOptions {
 }
 
 #[napi(object)]
+pub struct CompactScanOptions {
+  pub directories: Vec<String>,
+  #[napi(js_name = "ignoreHidden")]
+  pub ignore_hidden: Option<bool>,
+  #[napi(js_name = "fullPath")]
+  pub full_path: Option<bool>,
+  #[napi(js_name = "respectGitignore")]
+  pub respect_gitignore: Option<bool>,
+  #[napi(js_name = "ignoredMode")]
+  pub ignored_mode: Option<String>,
+}
+
+#[napi(object)]
 pub struct Node {
   pub name: String,
   #[napi(js_name = "size")]
@@ -24,21 +40,51 @@ pub struct Node {
   pub depth: u32,
 }
 
+#[napi(object)]
+pub struct CompactNode {
+  pub name: String,
+  #[napi(js_name = "size")]
+  pub size: i64,
+  pub children: Vec<CompactNode>,
+  pub depth: u32,
+  pub ignored: bool,
+  pub collapsed: bool,
+}
+
 impl Node {
   fn from_du_node(node: DuNode, full_path: bool) -> Self {
     let name = if full_path {
       node.name.to_string_lossy().to_string()
     } else {
-      node.name.file_name()
+      node
+        .name
+        .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| node.name.to_string_lossy().to_string())
     };
-    
+
     Node {
       name,
       size: node.size as i64,
-      children: node.children.into_iter().map(|child| Node::from_du_node(child, full_path)).collect(),
+      children: node
+        .children
+        .into_iter()
+        .map(|child| Node::from_du_node(child, full_path))
+        .collect(),
       depth: node.depth as u32,
+    }
+  }
+}
+
+impl From<ScanNode> for CompactNode {
+  fn from(node: ScanNode) -> Self {
+    CompactNode {
+      name: node.name,
+      size: node.size as i64,
+      children: node.children.into_iter().map(CompactNode::from).collect(),
+      depth: node.depth,
+      ignored: node.ignored,
+      collapsed: node.collapsed,
     }
   }
 }
@@ -60,7 +106,9 @@ pub struct DisplayNode {
 impl From<DuDisplayNode> for DisplayNode {
   fn from(node: DuDisplayNode) -> Self {
     DisplayNode {
-      name: node.name.file_name()
+      name: node
+        .name
+        .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| node.name.to_string_lossy().to_string()),
       size: node.size as i64,
@@ -73,11 +121,30 @@ impl From<DuDisplayNode> for DisplayNode {
 pub fn build_directory_tree(options: DirectoryTreeOptions) -> Vec<Node> {
   let ignore_hidden = options.ignore_hidden.unwrap_or(false);
   let full_path = options.full_path.unwrap_or(false);
-  
+
   du_dust::build_directory_tree(options.directories, ignore_hidden)
     .into_iter()
     .map(|node| Node::from_du_node(node, full_path))
     .collect()
+}
+
+#[napi]
+pub fn scan_compact(options: CompactScanOptions) -> Vec<CompactNode> {
+  let ignored_mode = match options.ignored_mode.as_deref() {
+    Some("exclude") => IgnoredMode::Exclude,
+    _ => IgnoredMode::Summarize,
+  };
+
+  scanner::scan_compact(ScanOptions {
+    directories: options.directories,
+    ignore_hidden: options.ignore_hidden.unwrap_or(false),
+    full_path: options.full_path.unwrap_or(false),
+    respect_gitignore: options.respect_gitignore.unwrap_or(true),
+    ignored_mode,
+  })
+  .into_iter()
+  .map(CompactNode::from)
+  .collect()
 }
 
 #[napi]

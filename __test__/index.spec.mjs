@@ -1,6 +1,28 @@
 import test from "ava";
+import { linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { buildDirectoryTree, getLargestNodes } from "../index.js";
+import { buildDirectoryTree, getLargestNodes, scanCompact } from "../index.js";
+
+function createGitignoreFixture() {
+  const root = mkdtempSync(join(tmpdir(), "space-lens-compact-"));
+  mkdirSync(join(root, "src"));
+  mkdirSync(join(root, "target"));
+  mkdirSync(join(root, "target", "debug"));
+  mkdirSync(join(root, "node_modules"));
+  mkdirSync(join(root, "node_modules", "left-pad"));
+  writeFileSync(join(root, ".gitignore"), "target/\nnode_modules/\n");
+  writeFileSync(join(root, "src", "index.ts"), "console.log('hello')\n");
+  writeFileSync(join(root, "target", "debug", "app.bin"), "x".repeat(4096));
+  writeFileSync(join(root, "node_modules", "left-pad", "index.js"), "module.exports = ''\n");
+
+  return root;
+}
+
+function childByName(node, name) {
+  return node.children.find((child) => child.name === name);
+}
 
 test("buildDirectoryTree", (t) => {
   const result = buildDirectoryTree({
@@ -9,8 +31,77 @@ test("buildDirectoryTree", (t) => {
     fullPath: true,
   });
   t.is(result.length, 1);
-  console.dir(result, { depth: null });
   const largestNodes = getLargestNodes(result, 10);
-  console.dir(largestNodes, { depth: null });
   t.is(largestNodes.children.length, 10);
+});
+
+test("scanCompact summarizes gitignored directories without descendants", (t) => {
+  const root = createGitignoreFixture();
+  t.teardown(() => rmSync(root, { recursive: true, force: true }));
+
+  const [tree] = scanCompact({
+    directories: [root],
+    fullPath: false,
+    respectGitignore: true,
+    ignoredMode: "summarize",
+  });
+
+  const target = childByName(tree, "target");
+  const nodeModules = childByName(tree, "node_modules");
+
+  t.truthy(childByName(tree, "src"));
+  t.truthy(target);
+  t.truthy(nodeModules);
+  t.true(target.size > 0);
+  t.true(nodeModules.size > 0);
+  t.true(target.ignored);
+  t.true(target.collapsed);
+  t.deepEqual(target.children, []);
+  t.true(nodeModules.ignored);
+  t.true(nodeModules.collapsed);
+  t.deepEqual(nodeModules.children, []);
+});
+
+test("scanCompact excludes gitignored directories when requested", (t) => {
+  const root = createGitignoreFixture();
+  t.teardown(() => rmSync(root, { recursive: true, force: true }));
+
+  const [tree] = scanCompact({
+    directories: [root],
+    fullPath: false,
+    respectGitignore: true,
+    ignoredMode: "exclude",
+  });
+
+  t.truthy(childByName(tree, "src"));
+  t.falsy(childByName(tree, "target"));
+  t.falsy(childByName(tree, "node_modules"));
+});
+
+test("scanCompact does not double count hard links", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "space-lens-hardlink-"));
+  t.teardown(() => rmSync(root, { recursive: true, force: true }));
+
+  const original = join(root, "original.bin");
+  const duplicate = join(root, "duplicate.bin");
+  writeFileSync(original, "x".repeat(4096));
+
+  try {
+    linkSync(original, duplicate);
+  } catch {
+    t.pass();
+    return;
+  }
+
+  const [tree] = scanCompact({
+    directories: [root],
+    fullPath: false,
+    respectGitignore: false,
+  });
+
+  const linkedFiles = tree.children.filter((child) =>
+    ["original.bin", "duplicate.bin"].includes(child.name),
+  );
+
+  t.is(linkedFiles.length, 1);
 });

@@ -8,11 +8,26 @@ export interface DirectoryTreeOptions {
   ignoreHidden?: boolean
   fullPath?: boolean
 }
+export interface CompactScanOptions {
+  directories: Array<string>
+  ignoreHidden?: boolean
+  fullPath?: boolean
+  respectGitignore?: boolean
+  ignoredMode?: 'exclude' | 'summarize'
+}
 export interface Node {
   name: string
   size: number
   children: Array<Node>
   depth: number
+}
+export interface CompactNode {
+  name: string
+  size: number
+  children: Array<CompactNode>
+  depth: number
+  ignored: boolean
+  collapsed: boolean
 }
 export interface DisplayNode {
   name: string
@@ -20,4 +35,5 @@ export interface DisplayNode {
   children: Array<DisplayNode>
 }
 export declare function buildDirectoryTree(options: DirectoryTreeOptions): Array<Node>
+export declare function scanCompact(options: CompactScanOptions): Array<CompactNode>
 export declare function getLargestNodes(nodes: Array<Node>, numberOfNodes: number): DisplayNode | null

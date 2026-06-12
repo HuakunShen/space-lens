@@ -24,7 +24,10 @@
   "license": "MIT",
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4",
-    "ava": "^6.0.1"
+    "@types/node": "^25.9.3",
+    "ava": "^6.0.1",
+    "citty": "^0.2.2",
+    "typescript": "^6.0.3"
   },
   "ava": {
     "timeout": "3m"
@@ -34,10 +37,12 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
+    "bench": "bun cli.ts",
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
-    "test": "ava",
+    "test": "node node_modules/ava/entrypoints/cli.mjs",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "universal": "napi universal",
     "version": "napi version"
   },

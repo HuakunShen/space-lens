@@ -310,7 +310,8 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { buildDirectoryTree, getLargestNodes } = nativeBinding
+const { buildDirectoryTree, scanCompact, getLargestNodes } = nativeBinding
 
 module.exports.buildDirectoryTree = buildDirectoryTree
+module.exports.scanCompact = scanCompact
 module.exports.getLargestNodes = getLargestNodes
