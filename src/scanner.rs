@@ -54,7 +54,7 @@ fn scan_path(
   seen_inodes: &SeenInodes,
 ) -> Option<ScanNode> {
   let metadata = std::fs::symlink_metadata(path).ok()?;
-  let own_size = unique_allocated_size(&metadata, seen_inodes)?;
+  let own_size = unique_allocated_size(path, &metadata, seen_inodes)?;
   let is_dir = metadata.is_dir();
 
   if !is_dir {
@@ -175,7 +175,7 @@ fn summarize_dir_children(path: &Path, seen_inodes: &SeenInodes) -> u64 {
         let entry = entry.ok()?;
         let entry_path = entry.path();
         let metadata = std::fs::symlink_metadata(&entry_path).ok()?;
-        let own_size = unique_allocated_size(&metadata, seen_inodes)?;
+        let own_size = unique_allocated_size(&entry_path, &metadata, seen_inodes)?;
 
         if metadata.is_dir() {
           Some(own_size + summarize_dir_children(&entry_path, seen_inodes))
@@ -206,8 +206,12 @@ fn is_hidden(path: &Path) -> bool {
     .is_some_and(|name| name.starts_with('.'))
 }
 
-fn unique_allocated_size(metadata: &std::fs::Metadata, seen_inodes: &SeenInodes) -> Option<u64> {
-  if let Some(key) = inode_key(metadata) {
+fn unique_allocated_size(
+  path: &Path,
+  metadata: &std::fs::Metadata,
+  seen_inodes: &SeenInodes,
+) -> Option<u64> {
+  if let Some(key) = inode_key(path, metadata) {
     let mut seen = seen_inodes.lock().ok()?;
     if !seen.insert(key) {
       return None;
@@ -218,14 +222,39 @@ fn unique_allocated_size(metadata: &std::fs::Metadata, seen_inodes: &SeenInodes)
 }
 
 #[cfg(unix)]
-fn inode_key(metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
+fn inode_key(_path: &Path, metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
   use std::os::unix::fs::MetadataExt;
 
   Some((metadata.ino(), metadata.dev()))
 }
 
-#[cfg(not(unix))]
-fn inode_key(_metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
+#[cfg(windows)]
+fn inode_key(path: &Path, metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
+  use std::mem::MaybeUninit;
+  use std::os::windows::io::AsRawHandle;
+  use windows_sys::Win32::Foundation::HANDLE;
+  use windows_sys::Win32::Storage::FileSystem::{
+    GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+  };
+
+  if metadata.is_dir() {
+    return None;
+  }
+
+  let file = std::fs::File::open(path).ok()?;
+  let mut info = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+  let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle() as HANDLE, info.as_mut_ptr()) };
+  if ok == 0 {
+    return None;
+  }
+
+  let info = unsafe { info.assume_init() };
+  let file_index = ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64;
+  Some((file_index, info.dwVolumeSerialNumber as u64))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn inode_key(_path: &Path, _metadata: &std::fs::Metadata) -> Option<(u64, u64)> {
   None
 }
 
