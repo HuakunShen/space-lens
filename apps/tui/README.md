@@ -27,7 +27,7 @@ Use this for normal local scanning:
 yarn tui ~/Dev --preset rust
 yarn tui ~/Dev --preset node,gitignored --sort path
 yarn tui . --preset rust
-npx spacelens ~/Dev --preset rust
+npx @space-lens/cli ~/Dev --preset rust
 ```
 
 `yarn tui` intentionally runs `bun apps/tui/src/cli.ts` from the current working
@@ -57,7 +57,7 @@ both the scan tree and cleanup plan.
 Useful while developing the TUI package itself:
 
 ```bash
-yarn workspace spacelens dev -- --preset rust .
+yarn workspace @space-lens/cli dev -- --preset rust .
 ```
 
 This runs with `apps/tui` as the working directory, so `.` means `apps/tui`, not
@@ -77,7 +77,7 @@ Press `Ctrl+C` to exit the TUI.
 ## Build And Verify
 
 ```bash
-yarn workspace spacelens build
-yarn workspace spacelens test
-yarn workspace spacelens typecheck
+yarn workspace @space-lens/cli build
+yarn workspace @space-lens/cli test
+yarn workspace @space-lens/cli typecheck
 ```

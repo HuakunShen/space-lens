@@ -51,7 +51,7 @@ jobs:
       - name: Node tests
         run: |
           yarn workspace space-lens test
-          yarn workspace spacelens test
+          yarn workspace @space-lens/cli test
   build:
     strategy:
       fail-fast: false
@@ -285,7 +285,7 @@ jobs:
         run: ls -R ./packages/node/npm
         shell: bash
       - name: Build spacelens
-        run: yarn workspace spacelens build
+        run: yarn workspace @space-lens/cli build
       - name: Publish space-lens
         working-directory: packages/node
         run: |

@@ -87,7 +87,7 @@ The workspace also includes `spacelens`, an OpenTUI app with two modes: `scan` f
 ```bash
 yarn tui ~/Dev --preset rust
 yarn tui ~/Dev --preset node,gitignored --sort path
-npx spacelens ~/Dev --preset rust
+npx @space-lens/cli ~/Dev --preset rust
 ```
 
 Inside the TUI, press `tab` to switch modes, `space` to select a cleanup candidate, `x` to request deletion, and `enter` to confirm. Use `Ctrl+C` or `q` to quit.
@@ -118,9 +118,9 @@ Options:
 ```bash
 yarn install
 yarn workspace space-lens build:debug
-yarn workspace spacelens build
+yarn workspace @space-lens/cli build
 yarn workspace space-lens test
-yarn workspace spacelens test
+yarn workspace @space-lens/cli test
 yarn workspace space-lens typecheck
 cargo test --workspace
 ```
