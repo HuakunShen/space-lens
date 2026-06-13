@@ -80,6 +80,17 @@ cargo run -p space-lens-cli -- clean ~/Dev --preset node
 
 `clean` defaults to dry-run. Add `--execute` only when you want to remove the planned paths.
 
+## TypeScript TUI CLI
+
+The workspace also includes an OpenTUI app with two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. OpenTUI 0.4.x uses native FFI that currently needs Bun at runtime:
+
+```bash
+yarn tui ~/Dev --preset rust
+yarn tui ~/Dev --preset node,gitignored --sort path
+```
+
+Inside the TUI, press `tab` to switch modes, `space` to select a cleanup candidate, `x` to request deletion, and `enter` to confirm. Use `Ctrl+C` or `q` to quit.
+
 ## Benchmark CLI
 
 This repository includes a local CLI for benchmarking the directory scanner and exporting trees:
@@ -106,7 +117,9 @@ Options:
 ```bash
 yarn install
 yarn workspace space-lens build:debug
+yarn workspace @space-lens/tui build
 yarn workspace space-lens test
+yarn workspace @space-lens/tui test
 yarn workspace space-lens typecheck
 cargo test --workspace
 ```
@@ -115,6 +128,7 @@ Useful local commands:
 
 - `yarn build`: build release bindings for the current platform.
 - `yarn build:debug`: build debug bindings for local testing.
+- `yarn tui`: run the Bun/OpenTUI cleanup candidate viewer.
 - `yarn test`: run Rust workspace tests and AVA tests.
-- `yarn typecheck`: type-check the local TypeScript benchmark CLI.
+- `yarn typecheck`: type-check the TypeScript workspaces.
 - `yarn bench`: run the benchmark CLI from the `space-lens` npm workspace.

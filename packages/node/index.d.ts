@@ -32,6 +32,8 @@ export interface DirectoryScanOptions {
   ignoredMode?: string
 }
 
+export declare function executeCleanup(plan: RemovalPlan): RemovalOutcome
+
 export declare function findCleanupCandidates(options: CleanupCandidateOptions): Array<CleanupCandidate>
 
 export declare function planCleanup(options: CleanupCandidateOptions): RemovalPlan
@@ -41,6 +43,12 @@ export interface RemovalEntry {
   size: number
   reason: string
   preset: string
+}
+
+export interface RemovalOutcome {
+  removed: Array<RemovalEntry>
+  bytesRemoved: number
+  errors: Array<string>
 }
 
 export interface RemovalPlan {

@@ -1,9 +1,9 @@
 import test from 'ava'
-import { linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { findCleanupCandidates, planCleanup, scanDirectory } from '../index'
+import { executeCleanup, findCleanupCandidates, planCleanup, scanDirectory } from '../index'
 import type { CleanupCandidate, DirectoryNode } from '../index'
 
 function createGitignoreFixture() {
@@ -119,6 +119,24 @@ test('planCleanup returns a dry-run removal plan', (t) => {
   t.is(plan.entries.length, 1)
   t.true(plan.totalSize > 0)
   t.true(plan.entries[0].path.endsWith('node_modules'))
+})
+
+test('executeCleanup removes entries from an explicit plan', (t) => {
+  const root = createGitignoreFixture()
+  t.teardown(() => rmSync(root, { recursive: true, force: true }))
+
+  const plan = planCleanup({
+    directories: [root],
+    presets: ['node'],
+  })
+
+  const outcome = executeCleanup(plan)
+
+  t.is(outcome.errors.length, 0)
+  t.is(outcome.removed.length, 1)
+  t.true(outcome.bytesRemoved > 0)
+  t.true(outcome.removed[0].path.endsWith('node_modules'))
+  t.false(existsSync(plan.entries[0].path))
 })
 
 function candidateEndingWith(candidates: CleanupCandidate[], suffix: string) {

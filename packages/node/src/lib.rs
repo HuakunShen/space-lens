@@ -5,9 +5,10 @@ use napi_derive::napi;
 use std::path::PathBuf;
 
 use space_lens::{
-  build_removal_plan as build_core_removal_plan, find_candidates as find_core_candidates,
-  scan_directory as scan_core_directory, CandidateOptions,
+  build_removal_plan as build_core_removal_plan, execute_removal_plan as execute_core_removal_plan,
+  find_candidates as find_core_candidates, scan_directory as scan_core_directory, CandidateOptions,
   CleanupCandidate as CoreCleanupCandidate, CleanupPreset, IgnoredMode,
+  RemovalEntry as CoreRemovalEntry, RemovalOutcome as CoreRemovalOutcome,
   RemovalPlan as CoreRemovalPlan, ScanNode, ScanOptions,
 };
 
@@ -104,6 +105,14 @@ pub struct RemovalPlan {
   pub errors: Vec<String>,
 }
 
+#[napi(object)]
+pub struct RemovalOutcome {
+  pub removed: Vec<RemovalEntry>,
+  #[napi(js_name = "bytesRemoved")]
+  pub bytes_removed: i64,
+  pub errors: Vec<String>,
+}
+
 impl From<CoreCleanupCandidate> for CleanupCandidate {
   fn from(candidate: CoreCleanupCandidate) -> Self {
     CleanupCandidate {
@@ -135,6 +144,25 @@ impl From<CoreRemovalPlan> for RemovalPlan {
   }
 }
 
+impl From<CoreRemovalOutcome> for RemovalOutcome {
+  fn from(outcome: CoreRemovalOutcome) -> Self {
+    RemovalOutcome {
+      removed: outcome
+        .removed
+        .into_iter()
+        .map(|entry| RemovalEntry {
+          path: entry.path.to_string_lossy().to_string(),
+          size: size_to_i64(entry.size),
+          reason: entry.reason,
+          preset: preset_to_string(entry.preset),
+        })
+        .collect(),
+      bytes_removed: size_to_i64(outcome.bytes_removed),
+      errors: outcome.errors,
+    }
+  }
+}
+
 #[napi(js_name = "findCleanupCandidates")]
 pub fn find_cleanup_candidates(options: CleanupCandidateOptions) -> Result<Vec<CleanupCandidate>> {
   let candidates = find_core_candidates(candidate_options(options)?);
@@ -145,6 +173,12 @@ pub fn find_cleanup_candidates(options: CleanupCandidateOptions) -> Result<Vec<C
 pub fn plan_cleanup(options: CleanupCandidateOptions) -> Result<RemovalPlan> {
   let candidates = find_core_candidates(candidate_options(options)?);
   Ok(RemovalPlan::from(build_core_removal_plan(candidates)))
+}
+
+#[napi(js_name = "executeCleanup")]
+pub fn execute_cleanup(plan: RemovalPlan) -> Result<RemovalOutcome> {
+  let plan = core_removal_plan(plan)?;
+  Ok(RemovalOutcome::from(execute_core_removal_plan(&plan)))
 }
 
 fn candidate_options(options: CleanupCandidateOptions) -> Result<CandidateOptions> {
@@ -159,6 +193,27 @@ fn candidate_options(options: CleanupCandidateOptions) -> Result<CandidateOption
     roots: options.directories.into_iter().map(PathBuf::from).collect(),
     presets,
     ignore_hidden: options.ignore_hidden.unwrap_or(false),
+  })
+}
+
+fn core_removal_plan(plan: RemovalPlan) -> Result<CoreRemovalPlan> {
+  let entries = plan
+    .entries
+    .into_iter()
+    .map(|entry| {
+      Ok(CoreRemovalEntry {
+        path: PathBuf::from(entry.path),
+        size: size_to_u64(entry.size, "entry.size")?,
+        reason: entry.reason,
+        preset: parse_preset(&entry.preset)?,
+      })
+    })
+    .collect::<Result<Vec<_>>>()?;
+
+  Ok(CoreRemovalPlan {
+    entries,
+    total_size: size_to_u64(plan.total_size, "totalSize")?,
+    errors: plan.errors,
   })
 }
 
@@ -185,4 +240,13 @@ fn preset_to_string(preset: CleanupPreset) -> String {
 
 fn size_to_i64(size: u64) -> i64 {
   i64::try_from(size).unwrap_or(i64::MAX)
+}
+
+fn size_to_u64(size: i64, field: &str) -> Result<u64> {
+  u64::try_from(size).map_err(|_| {
+    Error::new(
+      Status::InvalidArg,
+      format!("{field} must be a non-negative safe integer."),
+    )
+  })
 }
