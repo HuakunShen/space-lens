@@ -5,7 +5,7 @@
   "description": "OpenTUI-powered CLI for Space Lens scanning and cleanup.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/HuakunShen/space-lens",
+    "url": "git+https://github.com/HuakunShen/space-lens.git",
     "directory": "apps/tui"
   },
   "bin": {
