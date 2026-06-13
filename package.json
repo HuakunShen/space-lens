@@ -12,19 +12,19 @@
     "build": "run-p build:node build:tui",
     "build:debug": "yarn workspace space-lens build:debug",
     "build:node": "yarn workspace space-lens build",
-    "build:tui": "yarn workspace @space-lens/tui build",
+    "build:tui": "yarn workspace spacelens build",
     "format": "run-p format:prettier format:rs format:toml",
     "format:prettier": "prettier . -w",
     "format:toml": "taplo format",
     "format:rs": "cargo fmt --all",
     "lint": "run-p lint:node lint:tui",
     "lint:node": "yarn workspace space-lens lint",
-    "lint:tui": "yarn workspace @space-lens/tui lint",
-    "test": "cargo test --workspace && yarn workspace space-lens test && yarn workspace @space-lens/tui test",
+    "lint:tui": "yarn workspace spacelens lint",
+    "test": "cargo test --workspace && yarn workspace space-lens test && yarn workspace spacelens test",
     "tui": "bun apps/tui/src/cli.ts",
     "typecheck": "run-p typecheck:node typecheck:tui",
     "typecheck:node": "yarn workspace space-lens typecheck",
-    "typecheck:tui": "yarn workspace @space-lens/tui typecheck"
+    "typecheck:tui": "yarn workspace spacelens typecheck"
   },
   "devDependencies": {
     "@taplo/cli": "^0.7.0",

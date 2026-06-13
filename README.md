@@ -80,13 +80,14 @@ cargo run -p space-lens-cli -- clean ~/Dev --preset node
 
 `clean` defaults to dry-run. Add `--execute` only when you want to remove the planned paths.
 
-## TypeScript TUI CLI
+## spacelens TUI CLI
 
-The workspace also includes an OpenTUI app with two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. OpenTUI 0.4.x uses native FFI that currently needs Bun at runtime:
+The workspace also includes `spacelens`, an OpenTUI app with two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. OpenTUI 0.4.x uses native FFI that currently needs Bun at runtime:
 
 ```bash
 yarn tui ~/Dev --preset rust
 yarn tui ~/Dev --preset node,gitignored --sort path
+npx spacelens ~/Dev --preset rust
 ```
 
 Inside the TUI, press `tab` to switch modes, `space` to select a cleanup candidate, `x` to request deletion, and `enter` to confirm. Use `Ctrl+C` or `q` to quit.
@@ -117,9 +118,9 @@ Options:
 ```bash
 yarn install
 yarn workspace space-lens build:debug
-yarn workspace @space-lens/tui build
+yarn workspace spacelens build
 yarn workspace space-lens test
-yarn workspace @space-lens/tui test
+yarn workspace spacelens test
 yarn workspace space-lens typecheck
 cargo test --workspace
 ```

@@ -26,7 +26,7 @@ const commandConfig = {
   ),
 }
 
-export const spaceLensTuiCommand = Command.make('space-lens-tui', commandConfig, (rawConfig) =>
+export const spaceLensTuiCommand = Command.make('spacelens', commandConfig, (rawConfig) =>
   Effect.gen(function* () {
     const options = yield* Effect.try({
       try: () => normalizeCliConfig(rawConfig),
@@ -82,7 +82,7 @@ const runTuiProgram = Effect.fn('runTuiProgram')((options: CliOptions) =>
 
 function reportCliError(error: Error) {
   return Effect.sync(() => {
-    process.stderr.write(`space-lens-tui: ${error.message}\n`)
+    process.stderr.write(`spacelens: ${error.message}\n`)
     process.exitCode = 1
   })
 }

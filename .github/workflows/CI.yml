@@ -51,7 +51,7 @@ jobs:
       - name: Node tests
         run: |
           yarn workspace space-lens test
-          yarn workspace @space-lens/tui test
+          yarn workspace spacelens test
   build:
     strategy:
       fail-fast: false
