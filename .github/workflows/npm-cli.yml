@@ -1,0 +1,78 @@
+name: Publish @space-lens/cli
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: npm dist-tag to publish with
+        required: true
+        default: latest
+        type: choice
+        options:
+          - latest
+          - next
+  push:
+    tags:
+      - 'v*'
+      - 'cli-v*'
+
+concurrency:
+  group: npm-cli-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish @space-lens/cli
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: yarn install --immutable
+      - name: Test
+        run: yarn workspace @space-lens/cli test
+      - name: Typecheck
+        run: yarn workspace @space-lens/cli typecheck
+      - name: Build
+        run: yarn workspace @space-lens/cli build
+      - name: Pack dry run
+        working-directory: apps/tui
+        run: npm pack --dry-run
+      - name: Publish
+        working-directory: apps/tui
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version >/dev/null 2>&1;
+          then
+            echo "$PACKAGE_NAME@$PACKAGE_VERSION is already published, skipping"
+            exit 0
+          fi
+
+          DIST_TAG="${{ github.event.inputs.tag }}"
+          if [[ -z "$DIST_TAG" ]]; then
+            VERSION_REF="${GITHUB_REF_NAME#cli-}"
+            if [[ "$VERSION_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              DIST_TAG=latest
+            else
+              DIST_TAG=next
+            fi
+          fi
+
+          if [[ "$DIST_TAG" == "latest" ]]; then
+            npm publish --provenance --access public
+          else
+            npm publish --provenance --access public --tag "$DIST_TAG"
+          fi
