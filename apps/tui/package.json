@@ -4,8 +4,8 @@
   "version": "0.2.0",
   "description": "OpenTUI-powered CLI for Space Lens scanning and cleanup.",
   "bin": {
-    "space-lens-tui": "./dist/cli.mjs",
-    "spacelens": "./dist/cli.mjs"
+    "space-lens-tui": "dist/cli.mjs",
+    "spacelens": "dist/cli.mjs"
   },
   "engines": {
     "bun": ">=1.3.0"

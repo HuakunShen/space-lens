@@ -4372,8 +4372,8 @@ __metadata:
     typescript: "npm:^6.0.3"
     web-tree-sitter: "npm:0.25.10"
   bin:
-    space-lens-tui: ./dist/cli.mjs
-    spacelens: ./dist/cli.mjs
+    space-lens-tui: dist/cli.mjs
+    spacelens: dist/cli.mjs
   languageName: unknown
   linkType: soft
 
