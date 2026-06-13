@@ -3,6 +3,11 @@
   "type": "module",
   "version": "0.2.1",
   "description": "OpenTUI-powered CLI for Space Lens scanning and cleanup.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HuakunShen/space-lens",
+    "directory": "apps/tui"
+  },
   "bin": {
     "spacelens": "dist/cli.mjs"
   },
