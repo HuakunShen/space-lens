@@ -178,9 +178,7 @@ The root `package.json` becomes a private Yarn workspace root. Yarn stays on the
 Workspace members:
 
 ```json
-[
-  "packages/node"
-]
+["packages/node"]
 ```
 
 `packages/node` remains publishable. `apps/npx` can be added as a workspace member when the NPX app is implemented. Rust-only packages do not need npm workspace entries.

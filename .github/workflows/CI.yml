@@ -39,11 +39,13 @@ jobs:
       - name: Install dependencies
         run: yarn install
       - name: Oxlint
-        run: yarn lint
+        run: yarn workspace space-lens lint
       - name: Cargo fmt
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy
+        run: cargo clippy --workspace --all-targets
+      - name: Cargo test
+        run: cargo test --workspace
   build:
     strategy:
       fail-fast: false
@@ -51,28 +53,28 @@ jobs:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: yarn build --target x86_64-apple-darwin
+            build: yarn workspace space-lens build --target x86_64-apple-darwin
           - host: windows-latest
-            build: yarn build --target x86_64-pc-windows-msvc
+            build: yarn workspace space-lens build --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            build: yarn build --target x86_64-unknown-linux-gnu --use-napi-cross
+            build: yarn workspace space-lens build --target x86_64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            build: yarn build --target x86_64-unknown-linux-musl -x
+            build: yarn workspace space-lens build --target x86_64-unknown-linux-musl -x
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: yarn build --target aarch64-apple-darwin
+            build: yarn workspace space-lens build --target aarch64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            build: yarn build --target aarch64-unknown-linux-gnu --use-napi-cross
+            build: yarn workspace space-lens build --target aarch64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            build: yarn build --target aarch64-unknown-linux-musl -x
+            build: yarn workspace space-lens build --target aarch64-unknown-linux-musl -x
           - host: windows-latest
             target: aarch64-pc-windows-msvc
-            build: yarn build --target aarch64-pc-windows-msvc
+            build: yarn workspace space-lens build --target aarch64-pc-windows-msvc
     name: stable - ${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -124,8 +126,8 @@ jobs:
         with:
           name: bindings-${{ matrix.settings.target }}
           path: |
-            ${{ env.APP_NAME }}.*.node
-            ${{ env.APP_NAME }}.*.wasm
+            packages/node/${{ env.APP_NAME }}.*.node
+            packages/node/${{ env.APP_NAME }}.*.wasm
           if-no-files-found: error
   test-macOS-windows-binding:
     name: Test bindings on ${{ matrix.settings.target }} - node@${{ matrix.node }}
@@ -166,12 +168,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: .
+          path: packages/node
       - name: List packages
-        run: ls -R .
+        run: ls -R packages/node
         shell: bash
       - name: Test bindings
-        run: yarn test
+        run: yarn workspace space-lens test
   test-linux-binding:
     name: Test ${{ matrix.target }} - node@${{ matrix.node }}
     needs:
@@ -227,9 +229,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: bindings-${{ matrix.target }}
-          path: .
+          path: packages/node
       - name: List packages
-        run: ls -R .
+        run: ls -R packages/node
         shell: bash
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -244,7 +246,7 @@ jobs:
           image: ${{ steps.docker.outputs.IMAGE }}
           name: test-bindings-${{ matrix.target }}
           options: '-v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} --platform ${{ steps.docker.outputs.PLATFORM }}'
-          args: sh -c "corepack enable && yarn test"
+          args: sh -c "corepack enable && yarn workspace space-lens test"
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -266,17 +268,18 @@ jobs:
       - name: Install dependencies
         run: yarn install
       - name: create npm dirs
-        run: yarn napi create-npm-dirs
+        run: yarn workspace space-lens napi create-npm-dirs
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
-          path: artifacts
+          path: packages/node/artifacts
       - name: Move artifacts
-        run: yarn artifacts
+        run: yarn workspace space-lens artifacts
       - name: List packages
-        run: ls -R ./npm
+        run: ls -R ./packages/node/npm
         shell: bash
       - name: Publish
+        working-directory: packages/node
         run: |
           npm config set provenance true
           if [[ "$GITHUB_REF" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || git log -1 --pretty=%B | grep "^[0-9]\+\.[0-9]\+\.[0-9]\+$";

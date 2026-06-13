@@ -3,8 +3,8 @@ import { linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { scanDirectory } from '../index'
-import type { DirectoryNode } from '../index'
+import { findCleanupCandidates, planCleanup, scanDirectory } from '../index'
+import type { CleanupCandidate, DirectoryNode } from '../index'
 
 function createGitignoreFixture() {
   const root = mkdtempSync(join(tmpdir(), 'space-lens-compact-'))
@@ -93,3 +93,34 @@ test('scanDirectory does not double count hard links', (t) => {
 
   t.is(linkedFiles.length, 1)
 })
+
+test('findCleanupCandidates reports preset matches', (t) => {
+  const root = createGitignoreFixture()
+  t.teardown(() => rmSync(root, { recursive: true, force: true }))
+
+  const candidates = findCleanupCandidates({
+    directories: [root],
+    presets: ['node', 'rust', 'gitignored'],
+  })
+
+  t.truthy(candidateEndingWith(candidates, 'node_modules'))
+  t.truthy(candidateEndingWith(candidates, 'target'))
+})
+
+test('planCleanup returns a dry-run removal plan', (t) => {
+  const root = createGitignoreFixture()
+  t.teardown(() => rmSync(root, { recursive: true, force: true }))
+
+  const plan = planCleanup({
+    directories: [root],
+    presets: ['node'],
+  })
+
+  t.is(plan.entries.length, 1)
+  t.true(plan.totalSize > 0)
+  t.true(plan.entries[0].path.endsWith('node_modules'))
+})
+
+function candidateEndingWith(candidates: CleanupCandidate[], suffix: string) {
+  return candidates.find((candidate) => candidate.path.endsWith(suffix))
+}

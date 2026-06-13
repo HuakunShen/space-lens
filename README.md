@@ -1,6 +1,6 @@
 # Space Lens
 
-Fast directory scanning utilities for Node.js, powered by Rust and napi-rs.
+Fast directory scanning and cleanup candidate utilities, powered by Rust and napi-rs.
 
 ## Installation
 
@@ -24,6 +24,22 @@ const tree = scanDirectory({
 console.dir(tree, { depth: 3 })
 ```
 
+Find cleanup candidates without deleting anything:
+
+```ts
+import { findCleanupCandidates, planCleanup } from 'space-lens'
+
+const candidates = findCleanupCandidates({
+  directories: [process.cwd()],
+  presets: ['node', 'rust', 'gitignored'],
+})
+
+const plan = planCleanup({
+  directories: [process.cwd()],
+  presets: ['node'],
+})
+```
+
 ## Directory Scanning
 
 `scanDirectory` is intended for large folders where keeping every file node in memory is too expensive.
@@ -32,6 +48,7 @@ With `ignoredMode: 'summarize'`, ignored directories such as `target/` or `node_
 ```ts
 {
   name: 'target',
+  path: '/path/to/project/target',
   size: 1238249472,
   children: [],
   ignored: true,
@@ -40,6 +57,28 @@ With `ignoredMode: 'summarize'`, ignored directories such as `target/` or `node_
 ```
 
 Use `ignoredMode: 'exclude'` to skip ignored paths entirely.
+
+## Cleanup Candidates
+
+Cleanup APIs are dry-run oriented. `findCleanupCandidates` reports matching paths and sizes, and `planCleanup` returns a removal plan. The npm package does not execute deletion.
+
+Initial presets:
+
+- `node`: reports `node_modules`.
+- `rust`: reports Cargo `target` directories.
+- `gitignored`: reports paths matched by `.gitignore`.
+
+## Rust CLI
+
+The workspace includes a simple Rust CLI app:
+
+```bash
+cargo run -p space-lens-cli -- scan ~/Dev --json
+cargo run -p space-lens-cli -- candidates ~/Dev --preset node
+cargo run -p space-lens-cli -- clean ~/Dev --preset node
+```
+
+`clean` defaults to dry-run. Add `--execute` only when you want to remove the planned paths.
 
 ## Benchmark CLI
 
@@ -66,16 +105,16 @@ Options:
 
 ```bash
 yarn install
-yarn build:debug
-yarn test
-yarn typecheck
-cargo check
+yarn workspace space-lens build:debug
+yarn workspace space-lens test
+yarn workspace space-lens typecheck
+cargo test --workspace
 ```
 
 Useful local commands:
 
 - `yarn build`: build release bindings for the current platform.
 - `yarn build:debug`: build debug bindings for local testing.
-- `yarn test`: run AVA tests against the generated native binding.
-- `yarn typecheck`: type-check the local TypeScript CLI.
-- `yarn bench`: run the benchmark CLI.
+- `yarn test`: run Rust workspace tests and AVA tests.
+- `yarn typecheck`: type-check the local TypeScript benchmark CLI.
+- `yarn bench`: run the benchmark CLI from the `space-lens` npm workspace.

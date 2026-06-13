@@ -1,0 +1,17 @@
+[package]
+authors.workspace    = true
+description          = "Fast disk usage scanner and cleanup candidate finder."
+edition.workspace    = true
+license.workspace    = true
+name                 = "space-lens"
+repository.workspace = true
+version.workspace    = true
+
+[dependencies]
+ignore = "0.4"
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Storage_FileSystem",
+] }

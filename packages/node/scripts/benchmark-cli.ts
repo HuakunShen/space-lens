@@ -8,9 +8,7 @@ import { scanDirectory } from '../index.js'
 import type { DirectoryNode, DirectoryScanOptions } from '../index.js'
 
 const IGNORED_MODES = ['summarize', 'exclude'] as const
-const PACKAGE_VERSION = JSON.parse(
-  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
-).version as string
+const PACKAGE_VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version as string
 
 type IgnoredMode = (typeof IGNORED_MODES)[number]
 type Log = (line?: string) => void
@@ -127,10 +125,7 @@ export function createBenchmarkCommand(options: BenchmarkOptions = {}) {
   })
 }
 
-export async function runBenchmark(
-  rawArgs: RawArgs,
-  options: BenchmarkOptions = {},
-): Promise<BenchmarkResult> {
+export async function runBenchmark(rawArgs: RawArgs, options: BenchmarkOptions = {}): Promise<BenchmarkResult> {
   const log = options.log ?? console.log
   const scanners = options.scanners ?? defaultScanners
   const args = normalizeArgs(rawArgs)

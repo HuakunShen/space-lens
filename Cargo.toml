@@ -1,23 +1,14 @@
+[workspace]
+members  = ["packages/space-lens", "packages/node", "apps/cli"]
+resolver = "2"
 
-[package]
-authors = ["LongYinan <lynweklm@gmail.com>"]
-edition = "2021"
-name = "space_lens"
-version = "0.1.0"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-napi = "3.0.0"
-napi-derive = "3.0.0"
-ignore = "0.4"
-rayon = "1"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
-
-[build-dependencies]
-napi-build = "2"
+  [workspace.package]
+  authors    = ["HuakunShen"]
+  edition    = "2021"
+  license    = "MIT"
+  repository = "https://github.com/HuakunShen/space-lens"
+  version    = "0.2.0"
 
 [profile.release]
-lto = true
+lto   = true
 strip = "symbols"

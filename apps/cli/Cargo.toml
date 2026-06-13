@@ -1,0 +1,19 @@
+[package]
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+name                 = "space-lens-cli"
+publish              = false
+repository.workspace = true
+version.workspace    = true
+
+[[bin]]
+name = "space-lens"
+path = "src/main.rs"
+
+[dependencies]
+anyhow     = "1"
+clap       = { version = "4", features = ["derive"] }
+serde      = "1"
+serde_json = "1"
+space-lens = { path = "../../packages/space-lens" }

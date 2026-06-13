@@ -1,26 +1,31 @@
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use rayon::iter::ParallelBridge;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum IgnoredMode {
   Exclude,
   Summarize,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScanOptions {
-  pub directories: Vec<String>,
+  pub directories: Vec<PathBuf>,
   pub ignore_hidden: bool,
   pub full_path: bool,
   pub respect_gitignore: bool,
   pub ignored_mode: IgnoredMode,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScanNode {
   pub name: String,
+  pub path: PathBuf,
   pub size: u64,
   pub children: Vec<ScanNode>,
   pub depth: u32,
@@ -37,11 +42,13 @@ pub fn scan_directory(options: ScanOptions) -> Vec<ScanNode> {
   options
     .directories
     .iter()
-    .filter_map(|directory| {
-      let path = PathBuf::from(directory);
-      scan_path(&path, 0, &[], false, false, &options, &seen_inodes)
-    })
+    .filter_map(|directory| scan_path(directory, 0, &[], false, false, &options, &seen_inodes))
     .collect()
+}
+
+pub fn measure_path(path: &Path) -> u64 {
+  let seen_inodes = Arc::new(Mutex::new(HashSet::new()));
+  summarize_path(path, &seen_inodes)
 }
 
 fn scan_path(
@@ -60,6 +67,7 @@ fn scan_path(
   if !is_dir {
     return Some(ScanNode {
       name: display_name(path, options.full_path),
+      path: path.to_path_buf(),
       size: own_size,
       children: vec![],
       depth,
@@ -77,6 +85,7 @@ fn scan_path(
   if collapsed {
     return Some(ScanNode {
       name: display_name(path, options.full_path),
+      path: path.to_path_buf(),
       size: own_size + summarize_dir_children(path, seen_inodes),
       children: vec![],
       depth,
@@ -125,12 +134,27 @@ fn scan_path(
 
   Some(ScanNode {
     name: display_name(path, options.full_path),
+    path: path.to_path_buf(),
     size: own_size + children_size,
     children,
     depth,
     ignored,
     collapsed,
   })
+}
+
+fn summarize_path(path: &Path, seen_inodes: &SeenInodes) -> u64 {
+  let metadata = match std::fs::symlink_metadata(path) {
+    Ok(metadata) => metadata,
+    Err(_) => return 0,
+  };
+  let own_size = unique_allocated_size(path, &metadata, seen_inodes).unwrap_or(0);
+
+  if metadata.is_dir() {
+    own_size + summarize_dir_children(path, seen_inodes)
+  } else {
+    own_size
+  }
 }
 
 fn append_gitignore(path: &Path, ignore_stack: &[Arc<Gitignore>]) -> IgnoreStack {

@@ -2909,9 +2909,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"space-lens@workspace:.":
+"space-lens-repo@workspace:.":
   version: 0.0.0-use.local
-  resolution: "space-lens@workspace:."
+  resolution: "space-lens-repo@workspace:."
+  dependencies:
+    "@taplo/cli": "npm:^0.7.0"
+    npm-run-all2: "npm:^8.0.4"
+    prettier: "npm:^3.6.2"
+  languageName: unknown
+  linkType: soft
+
+"space-lens@workspace:packages/node":
+  version: 0.0.0-use.local
+  resolution: "space-lens@workspace:packages/node"
   dependencies:
     "@emnapi/core": "npm:^1.5.0"
     "@emnapi/runtime": "npm:^1.5.0"
