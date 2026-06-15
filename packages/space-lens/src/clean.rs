@@ -9,6 +9,7 @@ pub enum CleanupPreset {
   Node,
   Rust,
   Gitignored,
+  Manual,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -90,6 +91,7 @@ pub fn find_candidates(options: CandidateOptions) -> Vec<CleanupCandidate> {
       CleanupPreset::Gitignored => {
         find_gitignored_candidates(&options, &mut seen, &mut candidates);
       }
+      CleanupPreset::Manual => {}
     }
   }
 

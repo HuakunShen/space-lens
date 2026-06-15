@@ -3,8 +3,8 @@ import { existsSync, linkSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { executeCleanup, findCleanupCandidates, planCleanup, scanDirectory } from '../index'
-import type { CleanupCandidate, DirectoryNode } from '../index'
+import { executeCleanup, findCleanupCandidates, planCleanup, scanDirectory, scanDirectoryWithProgress } from '../index'
+import type { CleanupCandidate, DirectoryNode, ScanProgressEvent } from '../index'
 
 function createGitignoreFixture() {
   const root = mkdtempSync(join(tmpdir(), 'space-lens-compact-'))
@@ -94,6 +94,31 @@ test('scanDirectory does not double count hard links', (t) => {
   t.is(linkedFiles.length, 1)
 })
 
+test('scanDirectoryWithProgress reports cumulative scan progress', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'space-lens-progress-'))
+  mkdirSync(join(root, 'nested'))
+  writeFileSync(join(root, 'alpha.txt'), 'alpha')
+  writeFileSync(join(root, 'nested', 'beta.txt'), 'beta')
+  t.teardown(() => rmSync(root, { recursive: true, force: true }))
+
+  const events: ScanProgressEvent[] = []
+  const [tree] = await scanDirectoryWithProgress(
+    {
+      directories: [root],
+      fullPath: false,
+      respectGitignore: false,
+    },
+    (event) => events.push(event),
+  )
+  await waitFor(() => events.length >= 3)
+
+  t.true(events.length >= 3)
+  t.true(events.some((event) => event.path.endsWith('alpha.txt')))
+  t.true(events.some((event) => event.path.endsWith('beta.txt')))
+  t.is(events.at(-1)?.bytesScanned, tree.size)
+  t.is(events.at(-1)?.entriesScanned, events.length)
+})
+
 test('findCleanupCandidates reports preset matches', (t) => {
   const root = createGitignoreFixture()
   t.teardown(() => rmSync(root, { recursive: true, force: true }))
@@ -138,6 +163,13 @@ test('executeCleanup removes entries from an explicit plan', (t) => {
   t.true(outcome.removed[0].path.endsWith('node_modules'))
   t.false(existsSync(plan.entries[0].path))
 })
+
+async function waitFor(predicate: () => boolean) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
 
 function candidateEndingWith(candidates: CleanupCandidate[], suffix: string) {
   return candidates.find((candidate) => candidate.path.endsWith(suffix))

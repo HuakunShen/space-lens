@@ -58,3 +58,11 @@ export interface RemovalPlan {
 }
 
 export declare function scanDirectory(options: DirectoryScanOptions): Array<DirectoryNode>
+
+export declare function scanDirectoryWithProgress(options: DirectoryScanOptions, onProgress: (event: ScanProgressEvent) => void): Promise<DirectoryNode[]>
+
+export interface ScanProgressEvent {
+  path: string
+  bytesScanned: number
+  entriesScanned: number
+}

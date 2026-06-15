@@ -1,1 +1,1 @@
-@kksh/svelte5 is installed 
+@kksh/svelte5 is installed

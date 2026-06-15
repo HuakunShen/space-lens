@@ -4,27 +4,31 @@
   "private": true,
   "workspaces": [
     "packages/node",
-    "apps/tui"
+    "apps/tui",
+    "apps/web"
   ],
   "scripts": {
     "artifacts": "yarn workspace space-lens artifacts",
     "bench": "yarn workspace space-lens bench",
-    "build": "run-p build:node build:tui",
+    "build": "run-s build:node build:web build:tui",
     "build:debug": "yarn workspace space-lens build:debug",
     "build:node": "yarn workspace space-lens build",
     "build:tui": "yarn workspace @space-lens/cli build",
+    "build:web": "yarn workspace web build",
     "format": "run-p format:prettier format:rs format:toml",
     "format:prettier": "prettier . -w",
     "format:toml": "taplo format",
     "format:rs": "cargo fmt --all",
-    "lint": "run-p lint:node lint:tui",
+    "lint": "run-p lint:node lint:tui lint:web",
     "lint:node": "yarn workspace space-lens lint",
     "lint:tui": "yarn workspace @space-lens/cli lint",
+    "lint:web": "yarn workspace web lint",
     "test": "cargo test --workspace && yarn workspace space-lens test && yarn workspace @space-lens/cli test",
     "tui": "bun apps/tui/src/cli.ts",
-    "typecheck": "run-p typecheck:node typecheck:tui",
+    "typecheck": "run-p typecheck:node typecheck:tui typecheck:web",
     "typecheck:node": "yarn workspace space-lens typecheck",
-    "typecheck:tui": "yarn workspace @space-lens/cli typecheck"
+    "typecheck:tui": "yarn workspace @space-lens/cli typecheck",
+    "typecheck:web": "yarn workspace web check"
   },
   "devDependencies": {
     "@taplo/cli": "^0.7.0",

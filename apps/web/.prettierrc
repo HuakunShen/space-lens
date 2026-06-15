@@ -1,15 +1,12 @@
 {
-	"plugins": [
-		"prettier-plugin-tailwindcss",
-		"prettier-plugin-svelte"
-	],
-	"tailwindStylesheet": "./src/routes/layout.css",
-	"overrides": [
-		{
-			"files": "*.svelte",
-			"options": {
-				"parser": "svelte"
-			}
-		}
-	]
+  "plugins": ["prettier-plugin-tailwindcss", "prettier-plugin-svelte"],
+  "tailwindStylesheet": "./src/routes/layout.css",
+  "overrides": [
+    {
+      "files": "*.svelte",
+      "options": {
+        "parser": "svelte"
+      }
+    }
+  ]
 }

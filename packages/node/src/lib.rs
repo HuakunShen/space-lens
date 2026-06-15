@@ -1,18 +1,23 @@
 #![deny(clippy::all)]
 
+use napi::bindgen_prelude::*;
+use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::{Error, Result, Status};
 use napi_derive::napi;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use space_lens::{
   build_removal_plan as build_core_removal_plan, execute_removal_plan as execute_core_removal_plan,
-  find_candidates as find_core_candidates, scan_directory as scan_core_directory, CandidateOptions,
+  find_candidates as find_core_candidates, scan_directory as scan_core_directory,
+  scan_directory_with_progress as scan_core_directory_with_progress, CandidateOptions,
   CleanupCandidate as CoreCleanupCandidate, CleanupPreset, IgnoredMode,
   RemovalEntry as CoreRemovalEntry, RemovalOutcome as CoreRemovalOutcome,
   RemovalPlan as CoreRemovalPlan, ScanNode, ScanOptions,
 };
 
 #[napi(object)]
+#[derive(Clone)]
 pub struct DirectoryScanOptions {
   pub directories: Vec<String>,
   #[napi(js_name = "ignoreHidden")]
@@ -37,6 +42,22 @@ pub struct DirectoryNode {
   pub collapsed: bool,
 }
 
+#[napi(object)]
+pub struct ScanProgressEvent {
+  pub path: String,
+  #[napi(js_name = "bytesScanned")]
+  pub bytes_scanned: i64,
+  #[napi(js_name = "entriesScanned")]
+  pub entries_scanned: i64,
+}
+
+type ProgressCallback = Arc<ThreadsafeFunction<ScanProgressEvent, (), ScanProgressEvent, Status, false>>;
+
+pub struct ScanDirectoryTask {
+  options: DirectoryScanOptions,
+  on_progress: ProgressCallback,
+}
+
 impl From<ScanNode> for DirectoryNode {
   fn from(node: ScanNode) -> Self {
     DirectoryNode {
@@ -53,21 +74,66 @@ impl From<ScanNode> for DirectoryNode {
 
 #[napi(js_name = "scanDirectory")]
 pub fn scan_directory(options: DirectoryScanOptions) -> Vec<DirectoryNode> {
+  scan_core_directory(scan_options(options))
+    .into_iter()
+    .map(DirectoryNode::from)
+    .collect()
+}
+
+#[napi(
+  js_name = "scanDirectoryWithProgress",
+  ts_args_type = "options: DirectoryScanOptions, onProgress: (event: ScanProgressEvent) => void",
+  ts_return_type = "Promise<DirectoryNode[]>"
+)]
+pub fn scan_directory_with_progress(
+  options: DirectoryScanOptions,
+  on_progress: ProgressCallback,
+) -> AsyncTask<ScanDirectoryTask> {
+  AsyncTask::new(ScanDirectoryTask {
+    options,
+    on_progress,
+  })
+}
+
+impl Task for ScanDirectoryTask {
+  type Output = Vec<ScanNode>;
+  type JsValue = Vec<DirectoryNode>;
+
+  fn compute(&mut self) -> Result<Self::Output> {
+    let callback = Arc::clone(&self.on_progress);
+    Ok(scan_core_directory_with_progress(
+      scan_options(self.options.clone()),
+      move |event| {
+        let _ = callback.call(
+          ScanProgressEvent {
+            path: event.path.to_string_lossy().to_string(),
+            bytes_scanned: size_to_i64(event.bytes_scanned),
+            entries_scanned: size_to_i64(event.entries_scanned),
+          },
+          ThreadsafeFunctionCallMode::NonBlocking,
+        );
+      },
+    ))
+  }
+
+  fn resolve(&mut self, _env: Env, output: Self::Output) -> Result<Self::JsValue> {
+    Ok(output.into_iter().map(DirectoryNode::from).collect())
+  }
+}
+
+fn scan_options(options: DirectoryScanOptions) -> ScanOptions {
   let ignored_mode = match options.ignored_mode.as_deref() {
     Some("exclude") => IgnoredMode::Exclude,
     _ => IgnoredMode::Summarize,
   };
 
-  scan_core_directory(ScanOptions {
+  ScanOptions {
     directories: options.directories.into_iter().map(PathBuf::from).collect(),
     ignore_hidden: options.ignore_hidden.unwrap_or(false),
     full_path: options.full_path.unwrap_or(false),
     respect_gitignore: options.respect_gitignore.unwrap_or(true),
     ignored_mode,
-  })
-  .into_iter()
-  .map(DirectoryNode::from)
-  .collect()
+  }
 }
 
 #[napi(object)]
@@ -222,9 +288,10 @@ fn parse_preset(preset: &str) -> Result<CleanupPreset> {
     "node" => Ok(CleanupPreset::Node),
     "rust" => Ok(CleanupPreset::Rust),
     "gitignored" => Ok(CleanupPreset::Gitignored),
+    "manual" => Ok(CleanupPreset::Manual),
     _ => Err(Error::new(
       Status::InvalidArg,
-      format!("Unknown cleanup preset \"{preset}\". Use node, rust, or gitignored."),
+      format!("Unknown cleanup preset \"{preset}\". Use node, rust, gitignored, or manual."),
     )),
   }
 }
@@ -234,6 +301,7 @@ fn preset_to_string(preset: CleanupPreset) -> String {
     CleanupPreset::Node => "node",
     CleanupPreset::Rust => "rust",
     CleanupPreset::Gitignored => "gitignored",
+    CleanupPreset::Manual => "manual",
   }
   .to_string()
 }
