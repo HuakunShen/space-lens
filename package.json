@@ -9,27 +9,27 @@
     "apps/web"
   ],
   "scripts": {
-    "artifacts": "yarn workspace space-lens artifacts",
-    "bench": "yarn workspace space-lens bench",
+    "artifacts": "pnpm --filter space-lens artifacts",
+    "bench": "pnpm --filter space-lens bench",
     "build": "run-s build:node build:web build:tui",
-    "build:debug": "yarn workspace space-lens build:debug",
-    "build:node": "yarn workspace space-lens build",
-    "build:tui": "yarn workspace @space-lens/cli build",
-    "build:web": "yarn workspace web build",
+    "build:debug": "pnpm --filter space-lens build:debug",
+    "build:node": "pnpm --filter space-lens build",
+    "build:tui": "pnpm --filter @space-lens/cli build",
+    "build:web": "pnpm --filter web build",
     "format": "run-p format:prettier format:rs format:toml",
     "format:prettier": "prettier . -w",
     "format:toml": "taplo format",
     "format:rs": "cargo fmt --all",
     "lint": "run-p lint:node lint:tui lint:web",
-    "lint:node": "yarn workspace space-lens lint",
-    "lint:tui": "yarn workspace @space-lens/cli lint",
-    "lint:web": "yarn workspace web lint",
-    "test": "cargo test --workspace && yarn workspace space-lens test && yarn workspace @space-lens/cli test",
+    "lint:node": "pnpm --filter space-lens lint",
+    "lint:tui": "pnpm --filter @space-lens/cli lint",
+    "lint:web": "pnpm --filter web lint",
+    "test": "cargo test --workspace && pnpm --filter space-lens test && pnpm --filter @space-lens/cli test",
     "tui": "bun apps/tui/src/cli.ts",
     "typecheck": "run-p typecheck:node typecheck:tui typecheck:web",
-    "typecheck:node": "yarn workspace space-lens typecheck",
-    "typecheck:tui": "yarn workspace @space-lens/cli typecheck",
-    "typecheck:web": "yarn workspace web check"
+    "typecheck:node": "pnpm --filter space-lens typecheck",
+    "typecheck:tui": "pnpm --filter @space-lens/cli typecheck",
+    "typecheck:web": "pnpm --filter web check"
   },
   "devDependencies": {
     "@taplo/cli": "^0.7.0",
@@ -43,5 +43,5 @@
     "singleQuote": true,
     "arrowParens": "always"
   },
-  "packageManager": "yarn@4.14.1"
+  "packageManager": "pnpm@11.0.0"
 }

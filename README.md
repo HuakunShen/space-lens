@@ -85,8 +85,8 @@ cargo run -p space-lens-cli -- clean ~/Dev --preset node
 The workspace also includes `spacelens`, an OpenTUI app with two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. OpenTUI 0.4.x uses native FFI that currently needs Bun at runtime:
 
 ```bash
-yarn tui ~/Dev --preset rust
-yarn tui ~/Dev --preset node,gitignored --sort path
+pnpm tui ~/Dev --preset rust
+pnpm tui ~/Dev --preset node,gitignored --sort path
 npx @space-lens/cli ~/Dev --preset rust
 ```
 
@@ -97,9 +97,9 @@ Inside the TUI, press `tab` to switch modes, `space` to select a cleanup candida
 This repository includes a local CLI for benchmarking the directory scanner and exporting trees:
 
 ```bash
-yarn bench ~/Dev
-yarn bench ~/Dev --no-json-size
-yarn bench ~/Dev --export-tree tree.json
+pnpm bench ~/Dev
+pnpm bench ~/Dev --no-json-size
+pnpm bench ~/Dev --export-tree tree.json
 ```
 
 Options:
@@ -116,20 +116,20 @@ Options:
 ## Development
 
 ```bash
-yarn install
-yarn workspace space-lens build:debug
-yarn workspace @space-lens/cli build
-yarn workspace space-lens test
-yarn workspace @space-lens/cli test
-yarn workspace space-lens typecheck
+pnpm install
+pnpm --filter space-lens build:debug
+pnpm --filter @space-lens/cli build
+pnpm --filter space-lens test
+pnpm --filter @space-lens/cli test
+pnpm --filter space-lens typecheck
 cargo test --workspace
 ```
 
 Useful local commands:
 
-- `yarn build`: build release bindings for the current platform.
-- `yarn build:debug`: build debug bindings for local testing.
-- `yarn tui`: run the Bun/OpenTUI cleanup candidate viewer.
-- `yarn test`: run Rust workspace tests and AVA tests.
-- `yarn typecheck`: type-check the TypeScript workspaces.
-- `yarn bench`: run the benchmark CLI from the `space-lens` npm workspace.
+- `pnpm build`: build release bindings for the current platform.
+- `pnpm build:debug`: build debug bindings for local testing.
+- `pnpm tui`: run the Bun/OpenTUI cleanup candidate viewer.
+- `pnpm test`: run Rust workspace tests and AVA tests.
+- `pnpm typecheck`: type-check the TypeScript workspaces.
+- `pnpm bench`: run the benchmark CLI from the `space-lens` npm workspace.

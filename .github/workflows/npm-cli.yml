@@ -39,13 +39,13 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
       - name: Install dependencies
-        run: yarn install --immutable
+        run: pnpm install --frozen-lockfile
       - name: Test
-        run: yarn workspace @space-lens/cli test
+        run: pnpm --filter @space-lens/cli test
       - name: Typecheck
-        run: yarn workspace @space-lens/cli typecheck
+        run: pnpm --filter @space-lens/cli typecheck
       - name: Build
-        run: yarn workspace @space-lens/cli build
+        run: pnpm --filter @space-lens/cli build
       - name: Pack dry run
         working-directory: apps/tui
         run: npm pack --dry-run

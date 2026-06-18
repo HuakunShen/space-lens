@@ -7,7 +7,10 @@
  * making the standalone web app depend on the Kunkun API package.
  */
 import { RPCChannel } from "kkrpc/streaming";
-import { electronIpcTransport, type ElectronMessageEndpoint } from "kkrpc/electron";
+import {
+  electronIpcTransport,
+  type ElectronMessageEndpoint,
+} from "kkrpc/electron";
 import { webSocketClientTransport } from "kkrpc/ws";
 import type {
   CleanupOutcome,
@@ -92,22 +95,24 @@ export interface KunkunClientBackendRuntime {
 
 export interface KunkunClientRuntime {
   getHostRuntime(): Promise<KunkunClientHostRuntime>;
-  createBackendRuntime(fsReadAllow?: readonly string[]): Promise<KunkunClientBackendRuntime>;
+  createBackendRuntime(
+    fsReadAllow?: readonly string[],
+  ): Promise<KunkunClientBackendRuntime>;
 }
 
 type KunkunHostConnection =
   | {
-    kind: "electron";
-    pluginId: string;
-    channel: string;
-    endpoint: ElectronMessageEndpoint;
-  }
+      kind: "electron";
+      pluginId: string;
+      channel: string;
+      endpoint: ElectronMessageEndpoint;
+    }
   | {
-    kind: "websocket";
-    pluginId: string;
-    commandName: string;
-    url: string;
-  };
+      kind: "websocket";
+      pluginId: string;
+      commandName: string;
+      url: string;
+    };
 
 interface KunkunBootConfig {
   pluginId: string;
@@ -128,11 +133,15 @@ export function resetKunkunClientForTests(): void {
   hostRuntimePromise = null;
 }
 
-export function createKunkunClientWithRuntime(runtime: KunkunClientRuntime): SpaceLensAPI {
+export function createKunkunClientWithRuntime(
+  runtime: KunkunClientRuntime,
+): SpaceLensAPI {
   let backendRuntimePromise: Promise<KunkunClientBackendRuntime> | null = null;
   const scanReadRootsById = new Map<string, readonly string[]>();
 
-  async function getRuntime(fsReadAllow: readonly string[] = []): Promise<KunkunClientBackendRuntime> {
+  async function getRuntime(
+    fsReadAllow: readonly string[] = [],
+  ): Promise<KunkunClientBackendRuntime> {
     const existing = backendRuntimePromise ? await backendRuntimePromise : null;
     if (existing && hasAllReadRoots(existing.fsReadAllow, fsReadAllow)) {
       return existing;
@@ -149,10 +158,7 @@ export function createKunkunClientWithRuntime(runtime: KunkunClientRuntime): Spa
     const { host } = await runtime.getHostRuntime();
     for (const path of options.paths) {
       const scope = recursiveScope(path);
-      const allowed = await host.permissions.check(
-        "fs-read",
-        scope,
-      );
+      const allowed = await host.permissions.check("fs-read", scope);
       if (allowed) continue;
       const granted = await host.permissions.request(
         "fs-read",
@@ -179,7 +185,9 @@ export function createKunkunClientWithRuntime(runtime: KunkunClientRuntime): Spa
         "Move this Space Lens cleanup item to Trash.",
       );
       if (!granted) {
-        throw new Error(`Space Lens does not have permission to delete ${entry.path}`);
+        throw new Error(
+          `Space Lens does not have permission to delete ${entry.path}`,
+        );
       }
     }
   }
@@ -221,7 +229,9 @@ export function createKunkunClientWithRuntime(runtime: KunkunClientRuntime): Spa
 
     async startScan(options) {
       await ensureReadAccess(options);
-      const scan = await (await getRuntime(options.paths)).backend.startScan(options);
+      const scan = await (
+        await getRuntime(options.paths)
+      ).backend.startScan(options);
       scanReadRootsById.set(scan.scanId, uniqueReadRoots(options.paths));
       return scan;
     },
@@ -238,7 +248,9 @@ export function createKunkunClientWithRuntime(runtime: KunkunClientRuntime): Spa
       return (await getRuntime()).backend.cancelScan(scanId);
     },
     async planCleanup(options) {
-      return (await getRuntime(cleanupReadRoots(options))).backend.planCleanup(options);
+      return (await getRuntime(cleanupReadRoots(options))).backend.planCleanup(
+        options,
+      );
     },
     async executeCleanup(options) {
       return executeWithHostConfirmation(options);
@@ -249,13 +261,16 @@ export function createKunkunClientWithRuntime(runtime: KunkunClientRuntime): Spa
   };
 
   function cleanupReadRoots(options: ExecuteCleanupOptions): readonly string[] {
-    return scanReadRootsById.get(options.scanId) ?? uniqueReadRoots(
-      options.entries.map((entry) => parentPath(entry.path)),
+    return (
+      scanReadRootsById.get(options.scanId) ??
+      uniqueReadRoots(options.entries.map((entry) => parentPath(entry.path)))
     );
   }
 }
 
-async function getKunkunScanTargets(host: KunkunHostAPI): Promise<ScanTarget[]> {
+async function getKunkunScanTargets(
+  host: KunkunHostAPI,
+): Promise<ScanTarget[]> {
   const home = await host.path.homeDir();
   const optionalTargets = await Promise.allSettled([
     host.path.desktopDir(),
@@ -297,7 +312,9 @@ function uniqueScanTargets(targets: ScanTarget[]): ScanTarget[] {
   });
 }
 
-async function createBackendRuntime(fsReadAllow: readonly string[] = []): Promise<KunkunBackendRuntime> {
+async function createBackendRuntime(
+  fsReadAllow: readonly string[] = [],
+): Promise<KunkunBackendRuntime> {
   const hostRuntime = await getHostRuntime();
   const readRoots = uniqueReadRoots(fsReadAllow);
   const { backendId, channel } = await hostRuntime.host.backend.spawn(
@@ -336,14 +353,16 @@ async function createHostRuntime(): Promise<KunkunHostRuntime> {
   const hostChannel = new RPCChannel<KunkunPluginAPI, KunkunHostAPI>(
     connection.kind === "electron"
       ? electronIpcTransport({
-        endpoint: connection.endpoint,
-        channel: connection.channel,
-      })
+          endpoint: connection.endpoint,
+          channel: connection.channel,
+        })
       : webSocketClientTransport({ url: connection.url }),
     { expose: createPluginAPI() },
   );
   return {
-    ...(connection.kind === "electron" ? { endpoint: connection.endpoint } : {}),
+    ...(connection.kind === "electron"
+      ? { endpoint: connection.endpoint }
+      : {}),
     host: hostChannel.getAPI(),
     hostChannel,
   };
@@ -353,10 +372,13 @@ function recursiveScope(path: string): string {
   return path.endsWith("/**") ? path : `${path.replace(/\/$/, "")}/**`;
 }
 
-function hasAllReadRoots(existing: readonly string[], requested: readonly string[]): boolean {
+function hasAllReadRoots(
+  existing: readonly string[],
+  requested: readonly string[],
+): boolean {
   const existingRoots = uniqueReadRoots(existing);
   return uniqueReadRoots(requested).every((root) =>
-    existingRoots.some((existingRoot) => readRootCovers(existingRoot, root))
+    existingRoots.some((existingRoot) => readRootCovers(existingRoot, root)),
   );
 }
 
@@ -373,7 +395,10 @@ function readRootCovers(existingRoot: string, requestedRoot: string): boolean {
   const existing = normalizeFsPath(existingRoot);
   const requested = normalizeFsPath(requestedRoot);
   if (existing === requested) return true;
-  return requested.startsWith(`${existing}/`) || requested.startsWith(`${existing}\\`);
+  return (
+    requested.startsWith(`${existing}/`) ||
+    requested.startsWith(`${existing}\\`)
+  );
 }
 
 function parentPath(input: string): string {
@@ -382,7 +407,8 @@ function parentPath(input: string): string {
   const backslashIndex = normalized.lastIndexOf("\\");
   const index = Math.max(slashIndex, backslashIndex);
   if (index <= 0) return normalized;
-  if (index === 2 && /^[A-Za-z]:/.test(normalized)) return normalized.slice(0, 3);
+  if (index === 2 && /^[A-Za-z]:/.test(normalized))
+    return normalized.slice(0, 3);
   return normalized.slice(0, index);
 }
 
@@ -406,9 +432,11 @@ function createPluginAPI(): KunkunPluginAPI {
 }
 
 function getElectronIpcEndpoint(): ElectronMessageEndpoint {
-  const endpoint = (globalThis as {
-    window?: { electron?: { ipcRenderer?: ElectronMessageEndpoint } };
-  }).window?.electron?.ipcRenderer;
+  const endpoint = (
+    globalThis as {
+      window?: { electron?: { ipcRenderer?: ElectronMessageEndpoint } };
+    }
+  ).window?.electron?.ipcRenderer;
   if (!endpoint) {
     throw new Error("Kunkun Electron IPC endpoint is not available");
   }
@@ -425,7 +453,11 @@ async function resolveKunkunHostConnection(): Promise<KunkunHostConnection> {
     kind: "websocket",
     pluginId: bootConfig.pluginId,
     commandName: bootConfig.commandName,
-    url: withPluginQuery(bootConfig.wsRpcUrl, bootConfig.pluginId, bootConfig.commandName),
+    url: withPluginQuery(
+      bootConfig.wsRpcUrl,
+      bootConfig.pluginId,
+      bootConfig.commandName,
+    ),
   };
 }
 
@@ -434,7 +466,8 @@ function resolveKunkunConnection(): KunkunHostConnection {
   const params = new URLSearchParams(location?.search ?? "");
   const pluginId = resolvePluginId(location, params);
   const commandName = resolveCommandName(location, params);
-  const explicitWebSocketUrl = params.get("kunkun_ws_rpc_url") ?? params.get("kunkun_rpc_url");
+  const explicitWebSocketUrl =
+    params.get("kunkun_ws_rpc_url") ?? params.get("kunkun_rpc_url");
 
   if (explicitWebSocketUrl) {
     return {
@@ -445,7 +478,11 @@ function resolveKunkunConnection(): KunkunHostConnection {
     };
   }
 
-  const routeWebSocketUrl = resolveRouteWebSocketUrl(location, pluginId, commandName);
+  const routeWebSocketUrl = resolveRouteWebSocketUrl(
+    location,
+    pluginId,
+    commandName,
+  );
   if (routeWebSocketUrl) {
     return {
       kind: "websocket",
@@ -484,9 +521,10 @@ function resolveCommandName(
   return parseCustomViewPath(location?.pathname).commandName ?? "";
 }
 
-function parseCustomViewPath(
-  pathname: string | undefined,
-): { pluginId?: string; commandName?: string } {
+function parseCustomViewPath(pathname: string | undefined): {
+  pluginId?: string;
+  commandName?: string;
+} {
   const parts = (pathname ?? "").split("/").filter(Boolean);
   if (parts[0] !== "custom-views" || !parts[1] || !parts[2]) {
     return {};
@@ -523,7 +561,12 @@ async function fetchBootConfig(): Promise<KunkunBootConfig | null> {
 
 function resolveBootConfigUrl(location: Location | undefined): string | null {
   const parsed = parseCustomViewPath(location?.pathname);
-  if (!parsed.pluginId || !parsed.commandName || !location?.protocol || !location.host) {
+  if (
+    !parsed.pluginId ||
+    !parsed.commandName ||
+    !location?.protocol ||
+    !location.host
+  ) {
     return null;
   }
   const url = new URL(`${location.protocol}//${location.host}`);
@@ -538,12 +581,18 @@ function resolveBootConfigUrl(location: Location | undefined): string | null {
 function isBootConfig(value: unknown): value is KunkunBootConfig {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
-  return typeof record["pluginId"] === "string" &&
+  return (
+    typeof record["pluginId"] === "string" &&
     typeof record["commandName"] === "string" &&
-    typeof record["wsRpcUrl"] === "string";
+    typeof record["wsRpcUrl"] === "string"
+  );
 }
 
-function withPluginQuery(url: string, pluginId: string, commandName: string): string {
+function withPluginQuery(
+  url: string,
+  pluginId: string,
+  commandName: string,
+): string {
   const parsed = new URL(url);
   if (!parsed.searchParams.has("pluginId")) {
     parsed.searchParams.set("pluginId", pluginId);

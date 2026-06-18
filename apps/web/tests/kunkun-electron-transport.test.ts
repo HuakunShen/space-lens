@@ -5,7 +5,10 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { RPCChannel } from "kkrpc/streaming";
-import { electronIpcTransport, type ElectronMessageEndpoint } from "kkrpc/electron";
+import {
+  electronIpcTransport,
+  type ElectronMessageEndpoint,
+} from "kkrpc/electron";
 import type { RPCMessage } from "kkrpc";
 import {
   createKunkunClient,
@@ -22,7 +25,10 @@ import type {
   StartScanOptions,
 } from "../src/lib/api/types";
 
-const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+const originalWindowDescriptor = Object.getOwnPropertyDescriptor(
+  globalThis,
+  "window",
+);
 
 afterEach(() => {
   resetKunkunClientForTests();
@@ -38,9 +44,20 @@ describe("createKunkunClient Electron custom-view transport", () => {
     const endpoints = createElectronEndpointPair();
     const backend = createFakeBackend();
     const hostEvents = {
-      permissionChecks: [] as Array<{ permissionType: string; scopePattern: string }>,
-      permissionRequests: [] as Array<{ permissionType: string; scopePattern: string; reason?: string }>,
-      spawnOptions: [] as Array<{ scriptPath: string; runtime?: string; fsReadAllow?: readonly string[] }>,
+      permissionChecks: [] as Array<{
+        permissionType: string;
+        scopePattern: string;
+      }>,
+      permissionRequests: [] as Array<{
+        permissionType: string;
+        scopePattern: string;
+        reason?: string;
+      }>,
+      spawnOptions: [] as Array<{
+        scriptPath: string;
+        runtime?: string;
+        fsReadAllow?: readonly string[];
+      }>,
       trashCalls: [] as Array<string | string[]>,
       confirmations: 0,
     };
@@ -54,10 +71,15 @@ describe("createKunkunClient Electron custom-view transport", () => {
             runtime,
             fsReadAllow: options?.fsReadAllow,
           });
-          channels.push(new RPCChannel<SpaceLensAPI, object>(
-            electronIpcTransport({ endpoint: endpoints.main, channel: "backend-space-lens-1" }),
-            { expose: backend },
-          ));
+          channels.push(
+            new RPCChannel<SpaceLensAPI, object>(
+              electronIpcTransport({
+                endpoint: endpoints.main,
+                channel: "backend-space-lens-1",
+              }),
+              { expose: backend },
+            ),
+          );
           return { backendId: "backend-1", channel: "backend-space-lens-1" };
         },
         async kill() {},
@@ -82,7 +104,11 @@ describe("createKunkunClient Electron custom-view transport", () => {
           return permissionType === "fs-read";
         },
         async request(permissionType, scopePattern, reason) {
-          hostEvents.permissionRequests.push({ permissionType, scopePattern, ...(reason ? { reason } : {}) });
+          hostEvents.permissionRequests.push({
+            permissionType,
+            scopePattern,
+            ...(reason ? { reason } : {}),
+          });
           return true;
         },
       },
@@ -100,16 +126,23 @@ describe("createKunkunClient Electron custom-view transport", () => {
       },
     };
 
-    channels.push(new RPCChannel<KunkunHostAPI, object>(
-      electronIpcTransport({ endpoint: endpoints.main, channel: "kkrpc-plugin-com.space-lens.app" }),
-      { expose: host },
-    ));
+    channels.push(
+      new RPCChannel<KunkunHostAPI, object>(
+        electronIpcTransport({
+          endpoint: endpoints.main,
+          channel: "kkrpc-plugin-com.space-lens.app",
+        }),
+        { expose: host },
+      ),
+    );
 
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: {
         electron: { ipcRenderer: endpoints.renderer },
-        location: new URL("http://space-lens.test/?pluginId=com.space-lens.app"),
+        location: new URL(
+          "http://space-lens.test/?pluginId=com.space-lens.app",
+        ),
       },
     });
 
@@ -149,7 +182,9 @@ describe("createKunkunClient Electron custom-view transport", () => {
       },
     ]);
 
-    await expect(client.startScan(startOptions(["/Users/tester/Downloads"]))).resolves.toMatchObject({
+    await expect(
+      client.startScan(startOptions(["/Users/tester/Downloads"])),
+    ).resolves.toMatchObject({
       scanId: "scan-1",
       rootIds: ["root"],
     });
@@ -159,11 +194,13 @@ describe("createKunkunClient Electron custom-view transport", () => {
       errors: [],
     });
 
-    expect(hostEvents.spawnOptions).toEqual([{
-      scriptPath: "$EXTENSION/dist/backend.js",
-      runtime: "node",
-      fsReadAllow: ["/Users/tester/Downloads"],
-    }]);
+    expect(hostEvents.spawnOptions).toEqual([
+      {
+        scriptPath: "$EXTENSION/dist/backend.js",
+        runtime: "node",
+        fsReadAllow: ["/Users/tester/Downloads"],
+      },
+    ]);
     expect(hostEvents.permissionChecks).toContainEqual({
       permissionType: "fs-read",
       scopePattern: "/Users/tester/Downloads/**",
@@ -174,7 +211,9 @@ describe("createKunkunClient Electron custom-view transport", () => {
       reason: "Move this Space Lens cleanup item to Trash.",
     });
     expect(hostEvents.confirmations).toBe(1);
-    expect(hostEvents.trashCalls).toEqual([["/Users/tester/Downloads/old.log"]]);
+    expect(hostEvents.trashCalls).toEqual([
+      ["/Users/tester/Downloads/old.log"],
+    ]);
     expect(backend.nativeDeletes).toEqual([]);
 
     for (const channel of channels) channel.destroy();
@@ -183,19 +222,28 @@ describe("createKunkunClient Electron custom-view transport", () => {
 
 class FakeElectronEndpoint implements ElectronMessageEndpoint {
   peer?: FakeElectronEndpoint;
-  private readonly listeners = new Map<string, Set<(_event: unknown, message: RPCMessage) => void>>();
+  private readonly listeners = new Map<
+    string,
+    Set<(_event: unknown, message: RPCMessage) => void>
+  >();
 
   send(channel: string, message: RPCMessage): void {
     queueMicrotask(() => this.peer?.emit(channel, message));
   }
 
-  on(channel: string, listener: (_event: unknown, message: RPCMessage) => void): void {
+  on(
+    channel: string,
+    listener: (_event: unknown, message: RPCMessage) => void,
+  ): void {
     const listeners = this.listeners.get(channel) ?? new Set();
     listeners.add(listener);
     this.listeners.set(channel, listeners);
   }
 
-  off(channel: string, listener: (_event: unknown, message: RPCMessage) => void): void {
+  off(
+    channel: string,
+    listener: (_event: unknown, message: RPCMessage) => void,
+  ): void {
     this.listeners.get(channel)?.delete(listener);
   }
 
@@ -231,26 +279,30 @@ function startOptions(paths: string[]): StartScanOptions {
 function cleanupOptions(): ExecuteCleanupOptions {
   return {
     scanId: "scan-1",
-    entries: [{
-      id: "scan-1:old-log",
-      scanId: "scan-1",
-      nodeId: "old-log",
-      path: "/Users/tester/Downloads/old.log",
-      name: "old.log",
-      size: 2048,
-      addedAt: "2026-06-17T00:00:00.000Z",
-    }],
+    entries: [
+      {
+        id: "scan-1:old-log",
+        scanId: "scan-1",
+        nodeId: "old-log",
+        path: "/Users/tester/Downloads/old.log",
+        name: "old.log",
+        size: 2048,
+        addedAt: "2026-06-17T00:00:00.000Z",
+      },
+    ],
   };
 }
 
 function removalPlan(): RemovalPlan {
   return {
-    entries: [{
-      path: "/Users/tester/Downloads/old.log",
-      size: 2048,
-      reason: "manual",
-      preset: "collector",
-    }],
+    entries: [
+      {
+        path: "/Users/tester/Downloads/old.log",
+        size: 2048,
+        reason: "manual",
+        preset: "collector",
+      },
+    ],
     totalSize: 2048,
     errors: [],
   };

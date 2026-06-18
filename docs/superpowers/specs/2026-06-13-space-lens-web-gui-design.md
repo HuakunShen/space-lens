@@ -31,7 +31,7 @@ Repository root:
 Important repo files:
 
 - `AGENTS.md` - repository instructions, commands, monorepo layout, gotchas.
-- `package.json` - root Yarn workspace config.
+- `pnpm-workspace.yaml` - root pnpm workspace config.
 - `Cargo.toml` - Rust workspace config.
 - `packages/space-lens/` - Rust scanner and cleanup core.
 - `packages/node/` - NAPI-RS package published as `space-lens`.
@@ -638,13 +638,13 @@ Follow repo instructions in `AGENTS.md`.
 Relevant commands:
 
 ```bash
-yarn install
-yarn build:debug
-yarn workspace web check
-yarn workspace web build
+pnpm install
+pnpm build:debug
+pnpm --filter web check
+pnpm --filter web build
 ```
 
-If `apps/web` is not in the root Yarn workspace yet, add it to the root `package.json` workspaces before relying on `yarn workspace web ...`.
+If `apps/web` is not in the root pnpm workspace yet, add it to `pnpm-workspace.yaml` before relying on `pnpm --filter web ...`.
 
 Before using or changing library-specific APIs, follow `AGENTS.md` and use `ctx7` for current documentation. This matters for SvelteKit, Svelte, D3, KKRPC, and Kunkun APIs.
 
@@ -654,8 +654,8 @@ For frontend implementation, also use the official Svelte MCP/docs if available 
 
 Minimum expected verification:
 
-- `yarn workspace web check`
-- `yarn workspace web build`
+- `pnpm --filter web check`
+- `pnpm --filter web build`
 
 When chart helper logic exists:
 
@@ -792,7 +792,7 @@ Suggested first loop:
 6. Implement breadcrumb, child list, scan picker, context menu, Collector, and status bar.
 7. Add or stub the fetch-based HTTP client shape for the future NPX/Hono server.
 8. Add apps/tui HTTP server skeleton only after the frontend static UI is working.
-9. Verify with yarn workspace web check and yarn workspace web build. If apps/web is not yet in the root workspace, fix the workspace config first.
+9. Verify with pnpm --filter web check and pnpm --filter web build. If apps/web is not yet in the root workspace, fix the workspace config first.
 
 Before using current library APIs for SvelteKit, Svelte, D3, KKRPC, or Kunkun, follow AGENTS.md and fetch current docs with ctx7. Use official Svelte docs/MCP when available.
 

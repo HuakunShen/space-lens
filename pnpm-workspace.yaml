@@ -1,0 +1,41 @@
+packages:
+  - packages/node
+  - apps/tui
+  - apps/kunkun-plugin
+  - apps/web
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  msgpackr-extract: true
+
+packageExtensions:
+  '@effect/platform-node-shared@*':
+    peerDependenciesMeta:
+      '@effect/cluster':
+        optional: true
+      '@effect/rpc':
+        optional: true
+      '@effect/sql':
+        optional: true
+  '@effect/platform-node@*':
+    peerDependenciesMeta:
+      '@effect/cluster':
+        optional: true
+      '@effect/rpc':
+        optional: true
+      '@effect/sql':
+        optional: true
+  '@opentui/core@*':
+    dependencies:
+      typescript: '^5.9.3'
+
+supportedArchitectures:
+  cpu:
+    - current
+    - arm64
+    - x64
+    - arm
+  libc:
+    - current
+    - glibc
+    - musl

@@ -14,7 +14,7 @@ It has two modes:
 ## Runtime
 
 OpenTUI `0.4.x` currently needs Bun for its native FFI runtime. Use the root
-`yarn tui` script or run the app with `bun`.
+`pnpm tui` script or run the app with `bun`.
 
 Running the built CLI with `node` prints a runtime error instead of opening the
 TUI.
@@ -24,13 +24,13 @@ TUI.
 Use this for normal local scanning:
 
 ```bash
-yarn tui ~/Dev --preset rust
-yarn tui ~/Dev --preset node,gitignored --sort path
-yarn tui . --preset rust
+pnpm tui ~/Dev --preset rust
+pnpm tui ~/Dev --preset node,gitignored --sort path
+pnpm tui . --preset rust
 npx @space-lens/cli ~/Dev --preset rust
 ```
 
-`yarn tui` intentionally runs `bun apps/tui/src/cli.ts` from the current working
+`pnpm tui` intentionally runs `bun apps/tui/src/cli.ts` from the current working
 directory, so relative paths like `.` mean the directory where you invoked the
 command.
 
@@ -57,7 +57,7 @@ both the scan tree and cleanup plan.
 Useful while developing the TUI package itself:
 
 ```bash
-yarn workspace @space-lens/cli dev -- --preset rust .
+pnpm --filter @space-lens/cli dev -- --preset rust .
 ```
 
 This runs with `apps/tui` as the working directory, so `.` means `apps/tui`, not
@@ -77,7 +77,7 @@ Press `Ctrl+C` to exit the TUI.
 ## Build And Verify
 
 ```bash
-yarn workspace @space-lens/cli build
-yarn workspace @space-lens/cli test
-yarn workspace @space-lens/cli typecheck
+pnpm --filter @space-lens/cli build
+pnpm --filter @space-lens/cli test
+pnpm --filter @space-lens/cli typecheck
 ```

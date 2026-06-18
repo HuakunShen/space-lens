@@ -18,26 +18,30 @@ import type {
 function cleanupOptions(): ExecuteCleanupOptions {
   return {
     scanId: "scan-1",
-    entries: [{
-      id: "entry-1",
-      scanId: "scan-1",
-      nodeId: "node-1",
-      path: "/tmp/space-lens/old.log",
-      name: "old.log",
-      size: 2048,
-      addedAt: "2026-06-17T00:00:00.000Z",
-    }],
+    entries: [
+      {
+        id: "entry-1",
+        scanId: "scan-1",
+        nodeId: "node-1",
+        path: "/tmp/space-lens/old.log",
+        name: "old.log",
+        size: 2048,
+        addedAt: "2026-06-17T00:00:00.000Z",
+      },
+    ],
   };
 }
 
 function removalPlan(): RemovalPlan {
   return {
-    entries: [{
-      path: "/tmp/space-lens/old.log",
-      size: 2048,
-      reason: "manual",
-      preset: "collector",
-    }],
+    entries: [
+      {
+        path: "/tmp/space-lens/old.log",
+        size: 2048,
+        reason: "manual",
+        preset: "collector",
+      },
+    ],
     totalSize: 2048,
     errors: [],
   };
@@ -74,7 +78,11 @@ function fakeApi(plan: RemovalPlan = removalPlan()): SpaceLensAPI & {
     },
     async executeCleanup(options) {
       deleteCalls.push(options);
-      return { removed: plan.entries, bytesRemoved: plan.totalSize, errors: plan.errors };
+      return {
+        removed: plan.entries,
+        bytesRemoved: plan.totalSize,
+        errors: plan.errors,
+      };
     },
   };
 }

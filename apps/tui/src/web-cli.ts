@@ -107,7 +107,7 @@ function resolveStaticDir(): string {
   if (found) return found
 
   throw new Error(
-    `Unable to find built web assets. Run "yarn build:web" or pass --static-dir. Checked: ${candidates.join(', ')}`,
+    `Unable to find built web assets. Run "pnpm build:web" or pass --static-dir. Checked: ${candidates.join(', ')}`,
   )
 }
 

@@ -32,29 +32,35 @@ function startOptions(paths: string[]): StartScanOptions {
   };
 }
 
-function cleanupOptions(path = "/tmp/space-lens/old.log"): ExecuteCleanupOptions {
+function cleanupOptions(
+  path = "/tmp/space-lens/old.log",
+): ExecuteCleanupOptions {
   return {
     scanId: "scan-1",
-    entries: [{
-      id: "collector-1",
-      scanId: "scan-1",
-      nodeId: "node-1",
-      path,
-      name: "old.log",
-      size: 123,
-      addedAt: "2026-06-17T00:00:00.000Z",
-    }],
+    entries: [
+      {
+        id: "collector-1",
+        scanId: "scan-1",
+        nodeId: "node-1",
+        path,
+        name: "old.log",
+        size: 123,
+        addedAt: "2026-06-17T00:00:00.000Z",
+      },
+    ],
   };
 }
 
 function removalPlan(path = "/tmp/space-lens/old.log"): RemovalPlan {
   return {
-    entries: [{
-      path,
-      size: 123,
-      reason: "manual",
-      preset: "collector",
-    }],
+    entries: [
+      {
+        path,
+        size: 123,
+        reason: "manual",
+        preset: "collector",
+      },
+    ],
     totalSize: 123,
     errors: [],
   };
@@ -113,31 +119,48 @@ function createFakeBackend(plan = removalPlan()): SpaceLensAPI & {
     },
     async executeCleanup(options) {
       nativeDeleteCalls.push(options);
-      return { removed: plan.entries, bytesRemoved: plan.totalSize, errors: plan.errors };
+      return {
+        removed: plan.entries,
+        bytesRemoved: plan.totalSize,
+        errors: plan.errors,
+      };
     },
   };
 }
 
-function createHarness(options: {
-  readAllowed?: boolean;
-  writeAllowed?: boolean;
-  confirmDelete?: boolean;
-  plan?: RemovalPlan;
-} = {}): {
+function createHarness(
+  options: {
+    readAllowed?: boolean;
+    writeAllowed?: boolean;
+    confirmDelete?: boolean;
+    plan?: RemovalPlan;
+  } = {},
+): {
   api: SpaceLensAPI;
   backend: ReturnType<typeof createFakeBackend>;
   spawnedReadRoots: readonly string[][];
   destroyedBackends: readonly string[];
   permissionChecks: readonly { permissionType: string; scopePattern: string }[];
-  permissionRequests: readonly { permissionType: string; scopePattern: string; reason?: string }[];
+  permissionRequests: readonly {
+    permissionType: string;
+    scopePattern: string;
+    reason?: string;
+  }[];
   trashCalls: readonly (string | string[])[];
   pathCalls: readonly string[];
 } {
   const backend = createFakeBackend(options.plan);
   const spawnedReadRoots: string[][] = [];
   const destroyedBackends: string[] = [];
-  const permissionChecks: Array<{ permissionType: string; scopePattern: string }> = [];
-  const permissionRequests: Array<{ permissionType: string; scopePattern: string; reason?: string }> = [];
+  const permissionChecks: Array<{
+    permissionType: string;
+    scopePattern: string;
+  }> = [];
+  const permissionRequests: Array<{
+    permissionType: string;
+    scopePattern: string;
+    reason?: string;
+  }> = [];
   const trashCalls: Array<string | string[]> = [];
   const pathCalls: string[] = [];
   let backendCounter = 0;
@@ -175,7 +198,11 @@ function createHarness(options: {
         return false;
       },
       async request(permissionType, scopePattern, reason) {
-        permissionRequests.push({ permissionType, scopePattern, ...(reason ? { reason } : {}) });
+        permissionRequests.push({
+          permissionType,
+          scopePattern,
+          ...(reason ? { reason } : {}),
+        });
         return true;
       },
     },
@@ -196,7 +223,9 @@ function createHarness(options: {
     async getHostRuntime() {
       return { host };
     },
-    async createBackendRuntime(fsReadAllow = []): Promise<KunkunClientBackendRuntime> {
+    async createBackendRuntime(
+      fsReadAllow = [],
+    ): Promise<KunkunClientBackendRuntime> {
       const backendId = `backend-${++backendCounter}`;
       spawnedReadRoots.push([...fsReadAllow]);
       return {
@@ -260,14 +289,21 @@ describe("createKunkunClientWithRuntime", () => {
       },
     ]);
 
-    expect(harness.pathCalls).toEqual(["homeDir", "desktopDir", "downloadDir", "documentDir"]);
+    expect(harness.pathCalls).toEqual([
+      "homeDir",
+      "desktopDir",
+      "downloadDir",
+      "documentDir",
+    ]);
     expect(harness.spawnedReadRoots).toEqual([]);
   });
 
   test("requests fs-read before scan and passes selected roots to backend spawn", async () => {
     const harness = createHarness({ readAllowed: false });
 
-    await expect(harness.api.startScan(startOptions(["/tmp/space-lens"]))).resolves.toMatchObject({
+    await expect(
+      harness.api.startScan(startOptions(["/tmp/space-lens"])),
+    ).resolves.toMatchObject({
       scanId: "scan-1",
     });
 
@@ -301,11 +337,13 @@ describe("createKunkunClientWithRuntime", () => {
   test("cancels cleanup without host trash or backend native delete when user declines", async () => {
     const harness = createHarness({ confirmDelete: false });
 
-    await expect(harness.api.executeCleanup(cleanupOptions())).resolves.toEqual({
-      removed: [],
-      bytesRemoved: 0,
-      errors: ["Deletion cancelled."],
-    });
+    await expect(harness.api.executeCleanup(cleanupOptions())).resolves.toEqual(
+      {
+        removed: [],
+        bytesRemoved: 0,
+        errors: ["Deletion cancelled."],
+      },
+    );
 
     expect(harness.spawnedReadRoots).toEqual([["/tmp/space-lens"]]);
     expect(harness.trashCalls).toEqual([]);
@@ -315,11 +353,13 @@ describe("createKunkunClientWithRuntime", () => {
   test("requests fs-write and deletes through host trash, not backend native delete", async () => {
     const harness = createHarness({ writeAllowed: false });
 
-    await expect(harness.api.executeCleanup(cleanupOptions())).resolves.toEqual({
-      removed: removalPlan().entries,
-      bytesRemoved: 123,
-      errors: [],
-    });
+    await expect(harness.api.executeCleanup(cleanupOptions())).resolves.toEqual(
+      {
+        removed: removalPlan().entries,
+        bytesRemoved: 123,
+        errors: [],
+      },
+    );
 
     expect(harness.permissionChecks).toContainEqual({
       permissionType: "fs-write",
@@ -338,7 +378,11 @@ describe("createKunkunClientWithRuntime", () => {
     const harness = createHarness({ readAllowed: true, writeAllowed: true });
 
     await harness.api.startScan(startOptions(["/tmp/space-lens"]));
-    await expect(harness.api.executeCleanup(cleanupOptions("/tmp/space-lens/nested/old.log"))).resolves.toEqual({
+    await expect(
+      harness.api.executeCleanup(
+        cleanupOptions("/tmp/space-lens/nested/old.log"),
+      ),
+    ).resolves.toEqual({
       removed: removalPlan().entries,
       bytesRemoved: 123,
       errors: [],
@@ -346,13 +390,17 @@ describe("createKunkunClientWithRuntime", () => {
 
     expect(harness.spawnedReadRoots).toEqual([["/tmp/space-lens"]]);
     expect(harness.destroyedBackends).toEqual([]);
-    expect(harness.backend.cleanupPlans[0]?.entries[0]?.path).toBe("/tmp/space-lens/nested/old.log");
+    expect(harness.backend.cleanupPlans[0]?.entries[0]?.path).toBe(
+      "/tmp/space-lens/nested/old.log",
+    );
   });
 
   test("respawns with scan roots when cleanup follows a destroyed backend", async () => {
     const harness = createHarness({ readAllowed: true, writeAllowed: true });
 
-    const firstScan = await harness.api.startScan(startOptions(["/tmp/space-lens"]));
+    const firstScan = await harness.api.startScan(
+      startOptions(["/tmp/space-lens"]),
+    );
     await harness.api.startScan(startOptions(["/tmp/other"]));
     await expect(
       harness.api.planCleanup({

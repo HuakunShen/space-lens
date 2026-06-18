@@ -6,8 +6,8 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "yarn workspace @space-lens/cli build && yarn workspace web build && bun build src/backend.ts --target=node --format=esm --outfile=dist/backend.js --external space-lens && node scripts/copy-web-assets.mjs",
-    "build:backend": "yarn workspace @space-lens/cli build && bun build src/backend.ts --target=node --format=esm --outfile=dist/backend.js --external space-lens && node scripts/copy-web-assets.mjs --scanner-only",
+    "build": "pnpm --filter @space-lens/cli build && pnpm --filter web build && bun build src/backend.ts --target=node --format=esm --outfile=dist/backend.js --external space-lens && node scripts/copy-web-assets.mjs",
+    "build:backend": "pnpm --filter @space-lens/cli build && bun build src/backend.ts --target=node --format=esm --outfile=dist/backend.js --external space-lens && node scripts/copy-web-assets.mjs --scanner-only",
     "check": "tsc --noEmit",
     "test": "bun test tests/*.test.ts"
   },

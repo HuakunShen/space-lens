@@ -73,9 +73,7 @@
       scanTargets = await client.api.getScanTargets();
     } catch (cause) {
       error =
-        cause instanceof Error
-          ? cause.message
-          : "Unable to load scan targets";
+        cause instanceof Error ? cause.message : "Unable to load scan targets";
     }
   }
 

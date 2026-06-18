@@ -57,7 +57,7 @@
     "effect": "^3.21.3",
     "hono": "^4.12.25",
     "kkrpc": "2.0.0",
-    "space-lens": "^0.2.0",
+    "space-lens": "workspace:^",
     "web-tree-sitter": "0.25.10",
     "ws": "^8.21.0"
   },

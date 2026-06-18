@@ -160,7 +160,10 @@
                   >
                     Folder path
                   </span>
-                  <Input bind:value={customPath} placeholder="/path/to/folder" />
+                  <Input
+                    bind:value={customPath}
+                    placeholder="/path/to/folder"
+                  />
                 </label>
                 <label class="grid gap-1.5">
                   <span

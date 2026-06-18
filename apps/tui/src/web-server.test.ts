@@ -119,10 +119,7 @@ test('web server exposes scan APIs through kkrpc websocket', async () => {
     const appUrl = new URL(running.appUrl)
     assert.equal(appUrl.origin, running.url)
     assert.equal(appUrl.searchParams.get('spaceLensRpc'), running.rpcUrl)
-    const channel = new RPCChannel<object, RpcAPI>(
-      webSocketClientTransport({ url: running.rpcUrl }),
-      { timeout: 500 },
-    )
+    const channel = new RPCChannel<object, RpcAPI>(webSocketClientTransport({ url: running.rpcUrl }), { timeout: 500 })
     const api = channel.getAPI()
 
     try {
@@ -281,10 +278,7 @@ test('web server denies cleanup execution unless explicitly enabled', async () =
       hostname: '127.0.0.1',
     })
     await once(running.server, 'listening')
-    const channel = new RPCChannel<object, RpcAPI>(
-      webSocketClientTransport({ url: running.rpcUrl }),
-      { timeout: 500 },
-    )
+    const channel = new RPCChannel<object, RpcAPI>(webSocketClientTransport({ url: running.rpcUrl }), { timeout: 500 })
     const api = channel.getAPI()
 
     try {
@@ -328,10 +322,7 @@ test('web server deletes manually collected paths', async () => {
       allowCleanupExecute: true,
     })
     await once(running.server, 'listening')
-    const channel = new RPCChannel<object, RpcAPI>(
-      webSocketClientTransport({ url: running.rpcUrl }),
-      { timeout: 500 },
-    )
+    const channel = new RPCChannel<object, RpcAPI>(webSocketClientTransport({ url: running.rpcUrl }), { timeout: 500 })
     const api = channel.getAPI()
 
     try {
@@ -386,10 +377,7 @@ test('web server starts scans in the background and reports progress status', as
       },
     })
     await once(running.server, 'listening')
-    const channel = new RPCChannel<object, RpcAPI>(
-      webSocketClientTransport({ url: running.rpcUrl }),
-      { timeout: 500 },
-    )
+    const channel = new RPCChannel<object, RpcAPI>(webSocketClientTransport({ url: running.rpcUrl }), { timeout: 500 })
     const api = channel.getAPI()
 
     try {
@@ -437,18 +425,22 @@ test('web server starts scans in the background and reports progress status', as
   }
 })
 
-test('web server returns startScan before synchronous scanner work begins', async () => {
+test('web server returns startScan before scanner work completes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'space-lens-web-sync-scan-'))
 
   try {
-    let scanStarted = false
+    let releaseScan: (() => void) | undefined
+    let scanCompleted = false
     const running = startWebServer({
       apiOnly: true,
       staticDir: root,
       port: 0,
       hostname: '127.0.0.1',
-      loadData: () => {
-        scanStarted = true
+      loadData: async () => {
+        await new Promise<void>((resolve) => {
+          releaseScan = resolve
+        })
+        scanCompleted = true
         return {
           scanTrees: [
             {
@@ -470,10 +462,7 @@ test('web server returns startScan before synchronous scanner work begins', asyn
       },
     })
     await once(running.server, 'listening')
-    const channel = new RPCChannel<object, RpcAPI>(
-      webSocketClientTransport({ url: running.rpcUrl }),
-      { timeout: 500 },
-    )
+    const channel = new RPCChannel<object, RpcAPI>(webSocketClientTransport({ url: running.rpcUrl }), { timeout: 500 })
     const api = channel.getAPI()
 
     try {
@@ -486,12 +475,14 @@ test('web server returns startScan before synchronous scanner work begins', asyn
         maxChildrenPerNode: 10,
       })
 
-      assert.equal(scanStarted, false)
+      assert.equal(scanCompleted, false)
       const initialStatus = await api.getScanStatus(scan.scanId)
       assert.equal(initialStatus.state, 'scanning')
 
+      await waitForCondition(() => releaseScan !== undefined, 'Scan did not start')
+      releaseScan?.()
       await waitForRpcReady(api, scan.scanId)
-      assert.equal(scanStarted, true)
+      assert.equal(scanCompleted, true)
     } finally {
       channel.destroy()
       running.server.close()
@@ -518,10 +509,7 @@ test('web server returns bounded tree slices and paged child lists', async () =>
       hostname: '127.0.0.1',
     })
     await once(running.server, 'listening')
-    const channel = new RPCChannel<object, RpcAPI>(
-      webSocketClientTransport({ url: running.rpcUrl }),
-      { timeout: 500 },
-    )
+    const channel = new RPCChannel<object, RpcAPI>(webSocketClientTransport({ url: running.rpcUrl }), { timeout: 500 })
     const api = channel.getAPI()
 
     try {
@@ -583,6 +571,14 @@ async function waitForRpcReady(api: RpcAPI, scanId: string): Promise<ScanStatusR
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
   throw new Error(`Scan ${scanId} did not become ready`)
+}
+
+async function waitForCondition(predicate: () => boolean, message: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error(message)
 }
 
 function withTimeout<T>(promise: Promise<T>, ms = 500): Promise<T> {

@@ -2,28 +2,28 @@
 
 ## Monorepo layout
 
-| Path | Type | Published as | Tech |
-|------|------|-------------|------|
-| `packages/space-lens/` | Rust library | — | scanner + cleanup core |
-| `packages/node/` | NAPI-RS binding | `space-lens` | napi-rs, Rust → Node.js |
-| `apps/cli/` | Rust CLI | — | clap, uses `space-lens` crate |
-| `apps/tui/` | Terminal TUI | `@space-lens/cli` | Effect, OpenTUI, TypeScript |
+| Path                   | Type            | Published as      | Tech                          |
+| ---------------------- | --------------- | ----------------- | ----------------------------- |
+| `packages/space-lens/` | Rust library    | —                 | scanner + cleanup core        |
+| `packages/node/`       | NAPI-RS binding | `space-lens`      | napi-rs, Rust → Node.js       |
+| `apps/cli/`            | Rust CLI        | —                 | clap, uses `space-lens` crate |
+| `apps/tui/`            | Terminal TUI    | `@space-lens/cli` | Effect, OpenTUI, TypeScript   |
 
-Workspace: Yarn 4 (`nodeLinker: node-modules`) + Cargo workspace (resolver 2).
+Workspace: pnpm workspace + Cargo workspace (resolver 2).
 
 ## Development commands
 
 ```bash
-yarn install                    # install everything
-yarn build:debug                # build debug NAPI bindings (needed before local test)
-yarn build:node                 # build release NAPI bindings
-yarn build:tui                  # bundle TUI via tsdown
-yarn test                       # cargo test + ava + node:test
-yarn typecheck                  # run-p typecheck:node typecheck:tui
-yarn lint                       # oxlint (node) + tsc --noEmit (tui)
-yarn format                     # prettier + cargo fmt + taplo format
-yarn bench                      # benchmark CLI (requires native binding)
-yarn tui                        # bun apps/tui/src/cli.ts
+pnpm install                    # install everything
+pnpm build:debug                # build debug NAPI bindings (needed before local test)
+pnpm build:node                 # build release NAPI bindings
+pnpm build:tui                  # bundle TUI via tsdown
+pnpm test                       # cargo test + ava + node:test
+pnpm typecheck                  # run-p typecheck:node typecheck:tui
+pnpm lint                       # oxlint (node) + tsc --noEmit (tui)
+pnpm format                     # prettier + cargo fmt + taplo format
+pnpm bench                      # benchmark CLI (requires native binding)
+pnpm tui                        # bun apps/tui/src/cli.ts
 cargo test --workspace          # Rust tests only
 ```
 
@@ -33,12 +33,12 @@ cargo test --workspace          # Rust tests only
 - **`@space-lens/cli` (apps/tui)**: Node.js built-in `node:test`. Run with `tsx`.
 - **Rust**: `cargo test --workspace`.
 
-Run focused: `yarn workspace space-lens test`, `yarn workspace @space-lens/cli test`.
+Run focused: `pnpm --filter space-lens test`, `pnpm --filter @space-lens/cli test`.
 
 ## Key gotchas
 
-1. **Build NAPI bindings first** — `yarn build:debug` before testing or benchmarking locally.
-2. **Bun required for TUI** — OpenTUI 0.4.x needs Bun's native FFI. `yarn tui` always uses `bun`.
+1. **Build NAPI bindings first** — `pnpm build:debug` before testing or benchmarking locally.
+2. **Bun required for TUI** — OpenTUI 0.4.x needs Bun's native FFI. `pnpm tui` always uses `bun`.
 3. **AVA config is in `packages/node/package.json`** — includes `@oxc-node/core/register` for TS support (`--import` flag).
 4. **oxlint, not eslint** — pre-commit runs `lint-staged` (oxlint --fix + prettier + taplo format). Config is in `packages/node/package.json`'s `"lint-staged"` key.
 5. **Two TypeScript module configs** — `packages/node` uses `module: "Preserve"`/`"Bundler"`; `apps/tui` uses `"NodeNext"`/`"NodeNext"`.
