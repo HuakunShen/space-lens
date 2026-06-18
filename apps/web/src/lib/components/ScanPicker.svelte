@@ -16,6 +16,7 @@
 
   interface Props {
     targets: ScanTarget[];
+    mode: string;
     busy: boolean;
     error: string | null;
     status: ScanStatus | null;
@@ -23,8 +24,9 @@
     onCancel: () => void;
   }
 
-  let { targets, busy, error, status, onScan, onCancel }: Props = $props();
-  let selectedId = $state("macintosh-hd");
+  let { targets, mode, busy, error, status, onScan, onCancel }: Props =
+    $props();
+  let selectedId = $state("");
   let customPath = $state("");
   let secondPath = $state("");
   let selectedTarget = $derived(
@@ -36,6 +38,13 @@
       : [customPath, secondPath].map((path) => path.trim()).filter(Boolean),
   );
   let canScan = $derived(selectedPaths.length > 0 && !busy);
+  let isKunkunMode = $derived(mode === "kunkun");
+
+  $effect(() => {
+    if (selectedId === "custom") return;
+    if (targets.some((target) => target.id === selectedId)) return;
+    selectedId = targets[0]?.id ?? "";
+  });
 
   function scanSelected() {
     if (!canScan) return;
@@ -48,7 +57,10 @@
 >
   <section class="flex h-full min-h-0 w-full flex-col">
     <header
-      class="flex min-h-12 items-center justify-between gap-4 border-b px-4 py-2"
+      class={[
+        "flex min-h-12 items-center justify-between gap-4 border-b px-4 py-2 [-webkit-app-region:drag]",
+        isKunkunMode ? "pl-24" : "",
+      ]}
     >
       <div class="flex min-w-0 items-center gap-2.5">
         <div
@@ -62,7 +74,9 @@
           </h1>
         </div>
       </div>
-      <Badge variant="outline">Standalone HTTP</Badge>
+      <Badge variant="outline" class="[-webkit-app-region:no-drag]">
+        {mode}
+      </Badge>
     </header>
 
     <div class="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]">
@@ -146,7 +160,7 @@
                   >
                     Folder path
                   </span>
-                  <Input bind:value={customPath} placeholder="/Users/hk/Dev" />
+                  <Input bind:value={customPath} placeholder="/path/to/folder" />
                 </label>
                 <label class="grid gap-1.5">
                   <span
@@ -156,7 +170,7 @@
                   </span>
                   <Input
                     bind:value={secondPath}
-                    placeholder="/Volumes/Portable2TB/ExtDev"
+                    placeholder="/path/to/another-folder"
                   />
                 </label>
               </Card.Content>

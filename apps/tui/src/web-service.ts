@@ -1,3 +1,6 @@
+import { homedir } from 'node:os'
+import { basename } from 'node:path'
+
 import { executeCleanupEntries, loadSpaceLensDataWithProgress } from './scanner.js'
 import type { DirectoryNode } from './model.js'
 import type { LoadSpaceLensOptions, SpaceLensData } from './scanner.js'
@@ -7,6 +10,7 @@ import type {
   CleanupOutcome,
   CollectorEntry,
   GetChildrenRequest,
+  ScanTarget,
   ScanSession,
   ScanStatus,
   SpaceLensAPI,
@@ -43,10 +47,14 @@ export function createSpaceLensAPI(options: SpaceLensServiceOptions = {}): Space
   const loadData = options.loadData ?? loadSpaceLensDataWithProgress
 
   return {
+    async getScanTargets() {
+      return defaultScanTargets()
+    },
+
     async startScan(scanOptions) {
       const started = createPendingSession(scanOptions)
       sessions.set(started.session.scanId, started)
-      void runScan(started, scanOptions, loadData)
+      scheduleScan(started, scanOptions, loadData)
       return started.session
     },
 
@@ -158,6 +166,12 @@ function createPendingSession(options: StartScanOptions): ServerSession {
   }
 }
 
+function scheduleScan(session: ServerSession, options: StartScanOptions, loadData: LoadData): void {
+  setTimeout(() => {
+    void runScan(session, options, loadData)
+  }, 0)
+}
+
 async function runScan(session: ServerSession, options: StartScanOptions, loadData: LoadData): Promise<void> {
   const updateProgress = createProgressSampler(session)
 
@@ -229,6 +243,51 @@ function createProgressSampler(session: ServerSession): (event: ScanProgressEven
 function labelFromPaths(paths: string[]): string {
   if (paths.length === 1) return paths[0] || 'Selected Folder'
   return `${paths.length} selected folders`
+}
+
+function defaultScanTargets(): ScanTarget[] {
+  const home = homedir()
+  const cwd = process.cwd()
+  const targets: ScanTarget[] = [
+    {
+      id: 'root',
+      label: process.platform === 'win32' ? 'System Drive' : 'Root Volume',
+      path: process.platform === 'win32' ? cwd.slice(0, 3) : '/',
+      kind: 'volume',
+      description: process.platform === 'win32' ? cwd.slice(0, 3) : '/',
+      size: 0,
+    },
+    {
+      id: 'home',
+      label: 'Home',
+      path: home,
+      kind: 'folder',
+      description: home,
+      size: 0,
+    },
+  ]
+
+  if (cwd && cwd !== home && cwd !== targets[0]?.path) {
+    targets.push({
+      id: 'current',
+      label: basename(cwd) || 'Current Folder',
+      path: cwd,
+      kind: 'folder',
+      description: cwd,
+      size: 0,
+    })
+  }
+
+  return uniqueTargets(targets)
+}
+
+function uniqueTargets(targets: ScanTarget[]): ScanTarget[] {
+  const seen = new Set<string>()
+  return targets.filter((target) => {
+    if (seen.has(target.path)) return false
+    seen.add(target.path)
+    return true
+  })
 }
 
 function indexNode(node: DirectoryNode, id: string, parentId: string | null): IndexedNode {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { FolderSearch, PackageOpen, RotateCcw } from "@lucide/svelte";
   import BreadcrumbBar from "$lib/components/BreadcrumbBar.svelte";
   import ChildList from "$lib/components/ChildList.svelte";
@@ -37,38 +38,12 @@
   let hoveredId = $state<string | null>(null);
   let collectorOpen = $state(false);
   let collectorEntries = $state<CollectorEntry[]>([]);
+  let scanTargets = $state<ScanTarget[]>([]);
   let contextMenu = $state<{
     node: TreeNodeSummary;
     x: number;
     y: number;
   } | null>(null);
-
-  const scanTargets: ScanTarget[] = [
-    {
-      id: "macintosh-hd",
-      label: "Macintosh HD",
-      path: "/",
-      kind: "volume",
-      description: "Root volume",
-      size: 0,
-    },
-    {
-      id: "home",
-      label: "Home",
-      path: "/Users/hk",
-      kind: "folder",
-      description: "/Users/hk",
-      size: 0,
-    },
-    {
-      id: "dev",
-      label: "Dev",
-      path: "/Users/hk/Dev",
-      kind: "folder",
-      description: "/Users/hk/Dev",
-      size: 0,
-    },
-  ];
 
   let collectorTotal = $derived(
     collectorEntries.reduce((total, entry) => total + entry.size, 0),
@@ -79,6 +54,7 @@
   let breadcrumbs = $derived(slice?.ancestors ?? []);
   let currentChildren = $derived(childItems);
   let canLoadMoreChildren = $derived(childPageOffset < childPageTotal);
+  let isKunkunMode = $derived(client.mode === "kunkun");
   let hoverInfo = $derived(
     hoveredId && slice
       ? (findTreeNode(slice.tree, hoveredId) ??
@@ -87,6 +63,21 @@
       : null,
   );
   let chartInfo = $derived(hoverInfo ?? slice?.focusNode ?? null);
+
+  onMount(() => {
+    void loadScanTargets();
+  });
+
+  async function loadScanTargets() {
+    try {
+      scanTargets = await client.api.getScanTargets();
+    } catch (cause) {
+      error =
+        cause instanceof Error
+          ? cause.message
+          : "Unable to load scan targets";
+    }
+  }
 
   async function startScan(paths: string[]) {
     busy = true;
@@ -257,14 +248,6 @@
     deleting = true;
     error = null;
     try {
-      const plan = await client.api.planCleanup({
-        scanId: session.scanId,
-        entries: collectorEntries,
-      });
-      const confirmed = globalThis.window?.confirm(
-        `Delete ${plan.entries.length} selected items (${formatBytes(plan.totalSize)})?`,
-      );
-      if (!confirmed) return;
       const outcome = await client.api.executeCleanup({
         scanId: session.scanId,
         entries: collectorEntries,
@@ -327,6 +310,7 @@
 {#if !session || !slice}
   <ScanPicker
     targets={scanTargets}
+    mode={client.mode}
     {busy}
     {error}
     {status}
@@ -345,7 +329,12 @@
       contextMenu = null;
     }}
   >
-    <header class="border-b px-4 py-2">
+    <header
+      class={[
+        "border-b px-4 py-2 [-webkit-app-region:drag]",
+        isKunkunMode ? "pl-24" : "",
+      ]}
+    >
       <div class="flex min-h-8 items-center justify-between gap-4">
         <div class="flex min-w-0 items-center gap-3">
           <div
@@ -358,15 +347,17 @@
               <h1 class="truncate text-sm font-semibold">Space Lens</h1>
               <Badge variant="outline">{client.mode}</Badge>
             </div>
-            <BreadcrumbBar
-              items={breadcrumbs}
-              onSelect={openNode}
-              onBack={goBack}
-              canGoBack={breadcrumbs.length > 1}
-            />
+            <div class="[-webkit-app-region:no-drag]">
+              <BreadcrumbBar
+                items={breadcrumbs}
+                onSelect={openNode}
+                onBack={goBack}
+                canGoBack={breadcrumbs.length > 1}
+              />
+            </div>
           </div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 [-webkit-app-region:no-drag]">
           <Button
             variant="ghost"
             size="sm"

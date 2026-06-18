@@ -1,7 +1,14 @@
-import { executeCleanup, planCleanup, scanDirectory, scanDirectoryWithProgress } from 'space-lens'
+import * as spaceLens from 'space-lens'
 
 import type { CliOptions, DirectoryNode, PlanEntry, PlanLike } from './model.js'
-import type { ScanProgressEvent } from 'space-lens'
+import type { DirectoryScanOptions, ScanProgressEvent } from 'space-lens'
+
+const { executeCleanup, planCleanup, scanDirectory } = spaceLens
+
+type ProgressScanner = (
+  options: DirectoryScanOptions,
+  onProgress: (event: ScanProgressEvent) => void,
+) => Promise<DirectoryNode[]>
 
 export interface SpaceLensData {
   scanTrees: DirectoryNode[]
@@ -43,16 +50,20 @@ export async function loadSpaceLensDataWithProgress(
   options: LoadSpaceLensOptions,
   onProgress: (event: ScanProgressEvent) => void,
 ): Promise<SpaceLensData> {
-  const scanTrees = await scanDirectoryWithProgress(
-    {
-      directories: options.paths,
-      ignoreHidden: options.ignoreHidden,
-      fullPath: false,
-      respectGitignore: options.respectGitignore ?? true,
-      ignoredMode: options.ignoredMode ?? 'summarize',
-    },
-    onProgress,
-  )
+  const scanWithProgress = resolveProgressScanner()
+  if (!scanWithProgress) {
+    throw new Error(
+      'The bundled Space Lens native scanner does not export scanDirectoryWithProgress. Rebuild the native scanner artifact before scanning in Kunkun.',
+    )
+  }
+  const scanOptions = {
+    directories: options.paths,
+    ignoreHidden: options.ignoreHidden,
+    fullPath: false,
+    respectGitignore: options.respectGitignore ?? true,
+    ignoredMode: options.ignoredMode ?? 'summarize',
+  }
+  const scanTrees = await scanWithProgress(scanOptions, onProgress)
 
   return {
     scanTrees,
@@ -72,4 +83,9 @@ export function executeCleanupEntries(entries: PlanEntry[]): CleanupOutcome {
     totalSize,
     errors: [],
   })
+}
+
+function resolveProgressScanner(): ProgressScanner | null {
+  const candidate = (spaceLens as Partial<{ scanDirectoryWithProgress: unknown }>).scanDirectoryWithProgress
+  return typeof candidate === 'function' ? (candidate as ProgressScanner) : null
 }

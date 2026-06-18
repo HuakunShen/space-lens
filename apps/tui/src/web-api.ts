@@ -17,6 +17,16 @@ export interface ScanSession {
   label: string
 }
 
+export interface ScanTarget {
+  id: string
+  label: string
+  path: string
+  kind: 'volume' | 'folder' | 'multi-folder'
+  description: string
+  size: number
+  used?: number
+}
+
 export interface TreeNodeSummary {
   id: string
   name: string
@@ -128,6 +138,7 @@ export interface CleanupOutcome {
 }
 
 export interface SpaceLensAPI {
+  getScanTargets(): Promise<ScanTarget[]>
   startScan(options: StartScanOptions): Promise<ScanSession>
   getNode(request: GetNodeRequest): Promise<TreeSlice>
   getChildren(request: GetChildrenRequest): Promise<ChildrenPage>

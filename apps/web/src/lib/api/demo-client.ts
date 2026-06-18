@@ -6,6 +6,7 @@ import type {
   GetChildrenRequest,
   GetNodeRequest,
   RemovalPlan,
+  ScanTarget,
   ScanSession,
   ScanStatus,
   SpaceLensAPI,
@@ -38,6 +39,10 @@ export function createDemoClient(): SpaceLensAPI {
   const sessions = new Map<string, DemoSession>();
 
   return {
+    async getScanTargets() {
+      return demoScanTargets();
+    },
+
     async startScan(options) {
       const demo = createDemoSession(options);
       sessions.set(demo.session.scanId, demo);
@@ -137,13 +142,42 @@ function createRoot(paths: string[]): DemoNode {
     });
   }
 
-  const input = paths[0] ?? "/Users/hk/Dev";
+  const input = paths[0] ?? "/Demo/Projects";
   if (input === "/" || input.toLowerCase().includes("portable")) {
     return attachParents(createVolumeTree());
   }
   return attachParents(
     createFolderTree("dev", basename(input) || "Dev", input, 0, 265.6 * GiB),
   );
+}
+
+function demoScanTargets(): ScanTarget[] {
+  return [
+    {
+      id: "demo-volume",
+      label: "Demo Volume",
+      path: "/Demo",
+      kind: "volume",
+      description: "/Demo",
+      size: 0,
+    },
+    {
+      id: "demo-projects",
+      label: "Projects",
+      path: "/Demo/Projects",
+      kind: "folder",
+      description: "/Demo/Projects",
+      size: 0,
+    },
+    {
+      id: "demo-archives",
+      label: "Archives",
+      path: "/Demo/Archives",
+      kind: "folder",
+      description: "/Demo/Archives",
+      size: 0,
+    },
+  ];
 }
 
 function createVolumeTree(): DemoNode {

@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { startWebServer } from './web-server.js'
+import type { RunningWebServer } from './web-server.js'
 
 interface WebCliOptions {
   hostname: string
@@ -63,7 +64,7 @@ export function parseWebCliArgs(argv: readonly string[]): WebCliOptions {
   return options
 }
 
-export function runWebCli(argv: readonly string[] = process.argv): void {
+export function runWebCli(argv: readonly string[] = process.argv): RunningWebServer | undefined {
   try {
     const options = parseWebCliArgs(argv)
     const running = startWebServer(options)
@@ -74,18 +75,20 @@ export function runWebCli(argv: readonly string[] = process.argv): void {
     })
     process.stdout.write(`Space Lens web listening on ${running.url}\n`)
     if (options.apiOnly) {
-      process.stdout.write(`Serving KKRPC WebSocket API from ${running.url.replace(/^http/, 'ws')}/rpc\n`)
-      process.stdout.write(`Serving compatibility JSON API from ${running.url}/api\n`)
+      process.stdout.write(`Serving authenticated KKRPC WebSocket API from ${running.rpcUrl}\n`)
     } else {
+      process.stdout.write(`Open Space Lens: ${running.appUrl}\n`)
       process.stdout.write(`Serving static assets from ${options.staticDir}\n`)
     }
     if (options.open) {
       process.stdout.write('Open the URL above in your browser.\n')
     }
+    return running
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     process.stderr.write(`spacelens-web: ${message}\n`)
     process.exitCode = 1
+    return undefined
   }
 }
 

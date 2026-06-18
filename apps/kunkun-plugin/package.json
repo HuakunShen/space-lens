@@ -1,0 +1,89 @@
+{
+  "$schema": "../../../kunkun/packages/api/manifest-schema.json",
+  "name": "@space-lens/kunkun-plugin",
+  "private": true,
+  "version": "0.2.1",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "yarn workspace @space-lens/cli build && yarn workspace web build && bun build src/backend.ts --target=node --format=esm --outfile=dist/backend.js --external space-lens && node scripts/copy-web-assets.mjs",
+    "build:backend": "yarn workspace @space-lens/cli build && bun build src/backend.ts --target=node --format=esm --outfile=dist/backend.js --external space-lens && node scripts/copy-web-assets.mjs --scanner-only",
+    "check": "tsc --noEmit",
+    "test": "bun test tests/*.test.ts"
+  },
+  "kunkun": {
+    "identifier": "com.space-lens.app",
+    "name": "Space Lens",
+    "shortDescription": "Visual disk usage scanner powered by Space Lens",
+    "longDescription": "Scan folders with Space Lens and inspect usage through the same Svelte UI used by standalone browser mode.",
+    "icon": {
+      "type": "iconify",
+      "value": "mdi:chart-donut",
+      "invert": true
+    },
+    "commands": [
+      {
+        "name": "space-lens",
+        "title": "Space Lens",
+        "description": "Open Space Lens as a Kunkun custom view",
+        "mode": "custom-view",
+        "main": "/",
+        "dist": "dist",
+        "devMain": "http://127.0.0.1:5173?spaceLensMode=kunkun",
+        "icon": {
+          "type": "iconify",
+          "value": "mdi:chart-donut",
+          "invert": true
+        },
+        "window": {
+          "title": "Space Lens",
+          "width": 1180,
+          "height": 760,
+          "transparent": true,
+          "titleBarStyle": "hidden",
+          "vibrancy": "sidebar",
+          "visualEffectState": "followWindow",
+          "hasShadow": true,
+          "resizable": true,
+          "trafficLightPosition": {
+            "x": 20,
+            "y": 12
+          }
+        }
+      }
+    ],
+    "permissions": [
+      "notifications",
+      "path",
+      "dialog",
+      "system-finder",
+      "system-trash",
+      "shell",
+      {
+        "permission": "fs-read",
+        "allow": [
+          "$HOME/**"
+        ]
+      },
+      {
+        "permission": "fs-write",
+        "allow": [
+          "$HOME/**"
+        ]
+      }
+    ],
+    "categories": [
+      "developer-tools",
+      "system"
+    ]
+  },
+  "dependencies": {
+    "@space-lens/cli": "workspace:*",
+    "space-lens": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "playwright": "^1.60.0",
+    "typescript": "^6.0.3"
+  }
+}

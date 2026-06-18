@@ -5,6 +5,7 @@
   "workspaces": [
     "packages/node",
     "apps/tui",
+    "apps/kunkun-plugin",
     "apps/web"
   ],
   "scripts": {

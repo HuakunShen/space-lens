@@ -255,15 +255,16 @@ standalone NPX/server mode
   lives in apps/tui
   serves static apps/web build output or packaged static assets
   exposes SpaceLensAPI over KKRPC WebSocket at /rpc
+  prints a clickable app URL containing an authenticated RPC URL
+  serves only a token-gated boot JSON plus /rpc for privileged APIs
   uses Hono for the Node-compatible HTTP/static host
   browser connects with kkrpc/ws client
 
 Kunkun plugin mode
-  deferred until after NPX KKRPC mode works
-  Kunkun custom view should eventually load the same SPA
-  frontend will eventually call spawnBackend()
-  backend should expose the same SpaceLensAPI contract
-  transport will eventually be Kunkun backend relay/stdin-stdout via KKRPC
+  loads the same SPA as a custom view
+  frontend calls a Kunkun host-provided kkrpc channel
+  backend exposes the same SpaceLensAPI contract with exposeBackend()
+  transport is Kunkun backend relay/stdin-stdout via kkrpc
 
 backend implementation
   wraps the existing space-lens NAPI package
@@ -360,23 +361,11 @@ NPX server recommendation:
 - Use `ws` with `WebSocketServer({ noServer: true })` and pass it to `serve({ websocket: { server } })` so `upgradeWebSocket()` works in Node.
 - Use `@hono/node-server/serve-static` to serve the built static SPA.
 - Expose the canonical business API at `GET /rpc` with `createHonoWebSocketHandler({ expose })`.
-- JSON endpoints under `/api/*` may remain as compatibility/debug wrappers, but the web frontend should not use hand-written fetch as its primary transport.
+- Do not expose legacy REST or JSON endpoints under `/api/*`. The standalone privileged API is kkrpc-over-WebSocket only.
+- Generate a high-entropy per-run RPC token. The CLI should print a clickable URL that includes the authenticated `spaceLensRpc=ws://.../rpc?token=...` parameter.
+- Reject `/rpc` upgrades without the RPC token, with a wrong `Host`, or with an `Origin` that does not match the app origin.
+- Keep destructive capabilities such as cleanup execution disabled unless the CLI explicitly starts in a delete-enabled mode.
 - Because the SPA uses hash routing, the server only needs to serve the root document and static assets; deep app state lives after `#`.
-
-Compatibility HTTP endpoints:
-
-```text
-POST /api/scans
-GET  /api/scans/:scanId/status
-POST /api/scans/:scanId/node
-POST /api/scans/:scanId/children
-POST /api/cleanup/plan
-POST /api/cleanup/execute
-POST /api/host/show-in-file-manager
-POST /api/host/open-in-terminal
-```
-
-Compatibility HTTP should preserve the exact `SpaceLensAPI` request/response DTOs so debug callers do not see a different model. The UI should call `SpaceLensAPI` through demo, KKRPC WebSocket, or future Kunkun transports.
 
 KKRPC import strategy:
 
@@ -393,7 +382,7 @@ Potential runtime mode detection:
 - Kunkun mode if Electron/Kunkun IPC is present.
 - KKRPC mode by default in dev and static-host mode.
 - Explicit KKRPC URL with `?spaceLensRpc=ws://127.0.0.1:PORT/rpc` or a base URL such as `?spaceLensRpc=http://127.0.0.1:PORT`.
-- `?spaceLensApi=...` is accepted only as a backward-compatible alias and should resolve to `/rpc`, not `/api`.
+- `?spaceLensApi=...` may be accepted only as a backward-compatible query alias and must resolve to `/rpc`, not `/api`.
 - Demo mode only for local UI development when no backend exists.
 
 ### Proposed `SpaceLensAPI`
@@ -702,7 +691,8 @@ When browser verification is available:
 - Use Hono, preferably with `@hono/node-server`.
 - Expose `SpaceLensAPI` through KKRPC WebSocket at `/rpc`.
 - Use `ws` with `@hono/node-server` so WebSocket upgrade works in Node.
-- Keep `/api/*` JSON endpoints only as compatibility/debug wrappers if useful.
+- Remove legacy `/api/*` JSON endpoints; privileged standalone APIs are kkrpc-only.
+- Print a clickable browser URL containing the authenticated WebSocket RPC token.
 - Wrap `space-lens` NAPI scanning.
 - Slice full backend scan data before sending to browser.
 

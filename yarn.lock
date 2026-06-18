@@ -2415,6 +2415,18 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@space-lens/kunkun-plugin@workspace:apps/kunkun-plugin":
+  version: 0.0.0-use.local
+  resolution: "@space-lens/kunkun-plugin@workspace:apps/kunkun-plugin"
+  dependencies:
+    "@space-lens/cli": "workspace:*"
+    "@types/node": "npm:^25.9.3"
+    playwright: "npm:^1.60.0"
+    space-lens: "workspace:*"
+    typescript: "npm:^6.0.3"
+  languageName: unknown
+  linkType: soft
+
 "@standard-schema/spec@npm:^1.0.0":
   version: 1.1.0
   resolution: "@standard-schema/spec@npm:1.1.0"
@@ -6206,7 +6218,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"space-lens@npm:^0.2.0, space-lens@workspace:packages/node":
+"space-lens@npm:^0.2.0, space-lens@workspace:*, space-lens@workspace:packages/node":
   version: 0.0.0-use.local
   resolution: "space-lens@workspace:packages/node"
   dependencies:
