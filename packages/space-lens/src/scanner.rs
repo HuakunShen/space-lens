@@ -52,6 +52,20 @@ struct ProgressState {
   callback: Option<ProgressCallback>,
 }
 
+struct ScanContext<'a> {
+  options: &'a ScanOptions,
+  seen_inodes: &'a SeenInodes,
+  progress: &'a ProgressState,
+}
+
+#[derive(Clone, Copy)]
+struct ScanPathState<'a> {
+  depth: u32,
+  ignore_stack: &'a [Arc<Gitignore>],
+  ignored: bool,
+  collapsed: bool,
+}
+
 impl ProgressState {
   fn new(callback: Option<ProgressCallback>) -> Self {
     Self {
@@ -89,22 +103,16 @@ pub fn scan_directory_with_progress(
 fn scan_directory_inner(options: ScanOptions, progress: Option<ProgressCallback>) -> Vec<ScanNode> {
   let seen_inodes = Arc::new(Mutex::new(HashSet::new()));
   let progress = Arc::new(ProgressState::new(progress));
+  let context = ScanContext {
+    options: &options,
+    seen_inodes: &seen_inodes,
+    progress: &progress,
+  };
 
   options
     .directories
     .iter()
-    .filter_map(|directory| {
-      scan_path(
-        directory,
-        0,
-        &[],
-        false,
-        false,
-        &options,
-        &seen_inodes,
-        &progress,
-      )
-    })
+    .filter_map(|directory| scan_path(directory, ScanPathState::root(), &context))
     .collect()
 }
 
@@ -113,48 +121,50 @@ pub fn measure_path(path: &Path) -> u64 {
   summarize_path(path, &seen_inodes)
 }
 
-fn scan_path(
-  path: &Path,
-  depth: u32,
-  ignore_stack: &[Arc<Gitignore>],
-  ignored: bool,
-  collapsed: bool,
-  options: &ScanOptions,
-  seen_inodes: &SeenInodes,
-  progress: &ProgressState,
-) -> Option<ScanNode> {
+impl<'a> ScanPathState<'a> {
+  fn root() -> Self {
+    Self {
+      depth: 0,
+      ignore_stack: &[],
+      ignored: false,
+      collapsed: false,
+    }
+  }
+}
+
+fn scan_path(path: &Path, state: ScanPathState<'_>, context: &ScanContext<'_>) -> Option<ScanNode> {
   let metadata = std::fs::symlink_metadata(path).ok()?;
-  let own_size = unique_allocated_size(path, &metadata, seen_inodes)?;
-  progress.record(path, own_size);
+  let own_size = unique_allocated_size(path, &metadata, context.seen_inodes)?;
+  context.progress.record(path, own_size);
   let is_dir = metadata.is_dir();
 
   if !is_dir {
     return Some(ScanNode {
-      name: display_name(path, options.full_path),
+      name: display_name(path, context.options.full_path),
       path: path.to_path_buf(),
       size: own_size,
       children: vec![],
-      depth,
-      ignored,
-      collapsed,
+      depth: state.depth,
+      ignored: state.ignored,
+      collapsed: state.collapsed,
     });
   }
 
-  let current_stack = if options.respect_gitignore && !collapsed {
-    append_gitignore(path, ignore_stack)
+  let current_stack = if context.options.respect_gitignore && !state.collapsed {
+    append_gitignore(path, state.ignore_stack)
   } else {
-    ignore_stack.to_vec()
+    state.ignore_stack.to_vec()
   };
 
-  if collapsed {
+  if state.collapsed {
     return Some(ScanNode {
-      name: display_name(path, options.full_path),
+      name: display_name(path, context.options.full_path),
       path: path.to_path_buf(),
-      size: own_size + summarize_dir_children(path, seen_inodes, progress),
+      size: own_size + summarize_dir_children(path, context.seen_inodes, context.progress),
       children: vec![],
-      depth,
-      ignored,
-      collapsed,
+      depth: state.depth,
+      ignored: state.ignored,
+      collapsed: state.collapsed,
     });
   }
 
@@ -167,28 +177,32 @@ fn scan_path(
         let file_type = entry.file_type().ok()?;
         let is_entry_dir = file_type.is_dir();
 
-        if options.ignore_hidden && is_hidden(&entry_path) {
+        if context.options.ignore_hidden && is_hidden(&entry_path) {
           return None;
         }
 
-        let is_ignored =
-          options.respect_gitignore && is_gitignored(&entry_path, is_entry_dir, &current_stack);
-        if is_ignored && options.ignored_mode == IgnoredMode::Exclude {
+        let is_ignored = context.options.respect_gitignore
+          && is_gitignored(&entry_path, is_entry_dir, &current_stack);
+        if is_ignored && context.options.ignored_mode == IgnoredMode::Exclude {
           return None;
         }
 
         let collapse_child =
-          is_ignored && options.ignored_mode == IgnoredMode::Summarize && is_entry_dir;
+          is_ignored && context.options.ignored_mode == IgnoredMode::Summarize && is_entry_dir;
 
         scan_path(
           &entry_path,
-          if is_entry_dir { depth + 1 } else { depth },
-          &current_stack,
-          is_ignored,
-          collapse_child,
-          options,
-          seen_inodes,
-          progress,
+          ScanPathState {
+            depth: if is_entry_dir {
+              state.depth + 1
+            } else {
+              state.depth
+            },
+            ignore_stack: &current_stack,
+            ignored: is_ignored,
+            collapsed: collapse_child,
+          },
+          context,
         )
       })
       .collect::<Vec<_>>(),
@@ -198,13 +212,13 @@ fn scan_path(
   let children_size = children.iter().map(|child| child.size).sum::<u64>();
 
   Some(ScanNode {
-    name: display_name(path, options.full_path),
+    name: display_name(path, context.options.full_path),
     path: path.to_path_buf(),
     size: own_size + children_size,
     children,
-    depth,
-    ignored,
-    collapsed,
+    depth: state.depth,
+    ignored: state.ignored,
+    collapsed: state.collapsed,
   })
 }
 
