@@ -93,7 +93,18 @@ fn scan_directory_inner(options: ScanOptions, progress: Option<ProgressCallback>
   options
     .directories
     .iter()
-    .filter_map(|directory| scan_path(directory, 0, &[], false, false, &options, &seen_inodes, &progress))
+    .filter_map(|directory| {
+      scan_path(
+        directory,
+        0,
+        &[],
+        false,
+        false,
+        &options,
+        &seen_inodes,
+        &progress,
+      )
+    })
     .collect()
 }
 
@@ -201,7 +212,11 @@ fn summarize_path(path: &Path, seen_inodes: &SeenInodes) -> u64 {
   summarize_path_with_progress(path, seen_inodes, &ProgressState::default())
 }
 
-fn summarize_path_with_progress(path: &Path, seen_inodes: &SeenInodes, progress: &ProgressState) -> u64 {
+fn summarize_path_with_progress(
+  path: &Path,
+  seen_inodes: &SeenInodes,
+  progress: &ProgressState,
+) -> u64 {
   let metadata = match std::fs::symlink_metadata(path) {
     Ok(metadata) => metadata,
     Err(_) => return 0,

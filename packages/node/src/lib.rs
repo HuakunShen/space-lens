@@ -51,7 +51,8 @@ pub struct ScanProgressEvent {
   pub entries_scanned: i64,
 }
 
-type ProgressCallback = Arc<ThreadsafeFunction<ScanProgressEvent, (), ScanProgressEvent, Status, false>>;
+type ProgressCallback =
+  Arc<ThreadsafeFunction<ScanProgressEvent, (), ScanProgressEvent, Status, false>>;
 
 pub struct ScanDirectoryTask {
   options: DirectoryScanOptions,
