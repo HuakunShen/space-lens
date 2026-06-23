@@ -48,6 +48,8 @@ jobs:
         run: cargo clippy --workspace --all-targets
       - name: Cargo test
         run: cargo test --workspace
+      - name: Build debug binding
+        run: pnpm build:debug
       - name: Node tests
         run: |
           pnpm --filter space-lens test
