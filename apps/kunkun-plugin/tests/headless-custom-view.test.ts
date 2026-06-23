@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { homedir } from 'node:os'
 
-import { startHeadlessServer } from '../../../../kunkun/packages/headless/src/index.ts'
+import { startHeadlessServer } from '@kunkunsh/headless'
 import { createKunkunClient } from '../../web/src/lib/api/kunkun-client'
 
 const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')

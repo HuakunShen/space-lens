@@ -4,11 +4,10 @@
  * relay, while the standalone NPX host exposes the same SpaceLensAPI over
  * WebSocket.
  *
- * The Kunkun backend helper is imported from the adjacent Kunkun checkout so
- * Bun can bundle it into dist/backend.js. Runtime plugin backends should not
- * depend on the host app's node_modules resolution.
+ * The Kunkun backend helper is resolved through a local pnpm link while the API
+ * package is unpublished.
  */
-import { exposeBackend } from '../../../../kunkun/packages/api/src/backend/index.ts'
+import { exposeBackend } from '@kunkunsh/api/backend'
 import { createSpaceLensAPI } from '@space-lens/cli/web-service'
 import type { SpaceLensAPI } from '@space-lens/cli/web-api'
 import {
