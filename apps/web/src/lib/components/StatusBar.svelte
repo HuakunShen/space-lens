@@ -45,10 +45,7 @@
       {#if status?.progress !== null && status?.progress !== undefined}
         <Progress value={Math.round(status.progress * 100)} class="max-w-md" />
       {:else if status?.state === "scanning"}
-        <Progress
-          value={35}
-          class="max-w-md [&_[data-slot=progress-indicator]]:animate-pulse"
-        />
+        <Progress indeterminate class="max-w-md" />
         <p class="truncate font-mono text-xs text-muted-foreground">
           {status.currentPath ?? "Preparing scanner..."}
         </p>

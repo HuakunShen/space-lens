@@ -1,17 +1,15 @@
 /**
  * Kunkun custom-view adapter for SpaceLensAPI.
  *
- * The Svelte UI talks only to SpaceLensAPI; this file owns the Kunkun host
- * transport, backend process relay, permission prompts, and host-mediated trash
- * boundary. It mirrors @kunkunsh/api/ui/custom connection discovery without
- * making the standalone web app depend on the Kunkun API package.
+ * This file owns Space Lens behavior in Kunkun mode: path presets, permission
+ * prompts, backend reuse, recent-scan storage, and host-mediated trash. Kunkun
+ * host bootstrap is imported lazily so standalone mode never initializes the
+ * custom-view kkrpc channel.
  */
-import { RPCChannel } from "kkrpc/streaming";
-import {
-  electronIpcTransport,
-  type ElectronMessageEndpoint,
-} from "kkrpc/electron";
-import { webSocketClientTransport } from "kkrpc/ws";
+import type {
+  KunkunBackendConnection,
+  KunkunRuntimeAdapter,
+} from "./kunkun-runtime";
 import type {
   CleanupOutcome,
   ExecuteCleanupOptions,
@@ -21,146 +19,74 @@ import type {
   StartScanOptions,
 } from "./types";
 
-type KunkunBackendAPI = SpaceLensAPI;
-
-export interface KunkunHostAPI {
-  backend: {
-    spawn(
-      scriptPath: string,
-      runtime?: "node" | "bun" | "deno",
-      options?: { fsReadAllow?: readonly string[] },
-    ): Promise<{ backendId: string; channel: string }>;
-    kill(backendId: string): Promise<void>;
-  };
-  path: {
-    homeDir(): Promise<string>;
-    desktopDir(): Promise<string>;
-    downloadDir(): Promise<string>;
-    documentDir(): Promise<string>;
-  };
-  permissions: {
-    check(permissionType: string, scopePattern: string): Promise<boolean>;
-    request(
-      permissionType: string,
-      scopePattern: string,
-      reason?: string,
-    ): Promise<boolean>;
-  };
-  system: {
-    showInFinder(path: string): Promise<void>;
-    trash(path: string | string[]): Promise<void>;
-  };
-  ui: {
-    confirmAlert(options: {
-      title: string;
-      message?: string;
-      primaryAction?: { title: string };
-    }): Promise<boolean>;
-  };
-}
-
-interface KunkunPluginAPI {
-  onEvent(event: unknown, payload: unknown): Promise<void>;
-  initialize(): Promise<void>;
-  updateProps(): Promise<void>;
-  executeHandler(): Promise<void>;
-  destroy(): Promise<void>;
-  syncTree(): Promise<void>;
-}
-
-interface KunkunHostRuntime {
-  host: KunkunHostAPI;
-  endpoint?: ElectronMessageEndpoint;
-  hostChannel: RPCChannel<KunkunPluginAPI, KunkunHostAPI>;
-}
-
 interface KunkunBackendRuntime {
-  backend: KunkunBackendAPI;
-  backendId: string;
-  fsReadAllow: readonly string[];
-  backendChannel: RPCChannel<object, KunkunBackendAPI>;
-  hostRuntime: KunkunHostRuntime;
+  readonly backend: SpaceLensAPI;
+  readonly approvedReadRoots: readonly string[];
   destroy(): Promise<void>;
 }
 
-export interface KunkunClientHostRuntime {
-  readonly host: KunkunHostAPI;
+interface RecentScanTargetEntry {
+  path: string;
+  label: string;
+  lastScannedAt: string;
+  scanCount: number;
 }
 
-export interface KunkunClientBackendRuntime {
-  readonly backend: KunkunBackendAPI;
-  readonly fsReadAllow: readonly string[];
-  destroy(): Promise<void>;
-}
+const BACKEND_SCRIPT_PATH = "$EXTENSION/dist/backend.js";
+const BACKEND_RUNTIME = "deno" as const;
+const RECENT_SCAN_TARGETS_STORAGE_KEY = "space-lens.recentScanTargets.v1";
+const MAX_RECENT_SCAN_TARGETS = 12;
 
-export interface KunkunClientRuntime {
-  getHostRuntime(): Promise<KunkunClientHostRuntime>;
-  createBackendRuntime(
-    fsReadAllow?: readonly string[],
-  ): Promise<KunkunClientBackendRuntime>;
-}
-
-type KunkunHostConnection =
-  | {
-      kind: "electron";
-      pluginId: string;
-      channel: string;
-      endpoint: ElectronMessageEndpoint;
-    }
-  | {
-      kind: "websocket";
-      pluginId: string;
-      commandName: string;
-      url: string;
-    };
-
-interface KunkunBootConfig {
-  pluginId: string;
-  commandName: string;
-  wsRpcUrl: string;
-}
-
-let hostRuntimePromise: Promise<KunkunHostRuntime> | null = null;
+let adapterPromise: Promise<KunkunRuntimeAdapter> | null = null;
 
 export function createKunkunClient(): SpaceLensAPI {
-  return createKunkunClientWithRuntime({
-    getHostRuntime,
-    createBackendRuntime,
-  });
+  return createKunkunClientWithAdapterProvider(getDefaultAdapter);
 }
 
 export function resetKunkunClientForTests(): void {
-  hostRuntimePromise = null;
+  adapterPromise = null;
 }
 
-export function createKunkunClientWithRuntime(
-  runtime: KunkunClientRuntime,
+export function createKunkunClientWithAdapter(
+  adapter: KunkunRuntimeAdapter,
 ): SpaceLensAPI {
-  let backendRuntimePromise: Promise<KunkunClientBackendRuntime> | null = null;
+  return createKunkunClientWithAdapterProvider(async () => adapter);
+}
+
+function createKunkunClientWithAdapterProvider(
+  getAdapter: () => Promise<KunkunRuntimeAdapter>,
+): SpaceLensAPI {
+  let backendRuntimePromise: Promise<KunkunBackendRuntime> | null = null;
   const scanReadRootsById = new Map<string, readonly string[]>();
 
   async function getRuntime(
-    fsReadAllow: readonly string[] = [],
-  ): Promise<KunkunClientBackendRuntime> {
+    approvedReadRoots: readonly string[] = [],
+  ): Promise<KunkunBackendRuntime> {
     const existing = backendRuntimePromise ? await backendRuntimePromise : null;
-    if (existing && hasAllReadRoots(existing.fsReadAllow, fsReadAllow)) {
+    if (
+      existing &&
+      hasAllReadRoots(existing.approvedReadRoots, approvedReadRoots)
+    ) {
       return existing;
     }
     if (existing) {
       await existing.destroy();
       backendRuntimePromise = null;
     }
-    backendRuntimePromise = runtime.createBackendRuntime(fsReadAllow);
+    backendRuntimePromise = createBackendRuntime(
+      await getAdapter(),
+      approvedReadRoots,
+    );
     return backendRuntimePromise;
   }
 
   async function ensureReadAccess(options: StartScanOptions): Promise<void> {
-    const { host } = await runtime.getHostRuntime();
+    const adapter = await getAdapter();
     for (const path of options.paths) {
       const scope = recursiveScope(path);
-      const allowed = await host.permissions.check("fs-read", scope);
+      const allowed = await adapter.permissions.check("fs-read", scope);
       if (allowed) continue;
-      const granted = await host.permissions.request(
+      const granted = await adapter.permissions.request(
         "fs-read",
         scope,
         "Scan this folder with Space Lens.",
@@ -172,14 +98,14 @@ export function createKunkunClientWithRuntime(
   }
 
   async function ensureWriteAccess(
-    host: KunkunHostAPI,
+    adapter: KunkunRuntimeAdapter,
     entries: RemovalEntry[],
   ): Promise<void> {
     for (const entry of entries) {
       const scope = recursiveScope(entry.path);
-      const allowed = await host.permissions.check("fs-write", scope);
+      const allowed = await adapter.permissions.check("fs-write", scope);
       if (allowed) continue;
-      const granted = await host.permissions.request(
+      const granted = await adapter.permissions.request(
         "fs-write",
         scope,
         "Move this Space Lens cleanup item to Trash.",
@@ -196,12 +122,12 @@ export function createKunkunClientWithRuntime(
     options: ExecuteCleanupOptions,
   ): Promise<CleanupOutcome> {
     const backendRuntime = await getRuntime(cleanupReadRoots(options));
-    const host = (await runtime.getHostRuntime()).host;
+    const adapter = await getAdapter();
     const plan = await backendRuntime.backend.planCleanup(options);
     if (plan.entries.length === 0) {
       return { removed: [], bytesRemoved: 0, errors: plan.errors };
     }
-    const confirmed = await host.ui.confirmAlert({
+    const confirmed = await adapter.confirmAlert({
       title: "Move selected items to Trash?",
       message: `${plan.entries.length} items will be moved to Trash. This cannot be undone from Space Lens.`,
       primaryAction: { title: "Move to Trash" },
@@ -213,8 +139,8 @@ export function createKunkunClientWithRuntime(
         errors: ["Deletion cancelled."],
       };
     }
-    await ensureWriteAccess(host, plan.entries);
-    await host.system.trash(plan.entries.map((entry) => entry.path));
+    await ensureWriteAccess(adapter, plan.entries);
+    await adapter.trash(plan.entries.map((entry) => entry.path));
     return {
       removed: plan.entries,
       bytesRemoved: plan.totalSize,
@@ -224,14 +150,14 @@ export function createKunkunClientWithRuntime(
 
   return {
     async getScanTargets() {
-      return getKunkunScanTargets((await runtime.getHostRuntime()).host);
+      return getKunkunScanTargets(await getAdapter());
     },
-
     async startScan(options) {
       await ensureReadAccess(options);
       const scan = await (
         await getRuntime(options.paths)
       ).backend.startScan(options);
+      await recordRecentScanTargets(await getAdapter(), options.paths);
       scanReadRootsById.set(scan.scanId, uniqueReadRoots(options.paths));
       return scan;
     },
@@ -256,7 +182,10 @@ export function createKunkunClientWithRuntime(
       return executeWithHostConfirmation(options);
     },
     async showInFileManager(path) {
-      return (await runtime.getHostRuntime()).host.system.showInFinder(path);
+      return (await getAdapter()).showInFinder(path);
+    },
+    async forgetScanTarget(path) {
+      return forgetRecentScanTarget(await getAdapter(), path);
     },
   };
 
@@ -268,14 +197,74 @@ export function createKunkunClientWithRuntime(
   }
 }
 
+async function getDefaultAdapter(): Promise<KunkunRuntimeAdapter> {
+  adapterPromise ??= createDefaultKunkunRuntimeAdapter();
+  return adapterPromise;
+}
+
+async function createDefaultKunkunRuntimeAdapter(): Promise<KunkunRuntimeAdapter> {
+  const [
+    {
+      LocalStorage,
+      confirmAlert,
+      showInFinder,
+      spawnBackend,
+      trash,
+    },
+    { path, permissions },
+  ] = await Promise.all([
+    import("@kunkunsh/api/ui/custom"),
+    import("@kunkunsh/api"),
+  ]);
+
+  return {
+    path,
+    permissions,
+    storage: {
+      getItem: (key) => LocalStorage.getItem(key),
+      setItem: (key, value) => LocalStorage.setItem(key, value),
+      removeItem: (key) => LocalStorage.removeItem(key),
+    },
+    confirmAlert,
+    showInFinder,
+    trash,
+    spawnBackend: async (options) => {
+      const connection = await spawnBackend<Record<string, (...args: unknown[]) => unknown>>(options);
+      return {
+        api: connection.api as unknown as SpaceLensAPI,
+        backendId: connection.backendId,
+        destroy: connection.destroy,
+      } satisfies KunkunBackendConnection<SpaceLensAPI>;
+    },
+  };
+}
+
+async function createBackendRuntime(
+  adapter: KunkunRuntimeAdapter,
+  approvedReadRoots: readonly string[] = [],
+): Promise<KunkunBackendRuntime> {
+  const connection: KunkunBackendConnection<SpaceLensAPI> =
+    await adapter.spawnBackend({
+      scriptPath: BACKEND_SCRIPT_PATH,
+      runtime: BACKEND_RUNTIME,
+    });
+  return {
+    backend: connection.api,
+    approvedReadRoots: uniqueReadRoots(approvedReadRoots),
+    async destroy() {
+      await connection.destroy();
+    },
+  };
+}
+
 async function getKunkunScanTargets(
-  host: KunkunHostAPI,
+  adapter: KunkunRuntimeAdapter,
 ): Promise<ScanTarget[]> {
-  const home = await host.path.homeDir();
+  const home = await adapter.path.homeDir();
   const optionalTargets = await Promise.allSettled([
-    host.path.desktopDir(),
-    host.path.downloadDir(),
-    host.path.documentDir(),
+    adapter.path.desktopDir(),
+    adapter.path.downloadDir(),
+    adapter.path.documentDir(),
   ]);
   const targets: ScanTarget[] = [
     {
@@ -285,6 +274,7 @@ async function getKunkunScanTargets(
       kind: "folder",
       description: home,
       size: 0,
+      source: "preset",
     },
   ];
   const labels = ["Desktop", "Downloads", "Documents"];
@@ -297,9 +287,160 @@ async function getKunkunScanTargets(
       kind: "folder",
       description: result.value,
       size: 0,
+      source: "preset",
     });
   });
-  return uniqueScanTargets(targets);
+  return uniqueScanTargets([
+    ...(await getRecentScanTargets(adapter)),
+    ...targets,
+  ]);
+}
+
+async function getRecentScanTargets(
+  adapter: KunkunRuntimeAdapter,
+): Promise<ScanTarget[]> {
+  const entries = await readRecentScanTargets(adapter);
+  return entries.map((entry) => ({
+    id: `recent:${entry.path}`,
+    label: entry.label,
+    path: entry.path,
+    kind: "folder",
+    description: entry.path,
+    size: 0,
+    source: "recent",
+    removable: true,
+    lastScannedAt: entry.lastScannedAt,
+  }));
+}
+
+async function recordRecentScanTargets(
+  adapter: KunkunRuntimeAdapter,
+  paths: readonly string[],
+): Promise<void> {
+  const existing = await readRecentScanTargets(adapter);
+  const entries = [...existing];
+  const now = new Date().toISOString();
+
+  for (const inputPath of paths) {
+    const path = normalizeFsPath(inputPath);
+    if (!path) continue;
+    const existingIndex = entries.findIndex((entry) => entry.path === path);
+    const previous =
+      existingIndex >= 0 ? entries.splice(existingIndex, 1)[0] : undefined;
+    entries.unshift({
+      path,
+      label: previous?.label ?? labelFromPath(path),
+      lastScannedAt: now,
+      scanCount: (previous?.scanCount ?? 0) + 1,
+    });
+  }
+
+  await writeRecentScanTargets(
+    adapter,
+    entries.slice(0, MAX_RECENT_SCAN_TARGETS),
+  );
+}
+
+async function forgetRecentScanTarget(
+  adapter: KunkunRuntimeAdapter,
+  inputPath: string,
+): Promise<void> {
+  const path = normalizeFsPath(inputPath);
+  if (!path) return;
+  const entries = (await readRecentScanTargets(adapter)).filter(
+    (entry) => entry.path !== path,
+  );
+  await writeRecentScanTargets(adapter, entries);
+}
+
+async function readRecentScanTargets(
+  adapter: KunkunRuntimeAdapter,
+): Promise<RecentScanTargetEntry[]> {
+  const raw = await adapter.storage.getItem(RECENT_SCAN_TARGETS_STORAGE_KEY);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const entries: RecentScanTargetEntry[] = [];
+    for (const item of parsed) {
+      const entry = parseRecentScanTargetEntry(item);
+      if (entry) entries.push(entry);
+    }
+    return sortRecentScanTargets(dedupeRecentScanTargets(entries)).slice(
+      0,
+      MAX_RECENT_SCAN_TARGETS,
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function writeRecentScanTargets(
+  adapter: KunkunRuntimeAdapter,
+  entries: readonly RecentScanTargetEntry[],
+): Promise<void> {
+  await adapter.storage.setItem(
+    RECENT_SCAN_TARGETS_STORAGE_KEY,
+    JSON.stringify(dedupeRecentScanTargets([...entries])),
+  );
+}
+
+function parseRecentScanTargetEntry(
+  value: unknown,
+): RecentScanTargetEntry | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const path =
+    typeof record.path === "string" ? normalizeFsPath(record.path) : "";
+  const lastScannedAt =
+    typeof record.lastScannedAt === "string" &&
+    !Number.isNaN(Date.parse(record.lastScannedAt))
+      ? record.lastScannedAt
+      : "";
+  if (!path || !lastScannedAt) return null;
+  const label =
+    typeof record.label === "string" && record.label.trim()
+      ? record.label.trim()
+      : labelFromPath(path);
+  const scanCount =
+    typeof record.scanCount === "number" && Number.isFinite(record.scanCount)
+      ? Math.max(1, Math.floor(record.scanCount))
+      : 1;
+  return {
+    path,
+    label,
+    lastScannedAt,
+    scanCount,
+  };
+}
+
+function dedupeRecentScanTargets(
+  entries: readonly RecentScanTargetEntry[],
+): RecentScanTargetEntry[] {
+  const seen = new Set<string>();
+  const result: RecentScanTargetEntry[] = [];
+  for (const entry of entries) {
+    const path = normalizeFsPath(entry.path);
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    result.push({ ...entry, path });
+  }
+  return result;
+}
+
+function sortRecentScanTargets(
+  entries: readonly RecentScanTargetEntry[],
+): RecentScanTargetEntry[] {
+  return [...entries].sort(
+    (left, right) =>
+      Date.parse(right.lastScannedAt) - Date.parse(left.lastScannedAt),
+  );
+}
+
+function labelFromPath(path: string): string {
+  const normalized = normalizeFsPath(path);
+  const parts = normalized.split(/[/\\]/).filter(Boolean);
+  return parts.at(-1) ?? normalized;
 }
 
 function uniqueScanTargets(targets: ScanTarget[]): ScanTarget[] {
@@ -310,62 +451,6 @@ function uniqueScanTargets(targets: ScanTarget[]): ScanTarget[] {
     seen.add(key);
     return true;
   });
-}
-
-async function createBackendRuntime(
-  fsReadAllow: readonly string[] = [],
-): Promise<KunkunBackendRuntime> {
-  const hostRuntime = await getHostRuntime();
-  const readRoots = uniqueReadRoots(fsReadAllow);
-  const { backendId, channel } = await hostRuntime.host.backend.spawn(
-    "$EXTENSION/dist/backend.js",
-    "node",
-    readRoots.length > 0 ? { fsReadAllow: readRoots } : undefined,
-  );
-  if (!hostRuntime.endpoint) {
-    throw new Error(
-      "Kunkun backend relay is not available for browser WebSocket custom-view hosts yet.",
-    );
-  }
-  const backendChannel = new RPCChannel<object, KunkunBackendAPI>(
-    electronIpcTransport({ endpoint: hostRuntime.endpoint, channel }),
-  );
-  return {
-    backend: backendChannel.getAPI(),
-    backendId,
-    fsReadAllow: readRoots,
-    backendChannel,
-    hostRuntime,
-    async destroy() {
-      backendChannel.destroy();
-      await hostRuntime.host.backend.kill(backendId);
-    },
-  };
-}
-
-async function getHostRuntime(): Promise<KunkunHostRuntime> {
-  hostRuntimePromise ??= createHostRuntime();
-  return hostRuntimePromise;
-}
-
-async function createHostRuntime(): Promise<KunkunHostRuntime> {
-  const connection = await resolveKunkunHostConnection();
-  const hostChannel = new RPCChannel<KunkunPluginAPI, KunkunHostAPI>(
-    connection.kind === "electron"
-      ? electronIpcTransport({
-          endpoint: connection.endpoint,
-          channel: connection.channel,
-        })
-      : webSocketClientTransport({ url: connection.url }),
-    { expose: createPluginAPI() },
-  );
-  return {
-    ...(connection.kind === "electron"
-      ? { endpoint: connection.endpoint }
-      : {}),
-    host: hostChannel.getAPI(),
-    hostChannel,
-  };
 }
 
 function recursiveScope(path: string): string {
@@ -418,195 +503,4 @@ function normalizeFsPath(input: string): string {
     normalized = normalized.slice(0, -1);
   }
   return normalized;
-}
-
-function createPluginAPI(): KunkunPluginAPI {
-  return {
-    async onEvent() {},
-    async initialize() {},
-    async updateProps() {},
-    async executeHandler() {},
-    async destroy() {},
-    async syncTree() {},
-  };
-}
-
-function getElectronIpcEndpoint(): ElectronMessageEndpoint {
-  const endpoint = (
-    globalThis as {
-      window?: { electron?: { ipcRenderer?: ElectronMessageEndpoint } };
-    }
-  ).window?.electron?.ipcRenderer;
-  if (!endpoint) {
-    throw new Error("Kunkun Electron IPC endpoint is not available");
-  }
-  return endpoint;
-}
-
-async function resolveKunkunHostConnection(): Promise<KunkunHostConnection> {
-  const connection = resolveKunkunConnection();
-  if (connection.kind !== "websocket") return connection;
-
-  const bootConfig = await fetchBootConfig();
-  if (!bootConfig) return connection;
-  return {
-    kind: "websocket",
-    pluginId: bootConfig.pluginId,
-    commandName: bootConfig.commandName,
-    url: withPluginQuery(
-      bootConfig.wsRpcUrl,
-      bootConfig.pluginId,
-      bootConfig.commandName,
-    ),
-  };
-}
-
-function resolveKunkunConnection(): KunkunHostConnection {
-  const location = globalThis.window?.location;
-  const params = new URLSearchParams(location?.search ?? "");
-  const pluginId = resolvePluginId(location, params);
-  const commandName = resolveCommandName(location, params);
-  const explicitWebSocketUrl =
-    params.get("kunkun_ws_rpc_url") ?? params.get("kunkun_rpc_url");
-
-  if (explicitWebSocketUrl) {
-    return {
-      kind: "websocket",
-      pluginId,
-      commandName,
-      url: withPluginQuery(explicitWebSocketUrl, pluginId, commandName),
-    };
-  }
-
-  const routeWebSocketUrl = resolveRouteWebSocketUrl(
-    location,
-    pluginId,
-    commandName,
-  );
-  if (routeWebSocketUrl) {
-    return {
-      kind: "websocket",
-      pluginId,
-      commandName,
-      url: routeWebSocketUrl,
-    };
-  }
-
-  const endpoint = getElectronIpcEndpoint();
-  return {
-    kind: "electron",
-    pluginId,
-    channel: `kkrpc-plugin-${pluginId}`,
-    endpoint,
-  };
-}
-
-function resolvePluginId(
-  location: Location | undefined,
-  params: URLSearchParams,
-): string {
-  const fromQuery = params.get("kkrpc_plugin_id") ?? params.get("pluginId");
-  if (fromQuery) return fromQuery;
-  const fromPath = parseCustomViewPath(location?.pathname).pluginId;
-  if (fromPath) return fromPath;
-  return location?.hostname ?? "unknown";
-}
-
-function resolveCommandName(
-  location: Location | undefined,
-  params: URLSearchParams,
-): string {
-  const fromQuery = params.get("commandName");
-  if (fromQuery) return fromQuery;
-  return parseCustomViewPath(location?.pathname).commandName ?? "";
-}
-
-function parseCustomViewPath(pathname: string | undefined): {
-  pluginId?: string;
-  commandName?: string;
-} {
-  const parts = (pathname ?? "").split("/").filter(Boolean);
-  if (parts[0] !== "custom-views" || !parts[1] || !parts[2]) {
-    return {};
-  }
-  return {
-    pluginId: safeDecode(parts[1]),
-    commandName: safeDecode(parts[2]),
-  };
-}
-
-function resolveRouteWebSocketUrl(
-  location: Location | undefined,
-  pluginId: string,
-  commandName: string,
-): string | null {
-  const parsed = parseCustomViewPath(location?.pathname);
-  if (!parsed.pluginId || !parsed.commandName || !location?.host) {
-    return null;
-  }
-  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${location.host}/rpc?pluginId=${encodeURIComponent(pluginId)}&commandName=${encodeURIComponent(commandName)}`;
-}
-
-async function fetchBootConfig(): Promise<KunkunBootConfig | null> {
-  const location = globalThis.window?.location;
-  const bootUrl = resolveBootConfigUrl(location);
-  if (!bootUrl) return null;
-  const response = await fetch(bootUrl);
-  if (!response.ok) return null;
-  const body: unknown = await response.json();
-  if (!isBootConfig(body)) return null;
-  return body;
-}
-
-function resolveBootConfigUrl(location: Location | undefined): string | null {
-  const parsed = parseCustomViewPath(location?.pathname);
-  if (
-    !parsed.pluginId ||
-    !parsed.commandName ||
-    !location?.protocol ||
-    !location.host
-  ) {
-    return null;
-  }
-  const url = new URL(`${location.protocol}//${location.host}`);
-  url.pathname = `/custom-views/${encodeURIComponent(parsed.pluginId)}/${encodeURIComponent(parsed.commandName)}/kunkun.boot.json`;
-  const bootToken = new URLSearchParams(location.search ?? "").get("bootToken");
-  if (bootToken) {
-    url.searchParams.set("bootToken", bootToken);
-  }
-  return url.toString();
-}
-
-function isBootConfig(value: unknown): value is KunkunBootConfig {
-  if (typeof value !== "object" || value === null) return false;
-  const record = value as Record<string, unknown>;
-  return (
-    typeof record["pluginId"] === "string" &&
-    typeof record["commandName"] === "string" &&
-    typeof record["wsRpcUrl"] === "string"
-  );
-}
-
-function withPluginQuery(
-  url: string,
-  pluginId: string,
-  commandName: string,
-): string {
-  const parsed = new URL(url);
-  if (!parsed.searchParams.has("pluginId")) {
-    parsed.searchParams.set("pluginId", pluginId);
-  }
-  if (commandName && !parsed.searchParams.has("commandName")) {
-    parsed.searchParams.set("commandName", commandName);
-  }
-  return parsed.toString();
-}
-
-function safeDecode(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return "";
-  }
 }

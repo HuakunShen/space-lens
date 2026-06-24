@@ -1,13 +1,13 @@
 /**
  * Defense-in-depth filesystem path policy for the Kunkun Space Lens backend.
- * Kunkun already validates `fsReadAllow` before spawning this process; this
- * module enforces the same approved roots again before scanner or cleanup calls
+ * Kunkun derives this process sandbox from scoped fs-read grants before spawn;
+ * this module enforces the approved roots again before scanner or cleanup calls
  * reach the shared SpaceLensAPI implementation.
  */
 import { existsSync, realpathSync } from 'node:fs'
 import path from 'node:path'
 
-export const BACKEND_FS_READ_ALLOW_ENV = 'KUNKUN_BACKEND_FS_READ_ALLOW'
+export const BACKEND_FS_READ_ROOTS_ENV = 'KUNKUN_BACKEND_FS_READ_ROOTS'
 
 export class PathPolicyError extends Error {
   constructor(message: string) {
@@ -17,18 +17,18 @@ export class PathPolicyError extends Error {
 }
 
 export function readAllowedRootsFromEnv(env: NodeJS.ProcessEnv = process.env): string[] {
-  const raw = env[BACKEND_FS_READ_ALLOW_ENV]
+  const raw = env[BACKEND_FS_READ_ROOTS_ENV]
   if (!raw) return []
 
   try {
     const parsed: unknown = JSON.parse(raw)
     if (!Array.isArray(parsed) || !parsed.every((entry) => typeof entry === 'string')) {
-      throw new PathPolicyError(`${BACKEND_FS_READ_ALLOW_ENV} must be a JSON string array`)
+      throw new PathPolicyError(`${BACKEND_FS_READ_ROOTS_ENV} must be a JSON string array`)
     }
     return parsed
   } catch (error) {
     if (error instanceof PathPolicyError) throw error
-    throw new PathPolicyError(`${BACKEND_FS_READ_ALLOW_ENV} is not valid JSON`)
+    throw new PathPolicyError(`${BACKEND_FS_READ_ROOTS_ENV} is not valid JSON`)
   }
 }
 

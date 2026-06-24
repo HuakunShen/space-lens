@@ -8,6 +8,7 @@
   import StatusBar from "$lib/components/StatusBar.svelte";
   import SunburstChart from "$lib/components/SunburstChart.svelte";
   import { createSpaceLensClient } from "$lib/api/client";
+  import type { SpaceLensClient } from "$lib/api/client";
   import type {
     CollectorEntry,
     ScanSession,
@@ -20,11 +21,12 @@
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
 
-  const client = createSpaceLensClient();
   const visibleDepth = 3;
   const maxChildrenPerNode = 28;
   const rightPanelPageSize = 100;
 
+  let client = $state<SpaceLensClient | null>(null);
+  let initializing = $state(true);
   let session = $state<ScanSession | null>(null);
   let slice = $state<TreeSlice | null>(null);
   let status = $state<ScanStatus | null>(null);
@@ -54,7 +56,7 @@
   let breadcrumbs = $derived(slice?.ancestors ?? []);
   let currentChildren = $derived(childItems);
   let canLoadMoreChildren = $derived(childPageOffset < childPageTotal);
-  let isKunkunMode = $derived(client.mode === "kunkun");
+  let isKunkunMode = $derived(client?.mode === "kunkun");
   let hoverInfo = $derived(
     hoveredId && slice
       ? (findTreeNode(slice.tree, hoveredId) ??
@@ -65,19 +67,66 @@
   let chartInfo = $derived(hoverInfo ?? slice?.focusNode ?? null);
 
   onMount(() => {
-    void loadScanTargets();
+    void initializeClient();
   });
+
+  async function initializeClient() {
+    initializing = true;
+    error = null;
+    try {
+      client = await createSpaceLensClient();
+      await loadScanTargets();
+    } catch (cause) {
+      error =
+        cause instanceof Error ? cause.message : "Unable to start Space Lens";
+    } finally {
+      initializing = false;
+    }
+  }
+
+  function requireClient(): SpaceLensClient {
+    if (!client) {
+      throw new Error("Space Lens is still starting");
+    }
+    return client;
+  }
 
   async function loadScanTargets() {
     try {
-      scanTargets = await client.api.getScanTargets();
+      const activeClient = requireClient();
+      scanTargets = await activeClient.api.getScanTargets();
     } catch (cause) {
       error =
         cause instanceof Error ? cause.message : "Unable to load scan targets";
     }
   }
 
+  async function forgetScanTarget(path: string) {
+    const activeClient = requireClient();
+    if (!activeClient.api.forgetScanTarget) return;
+    error = null;
+    try {
+      await activeClient.api.forgetScanTarget(path);
+      await loadScanTargets();
+    } catch (cause) {
+      error =
+        cause instanceof Error
+          ? cause.message
+          : "Unable to remove recent scan path";
+    }
+  }
+
+  async function returnToScanPicker() {
+    session = null;
+    slice = null;
+    status = null;
+    collectorEntries = [];
+    contextMenu = null;
+    await loadScanTargets();
+  }
+
   async function startScan(paths: string[]) {
+    const activeClient = requireClient();
     busy = true;
     error = null;
     session = null;
@@ -89,7 +138,7 @@
     childPageTotal = 0;
     childPageOffset = 0;
     try {
-      const nextSession = await client.api.startScan({
+      const nextSession = await activeClient.api.startScan({
         paths,
         ignoreHidden: false,
         respectGitignore: true,
@@ -98,7 +147,7 @@
         maxChildrenPerNode,
       });
       session = nextSession;
-      status = await client.api.getScanStatus(nextSession.scanId);
+      status = await activeClient.api.getScanStatus(nextSession.scanId);
       const readyStatus = await waitForScanReady(nextSession.scanId);
       const readySession = {
         ...nextSession,
@@ -115,8 +164,9 @@
   }
 
   async function waitForScanReady(scanId: string): Promise<ScanStatus> {
+    const activeClient = requireClient();
     while (true) {
-      const nextStatus = await client.api.getScanStatus(scanId);
+      const nextStatus = await activeClient.api.getScanStatus(scanId);
       status = nextStatus;
       if (nextStatus.state === "ready") return nextStatus;
       if (nextStatus.state === "failed") {
@@ -131,20 +181,21 @@
 
   async function openNode(node: TreeNodeSummary | string) {
     if (!session) return;
+    const activeClient = requireClient();
     const nodeId = typeof node === "string" ? node : node.id;
     busy = true;
     error = null;
     contextMenu = null;
     try {
       const [nextSlice, nextStatus, firstChildren] = await Promise.all([
-        client.api.getNode({
+        activeClient.api.getNode({
           scanId: session.scanId,
           nodeId,
           depth: visibleDepth,
           maxChildrenPerNode,
         }),
-        client.api.getScanStatus(session.scanId),
-        client.api.getChildren({
+        activeClient.api.getScanStatus(session.scanId),
+        activeClient.api.getChildren({
           scanId: session.scanId,
           nodeId,
           offset: 0,
@@ -166,10 +217,11 @@
 
   async function loadMoreChildren() {
     if (!session || !slice || childLoading || !canLoadMoreChildren) return;
+    const activeClient = requireClient();
     childLoading = true;
     error = null;
     try {
-      const page = await client.api.getChildren({
+      const page = await activeClient.api.getChildren({
         scanId: session.scanId,
         nodeId: slice.focusNode.id,
         offset: childPageOffset,
@@ -226,27 +278,31 @@
   }
 
   async function showInFileManager(path: string) {
+    const activeClient = requireClient();
     contextMenu = null;
-    await client.api.showInFileManager?.(path);
+    await activeClient.api.showInFileManager?.(path);
   }
 
   async function openInTerminal(path: string) {
+    const activeClient = requireClient();
     contextMenu = null;
-    await client.api.openInTerminal?.(path);
+    await activeClient.api.openInTerminal?.(path);
   }
 
   async function cancelScan() {
     if (!session) return;
-    await client.api.cancelScan(session.scanId);
-    status = await client.api.getScanStatus(session.scanId);
+    const activeClient = requireClient();
+    await activeClient.api.cancelScan(session.scanId);
+    status = await activeClient.api.getScanStatus(session.scanId);
   }
 
   async function deleteCollected() {
     if (!session || collectorEntries.length === 0) return;
+    const activeClient = requireClient();
     deleting = true;
     error = null;
     try {
-      const outcome = await client.api.executeCleanup({
+      const outcome = await activeClient.api.executeCleanup({
         scanId: session.scanId,
         entries: collectorEntries,
       });
@@ -305,15 +361,22 @@
   <title>Space Lens</title>
 </svelte:head>
 
-{#if !session || !slice}
+{#if initializing}
+  <main
+    class="grid h-dvh place-items-center bg-background/70 text-foreground backdrop-blur-2xl"
+  >
+    <p class="text-sm text-muted-foreground">Starting Space Lens...</p>
+  </main>
+{:else if !session || !slice}
   <ScanPicker
     targets={scanTargets}
-    mode={client.mode}
+    mode={client?.mode ?? "demo"}
     {busy}
     {error}
     {status}
     onScan={startScan}
     onCancel={cancelScan}
+    onForget={forgetScanTarget}
   />
 {:else}
   <main
@@ -329,51 +392,59 @@
   >
     <header
       class={[
-        "border-b px-4 py-2 [-webkit-app-region:drag]",
+        "border-b bg-background/55 px-4 py-2 backdrop-blur-xl [-webkit-app-region:drag]",
         isKunkunMode ? "pl-24" : "",
       ]}
     >
-      <div class="flex min-h-8 items-center justify-between gap-4">
-        <div class="flex min-w-0 items-center gap-3">
-          <div
-            class="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground"
-          >
-            <FolderSearch class="size-4" />
+      <div class="grid gap-1.5">
+        <div class="flex min-h-8 items-center justify-between gap-3">
+          <div class="flex min-w-0 items-center gap-2.5">
+            <div
+              class="grid size-7 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground"
+            >
+              <FolderSearch class="size-3.5" />
+            </div>
+            <div class="flex min-w-0 items-center gap-2">
+              <h1 class="truncate text-sm font-semibold leading-tight">
+                Space Lens
+              </h1>
+              <Badge variant="outline" class="h-6 px-2 text-xs">
+                {client?.mode ?? "demo"}
+              </Badge>
+            </div>
           </div>
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <h1 class="truncate text-sm font-semibold">Space Lens</h1>
-              <Badge variant="outline">{client.mode}</Badge>
-            </div>
-            <div class="[-webkit-app-region:no-drag]">
-              <BreadcrumbBar
-                items={breadcrumbs}
-                onSelect={openNode}
-                onBack={goBack}
-                canGoBack={breadcrumbs.length > 1}
-              />
-            </div>
+          <div
+            class="flex shrink-0 items-center gap-1.5 [-webkit-app-region:no-drag]"
+          >
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              onclick={() => (collectorOpen = true)}
+              class="px-2"
+            >
+              <PackageOpen class="size-4" />
+              Collector
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onclick={returnToScanPicker}
+              class="px-2.5"
+            >
+              <RotateCcw class="size-4" />
+              New scan
+            </Button>
           </div>
         </div>
-        <div class="flex items-center gap-2 [-webkit-app-region:no-drag]">
-          <Button
-            variant="ghost"
-            size="sm"
-            type="button"
-            onclick={() => (collectorOpen = true)}
-          >
-            <PackageOpen class="size-4" />
-            Collector
-          </Button>
-          <Button
-            variant="secondary"
-            size="sm"
-            type="button"
-            onclick={() => (session = null)}
-          >
-            <RotateCcw class="size-4" />
-            New scan
-          </Button>
+        <div class="min-w-0 [-webkit-app-region:no-drag]">
+          <BreadcrumbBar
+            items={breadcrumbs}
+            onSelect={openNode}
+            onBack={goBack}
+            canGoBack={breadcrumbs.length > 1}
+          />
         </div>
       </div>
     </header>
@@ -507,14 +578,14 @@
         >
         <button
           type="button"
-          disabled={!client.api.showInFileManager}
+          disabled={!client?.api.showInFileManager}
           onclick={() => showInFileManager(contextMenu?.node.path ?? "")}
         >
           Show in Finder
         </button>
         <button
           type="button"
-          disabled={!client.api.openInTerminal}
+          disabled={!client?.api.openInTerminal}
           onclick={() => openInTerminal(contextMenu?.node.path ?? "")}
         >
           Open in Terminal

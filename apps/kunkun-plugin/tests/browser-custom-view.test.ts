@@ -10,8 +10,9 @@ import { startHeadlessServer } from '@kunkunsh/headless'
 
 describe('Space Lens browser custom-view smoke', () => {
   test('renders the packaged custom view and fails closed on unavailable backend relay', async () => {
+    const pluginRoot = new URL('..', import.meta.url).pathname
     const server = await startHeadlessServer({
-      extensions: [new URL('..', import.meta.url).pathname],
+      extensions: [pluginRoot],
       port: 0,
       customViews: [{
         pluginId: 'com.space-lens.app',
@@ -36,6 +37,7 @@ describe('Space Lens browser custom-view smoke', () => {
       await page.getByRole('button', { name: /Home/ }).waitFor({ timeout: 5_000 })
       await page.getByText('Choose Folder').waitFor({ timeout: 5_000 })
 
+      await page.locator('input').first().fill(pluginRoot)
       await page.getByRole('button', { name: /^Scan$/ }).click()
       await page.getByText('Host capability "backend.spawn" is not available in headless runtime').waitFor({
         timeout: 5_000,

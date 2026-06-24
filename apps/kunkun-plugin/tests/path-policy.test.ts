@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import {
-  BACKEND_FS_READ_ALLOW_ENV,
+  BACKEND_FS_READ_ROOTS_ENV,
   assertPathUnderAllowedRoots,
   normalizeAllowedRoots,
   readAllowedRootsFromEnv,
@@ -65,11 +65,11 @@ describe('path policy', () => {
   test('parses allowed roots from env and fails closed on malformed values', () => {
     const root = tempDir('space-lens-policy-env-')
 
-    expect(readAllowedRootsFromEnv({ [BACKEND_FS_READ_ALLOW_ENV]: JSON.stringify([root]) })).toEqual([root])
-    expect(() => readAllowedRootsFromEnv({ [BACKEND_FS_READ_ALLOW_ENV]: '"not-array"' })).toThrow(
+    expect(readAllowedRootsFromEnv({ [BACKEND_FS_READ_ROOTS_ENV]: JSON.stringify([root]) })).toEqual([root])
+    expect(() => readAllowedRootsFromEnv({ [BACKEND_FS_READ_ROOTS_ENV]: '"not-array"' })).toThrow(
       /JSON string array/,
     )
-    expect(() => readAllowedRootsFromEnv({ [BACKEND_FS_READ_ALLOW_ENV]: 'not-json' })).toThrow(/not valid JSON/)
+    expect(() => readAllowedRootsFromEnv({ [BACKEND_FS_READ_ROOTS_ENV]: 'not-json' })).toThrow(/not valid JSON/)
   })
 })
 

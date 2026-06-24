@@ -4,7 +4,6 @@
  * and proves scanner startup fails closed where backend relay is unavailable.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { homedir } from 'node:os'
 
 import { startHeadlessServer } from '@kunkunsh/headless'
 import { createKunkunClient } from '../../web/src/lib/api/kunkun-client'
@@ -21,8 +20,9 @@ afterEach(() => {
 
 describe('Space Lens headless custom-view smoke', () => {
   test('serves the static plugin and fails closed when backend relay is unavailable', async () => {
+    const pluginRoot = new URL('..', import.meta.url).pathname
     const server = await startHeadlessServer({
-      extensions: [new URL('..', import.meta.url).pathname],
+      extensions: [pluginRoot],
       port: 0,
       customViews: [{
         pluginId: 'com.space-lens.app',
@@ -58,7 +58,7 @@ describe('Space Lens headless custom-view smoke', () => {
       const client = createKunkunClient()
       await expect(
         withTimeout(client.startScan({
-          paths: [homedir()],
+          paths: [pluginRoot],
           ignoreHidden: false,
           respectGitignore: true,
           ignoredMode: 'summarize',

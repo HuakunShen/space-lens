@@ -17,7 +17,7 @@ export function resolveRuntimeMode(
   ) {
     return requestedMode === "http" ? "rpc" : requestedMode;
   }
-  if (hasKunkunIpc()) return "kunkun";
+  if (hasKunkunCustomViewGlobal()) return "kunkun";
   if (isKunkunCustomViewRoute(location)) return "kunkun";
   if (params.has("spaceLensRpc") || params.has("spaceLensApi")) return "rpc";
   if (dev) return "rpc";
@@ -42,10 +42,10 @@ function currentLocation(): Location | undefined {
   return globalThis.window?.location;
 }
 
-function hasKunkunIpc(): boolean {
-  return Boolean(
-    (globalThis as { window?: { electron?: { ipcRenderer?: unknown } } }).window
-      ?.electron?.ipcRenderer,
+function hasKunkunCustomViewGlobal(): boolean {
+  return (
+    (globalThis as { window?: { __kunkun__?: { kind?: unknown } } }).window
+      ?.__kunkun__?.kind === "custom-view"
   );
 }
 

@@ -6,9 +6,10 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "pnpm --filter @space-lens/cli build && pnpm --filter web build && bun build src/backend.ts --target=node --format=esm --outfile=dist/backend.js --external space-lens && node scripts/copy-web-assets.mjs",
-    "build:backend": "pnpm --filter @space-lens/cli build && bun build src/backend.ts --target=node --format=esm --outfile=dist/backend.js --external space-lens && node scripts/copy-web-assets.mjs --scanner-only",
-    "check": "tsc --noEmit",
+    "build": "bun scripts/build-backend.ts --build-web --copy-web-assets",
+    "build:backend": "bun scripts/build-backend.ts --scanner-only",
+    "check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
+    "dev": "pnpm --filter web dev -- --host 127.0.0.1",
     "test": "bun test tests/*.test.ts"
   },
   "kunkun": {
@@ -54,21 +55,36 @@
     ],
     "permissions": [
       "notifications",
+      "storage",
       "path",
       "dialog",
       "system-finder",
       "system-trash",
-      "shell",
+      {
+        "permission": "backend",
+        "allow": [
+          {
+            "script": "$EXTENSION/dist/backend.js",
+            "runtime": "deno",
+            "capabilities": {
+              "nativeAddons": [
+                "$EXTENSION/dist/node_modules/space-lens/**/*.node"
+              ]
+            }
+          }
+        ]
+      },
       {
         "permission": "fs-read",
         "allow": [
-          "$HOME/**"
+          "$EXTENSION/**",
+          "$EXTENSION_SUPPORT/**"
         ]
       },
       {
         "permission": "fs-write",
         "allow": [
-          "$HOME/**"
+          "$EXTENSION_SUPPORT/**"
         ]
       }
     ],
@@ -78,12 +94,13 @@
     ]
   },
   "dependencies": {
-    "@kunkunsh/api": "link:../../../kunkun/packages/api",
+    "@kunkunsh/api": "workspace:*",
     "@space-lens/cli": "workspace:*",
     "space-lens": "workspace:*"
   },
   "devDependencies": {
-    "@kunkunsh/headless": "link:../../../kunkun/packages/headless",
+    "@kunkunsh/headless": "workspace:*",
+    "@types/bun": "^1.3.14",
     "@types/node": "^25.9.3",
     "playwright": "^1.60.0",
     "typescript": "^6.0.3"

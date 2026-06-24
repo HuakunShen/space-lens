@@ -9,7 +9,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 
 describe('Kunkun plugin packaging', () => {
-  test('ships the Space Lens native scanner package next to the backend bundle', () => {
+  test('ships the Space Lens scanner package wrapper next to the backend bundle', () => {
     const dist = path.resolve(import.meta.dir, '../dist')
     const requireFromDist = createRequire(path.join(dist, 'backend.js'))
     const scannerEntry = requireFromDist.resolve('space-lens')
@@ -38,9 +38,15 @@ describe('Kunkun plugin packaging', () => {
     expect(report.packageName).toBe('space-lens')
     expect(report.currentPlatform.platform).toBe(process.platform)
     expect(report.currentPlatform.arch).toBe(process.arch)
-    expect(report.currentPlatform.bundled).toBe(true)
-    expect(report.bundledArtifacts).toContain(report.currentPlatform.artifact)
     expect(report.expectedArtifacts).toContain(report.currentPlatform.artifact)
+    expect(report.currentPlatform.bundled).toBe(
+      report.bundledArtifacts.includes(report.currentPlatform.artifact),
+    )
+    if (report.currentPlatform.bundled) {
+      expect(report.bundledArtifacts).toContain(report.currentPlatform.artifact)
+    } else {
+      expect(report.missingArtifacts).toContain(report.currentPlatform.artifact)
+    }
     expect(report.crossPlatformComplete).toBe(report.missingArtifacts.length === 0)
     expect(report.releaseHint).toContain(
       report.crossPlatformComplete

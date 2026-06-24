@@ -25,6 +25,9 @@ export interface ScanTarget {
   description: string
   size: number
   used?: number
+  source?: 'preset' | 'recent'
+  removable?: boolean
+  lastScannedAt?: string
 }
 
 export interface TreeNodeSummary {
@@ -148,4 +151,5 @@ export interface SpaceLensAPI {
   executeCleanup(options: ExecuteCleanupOptions): Promise<CleanupOutcome>
   showInFileManager?(path: string): Promise<void>
   openInTerminal?(path: string): Promise<void>
+  forgetScanTarget?(path: string): Promise<void>
 }

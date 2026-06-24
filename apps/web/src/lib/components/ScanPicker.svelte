@@ -5,6 +5,7 @@
     HardDrive,
     Plus,
     Search,
+    X,
   } from "@lucide/svelte";
   import type { ScanStatus, ScanTarget } from "$lib/api/types";
   import { formatBytes } from "$lib/format";
@@ -22,13 +23,29 @@
     status: ScanStatus | null;
     onScan: (paths: string[]) => void;
     onCancel: () => void;
+    onForget?: (path: string) => Promise<void> | void;
   }
 
-  let { targets, mode, busy, error, status, onScan, onCancel }: Props =
-    $props();
+  let {
+    targets,
+    mode,
+    busy,
+    error,
+    status,
+    onScan,
+    onCancel,
+    onForget,
+  }: Props = $props();
   let selectedId = $state("");
   let customPath = $state("");
   let secondPath = $state("");
+  let forgettingPath = $state<string | null>(null);
+  let recentTargets = $derived(
+    targets.filter((target) => target.source === "recent"),
+  );
+  let presetTargets = $derived(
+    targets.filter((target) => target.source !== "recent"),
+  );
   let selectedTarget = $derived(
     targets.find((target) => target.id === selectedId),
   );
@@ -49,6 +66,18 @@
   function scanSelected() {
     if (!canScan) return;
     onScan(selectedPaths);
+  }
+
+  async function forgetTarget(event: MouseEvent, target: ScanTarget) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!onForget) return;
+    forgettingPath = target.path;
+    try {
+      await onForget(target.path);
+    } finally {
+      forgettingPath = null;
+    }
   }
 </script>
 
@@ -81,13 +110,60 @@
 
     <div class="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]">
       <aside class="flex min-h-0 flex-col gap-3 border-r bg-sidebar/55 p-3">
+        {#if recentTargets.length > 0}
+          <div class="grid gap-1.5">
+            <span
+              class="px-2 text-xs font-semibold uppercase text-muted-foreground"
+            >
+              Recent
+            </span>
+            {#each recentTargets as target (target.id)}
+              <div
+                class={[
+                  "flex min-h-12 items-center rounded-md border border-transparent text-sm text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-accent-foreground",
+                  selectedId === target.id
+                    ? "border-border bg-accent text-accent-foreground"
+                    : "",
+                ]}
+              >
+                <button
+                  class="flex min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left"
+                  onclick={() => (selectedId = target.id)}
+                  type="button"
+                >
+                  <FolderOpen size={15} />
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate font-medium">
+                      {target.label}
+                    </span>
+                    <span class="block truncate text-xs text-muted-foreground">
+                      {target.description}
+                    </span>
+                  </span>
+                </button>
+                {#if target.removable}
+                  <button
+                    aria-label={`Remove ${target.label} from recent scan paths`}
+                    class="mr-1 grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                    disabled={forgettingPath === target.path}
+                    onclick={(event) => forgetTarget(event, target)}
+                    type="button"
+                  >
+                    <X size={14} />
+                  </button>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+
         <div class="grid gap-1.5">
           <span
             class="px-2 text-xs font-semibold uppercase text-muted-foreground"
           >
             Disks and Folders
           </span>
-          {#each targets as target (target.id)}
+          {#each presetTargets as target (target.id)}
             <button
               class={[
                 "flex min-h-12 items-center gap-2 rounded-md border border-transparent px-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-accent-foreground",
@@ -228,10 +304,10 @@
                   </Button>
                 </div>
                 <Progress
+                  indeterminate={status.progress === null}
                   value={status.progress === null
-                    ? 35
+                    ? undefined
                     : Math.round(status.progress * 100)}
-                  class="[&_[data-slot=progress-indicator]]:animate-pulse"
                 />
               </Card.Header>
               <Card.Content>

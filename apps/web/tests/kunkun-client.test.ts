@@ -1,16 +1,15 @@
 /**
  * Smoke tests for the Kunkun SpaceLensAPI adapter.
  *
- * These tests inject a fake Kunkun host/backend pair so the shared Svelte UI
- * contract can be checked without launching Electron.
+ * These tests inject the high-level Kunkun runtime adapter that the plugin
+ * package owns, so the shared web app never needs to construct kkrpc channels.
  */
 import { describe, expect, test } from "bun:test";
-import {
-  createKunkunClientWithRuntime,
-  type KunkunClientBackendRuntime,
-  type KunkunClientRuntime,
-  type KunkunHostAPI,
-} from "../src/lib/api/kunkun-client";
+import { createKunkunClientWithAdapter } from "../src/lib/api/kunkun-client";
+import type {
+  KunkunBackendConnection,
+  KunkunRuntimeAdapter,
+} from "../src/lib/api/kunkun-runtime";
 import type {
   CleanupPlanOptions,
   ExecuteCleanupOptions,
@@ -134,11 +133,15 @@ function createHarness(
     writeAllowed?: boolean;
     confirmDelete?: boolean;
     plan?: RemovalPlan;
+    storage?: Record<string, string>;
   } = {},
 ): {
   api: SpaceLensAPI;
   backend: ReturnType<typeof createFakeBackend>;
-  spawnedReadRoots: readonly string[][];
+  spawnedBackends: readonly {
+    scriptPath: string;
+    runtime?: "auto" | "node" | "bun" | "deno";
+  }[];
   destroyedBackends: readonly string[];
   permissionChecks: readonly { permissionType: string; scopePattern: string }[];
   permissionRequests: readonly {
@@ -148,9 +151,13 @@ function createHarness(
   }[];
   trashCalls: readonly (string | string[])[];
   pathCalls: readonly string[];
+  storage: Record<string, string>;
 } {
   const backend = createFakeBackend(options.plan);
-  const spawnedReadRoots: string[][] = [];
+  const spawnedBackends: Array<{
+    scriptPath: string;
+    runtime?: "auto" | "node" | "bun" | "deno";
+  }> = [];
   const destroyedBackends: string[] = [];
   const permissionChecks: Array<{
     permissionType: string;
@@ -163,15 +170,10 @@ function createHarness(
   }> = [];
   const trashCalls: Array<string | string[]> = [];
   const pathCalls: string[] = [];
+  const storage = options.storage ?? {};
   let backendCounter = 0;
 
-  const host: KunkunHostAPI = {
-    backend: {
-      async spawn() {
-        return { backendId: "unused", channel: "unused" };
-      },
-      async kill() {},
-    },
+  const adapter: KunkunRuntimeAdapter = {
     path: {
       async homeDir() {
         pathCalls.push("homeDir");
@@ -206,31 +208,30 @@ function createHarness(
         return true;
       },
     },
-    system: {
-      async showInFinder() {},
-      async trash(path) {
-        trashCalls.push(path);
+    storage: {
+      async getItem(key) {
+        return storage[key];
+      },
+      async setItem(key, value) {
+        storage[key] = value;
+      },
+      async removeItem(key) {
+        delete storage[key];
       },
     },
-    ui: {
-      async confirmAlert() {
-        return options.confirmDelete ?? true;
-      },
+    async confirmAlert() {
+      return options.confirmDelete ?? true;
     },
-  };
-
-  const runtime: KunkunClientRuntime = {
-    async getHostRuntime() {
-      return { host };
+    async showInFinder() {},
+    async trash(path) {
+      trashCalls.push(path);
     },
-    async createBackendRuntime(
-      fsReadAllow = [],
-    ): Promise<KunkunClientBackendRuntime> {
+    async spawnBackend(spawnOptions): Promise<KunkunBackendConnection<SpaceLensAPI>> {
       const backendId = `backend-${++backendCounter}`;
-      spawnedReadRoots.push([...fsReadAllow]);
+      spawnedBackends.push(spawnOptions);
       return {
-        backend,
-        fsReadAllow: [...fsReadAllow],
+        backendId,
+        api: backend,
         async destroy() {
           destroyedBackends.push(backendId);
         },
@@ -239,19 +240,20 @@ function createHarness(
   };
 
   return {
-    api: createKunkunClientWithRuntime(runtime),
+    api: createKunkunClientWithAdapter(adapter),
     backend,
-    spawnedReadRoots,
+    spawnedBackends,
     destroyedBackends,
     permissionChecks,
     permissionRequests,
     trashCalls,
     pathCalls,
+    storage,
   };
 }
 
-describe("createKunkunClientWithRuntime", () => {
-  test("loads scan targets through Kunkun host path APIs without spawning backend", async () => {
+describe("createKunkunClientWithAdapter", () => {
+  test("loads scan targets through Kunkun path APIs without spawning backend", async () => {
     const harness = createHarness();
 
     await expect(harness.api.getScanTargets()).resolves.toEqual([
@@ -262,6 +264,7 @@ describe("createKunkunClientWithRuntime", () => {
         kind: "folder",
         description: "/Users/tester",
         size: 0,
+        source: "preset",
       },
       {
         id: "desktop",
@@ -270,6 +273,7 @@ describe("createKunkunClientWithRuntime", () => {
         kind: "folder",
         description: "/Users/tester/Desktop",
         size: 0,
+        source: "preset",
       },
       {
         id: "downloads",
@@ -278,6 +282,7 @@ describe("createKunkunClientWithRuntime", () => {
         kind: "folder",
         description: "/Users/tester/Downloads",
         size: 0,
+        source: "preset",
       },
       {
         id: "documents",
@@ -286,6 +291,7 @@ describe("createKunkunClientWithRuntime", () => {
         kind: "folder",
         description: "/Users/tester/Documents",
         size: 0,
+        source: "preset",
       },
     ]);
 
@@ -295,10 +301,83 @@ describe("createKunkunClientWithRuntime", () => {
       "downloadDir",
       "documentDir",
     ]);
-    expect(harness.spawnedReadRoots).toEqual([]);
+    expect(harness.spawnedBackends).toEqual([]);
   });
 
-  test("requests fs-read before scan and passes selected roots to backend spawn", async () => {
+  test("loads recent scan targets before presets and dedupes preset paths", async () => {
+    const harness = createHarness({
+      storage: {
+        "space-lens.recentScanTargets.v1": JSON.stringify([
+          {
+            path: "/Users/tester",
+            label: "Tester Home",
+            lastScannedAt: "2026-06-17T08:00:00.000Z",
+            scanCount: 2,
+          },
+          {
+            path: "/tmp/newer",
+            label: "newer",
+            lastScannedAt: "2026-06-17T09:00:00.000Z",
+            scanCount: 1,
+          },
+        ]),
+      },
+    });
+
+    await expect(harness.api.getScanTargets()).resolves.toEqual([
+      {
+        id: "recent:/tmp/newer",
+        label: "newer",
+        path: "/tmp/newer",
+        kind: "folder",
+        description: "/tmp/newer",
+        size: 0,
+        source: "recent",
+        removable: true,
+        lastScannedAt: "2026-06-17T09:00:00.000Z",
+      },
+      {
+        id: "recent:/Users/tester",
+        label: "Tester Home",
+        path: "/Users/tester",
+        kind: "folder",
+        description: "/Users/tester",
+        size: 0,
+        source: "recent",
+        removable: true,
+        lastScannedAt: "2026-06-17T08:00:00.000Z",
+      },
+      {
+        id: "desktop",
+        label: "Desktop",
+        path: "/Users/tester/Desktop",
+        kind: "folder",
+        description: "/Users/tester/Desktop",
+        size: 0,
+        source: "preset",
+      },
+      {
+        id: "downloads",
+        label: "Downloads",
+        path: "/Users/tester/Downloads",
+        kind: "folder",
+        description: "/Users/tester/Downloads",
+        size: 0,
+        source: "preset",
+      },
+      {
+        id: "documents",
+        label: "Documents",
+        path: "/Users/tester/Documents",
+        kind: "folder",
+        description: "/Users/tester/Documents",
+        size: 0,
+        source: "preset",
+      },
+    ]);
+  });
+
+  test("requests fs-read before scan and records recent targets", async () => {
     const harness = createHarness({ readAllowed: false });
 
     await expect(
@@ -316,8 +395,85 @@ describe("createKunkunClientWithRuntime", () => {
       scopePattern: "/tmp/space-lens/**",
       reason: "Scan this folder with Space Lens.",
     });
-    expect(harness.spawnedReadRoots).toEqual([["/tmp/space-lens"]]);
+    expect(harness.spawnedBackends).toEqual([
+      {
+        scriptPath: "$EXTENSION/dist/backend.js",
+        runtime: "deno",
+      },
+    ]);
     expect(harness.backend.scans[0]?.paths).toEqual(["/tmp/space-lens"]);
+    expect(
+      JSON.parse(harness.storage["space-lens.recentScanTargets.v1"] ?? "[]"),
+    ).toMatchObject([
+      {
+        path: "/tmp/space-lens",
+        label: "space-lens",
+        scanCount: 1,
+      },
+    ]);
+  });
+
+  test("updates each successfully scanned path in recent target storage", async () => {
+    const harness = createHarness({
+      readAllowed: true,
+      storage: {
+        "space-lens.recentScanTargets.v1": JSON.stringify([
+          {
+            path: "/tmp/one",
+            label: "one",
+            lastScannedAt: "2026-06-17T08:00:00.000Z",
+            scanCount: 3,
+          },
+        ]),
+      },
+    });
+
+    await harness.api.startScan(startOptions(["/tmp/one/", "/tmp/two"]));
+
+    const stored = JSON.parse(
+      harness.storage["space-lens.recentScanTargets.v1"] ?? "[]",
+    ) as Array<{ path: string; label: string; scanCount: number }>;
+    expect(stored.map((entry) => entry.path)).toEqual(["/tmp/two", "/tmp/one"]);
+    expect(stored.find((entry) => entry.path === "/tmp/one")?.scanCount).toBe(4);
+    expect(stored.find((entry) => entry.path === "/tmp/two")?.label).toBe("two");
+  });
+
+  test("forgets only the requested recent scan target", async () => {
+    const harness = createHarness({
+      storage: {
+        "space-lens.recentScanTargets.v1": JSON.stringify([
+          {
+            path: "/tmp/one",
+            label: "one",
+            lastScannedAt: "2026-06-17T08:00:00.000Z",
+            scanCount: 1,
+          },
+          {
+            path: "/tmp/two",
+            label: "two",
+            lastScannedAt: "2026-06-17T09:00:00.000Z",
+            scanCount: 1,
+          },
+        ]),
+      },
+    });
+
+    await harness.api.forgetScanTarget?.("/tmp/one/");
+
+    const stored = JSON.parse(
+      harness.storage["space-lens.recentScanTargets.v1"] ?? "[]",
+    ) as Array<{ path: string }>;
+    expect(stored.map((entry) => entry.path)).toEqual(["/tmp/two"]);
+  });
+
+  test("ignores invalid recent target storage without crashing", async () => {
+    const harness = createHarness({
+      storage: {
+        "space-lens.recentScanTargets.v1": "not json",
+      },
+    });
+
+    await expect(harness.api.getScanTargets()).resolves.toHaveLength(4);
   });
 
   test("respawns backend when a later scan needs a wider read set", async () => {
@@ -327,10 +483,7 @@ describe("createKunkunClientWithRuntime", () => {
     await harness.api.startScan(startOptions(["/tmp/one"]));
     await harness.api.startScan(startOptions(["/tmp/one", "/tmp/two"]));
 
-    expect(harness.spawnedReadRoots).toEqual([
-      ["/tmp/one"],
-      ["/tmp/one", "/tmp/two"],
-    ]);
+    expect(harness.spawnedBackends).toHaveLength(2);
     expect(harness.destroyedBackends).toEqual(["backend-1"]);
   });
 
@@ -345,7 +498,6 @@ describe("createKunkunClientWithRuntime", () => {
       },
     );
 
-    expect(harness.spawnedReadRoots).toEqual([["/tmp/space-lens"]]);
     expect(harness.trashCalls).toEqual([]);
     expect(harness.backend.nativeDeleteCalls).toEqual([]);
   });
@@ -388,7 +540,7 @@ describe("createKunkunClientWithRuntime", () => {
       errors: [],
     });
 
-    expect(harness.spawnedReadRoots).toEqual([["/tmp/space-lens"]]);
+    expect(harness.spawnedBackends).toHaveLength(1);
     expect(harness.destroyedBackends).toEqual([]);
     expect(harness.backend.cleanupPlans[0]?.entries[0]?.path).toBe(
       "/tmp/space-lens/nested/old.log",
@@ -409,11 +561,7 @@ describe("createKunkunClientWithRuntime", () => {
       }),
     ).resolves.toEqual(removalPlan());
 
-    expect(harness.spawnedReadRoots).toEqual([
-      ["/tmp/space-lens"],
-      ["/tmp/other"],
-      ["/tmp/space-lens"],
-    ]);
+    expect(harness.spawnedBackends).toHaveLength(3);
     expect(harness.destroyedBackends).toEqual(["backend-1", "backend-2"]);
   });
 });

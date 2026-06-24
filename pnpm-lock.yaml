@@ -20,31 +20,6 @@ importers:
         specifier: ^3.6.2
         version: 3.8.4
 
-  apps/kunkun-plugin:
-    dependencies:
-      '@kunkunsh/api':
-        specifier: link:../../../kunkun/packages/api
-        version: link:../../../kunkun/packages/api
-      '@space-lens/cli':
-        specifier: workspace:*
-        version: link:../tui
-      space-lens:
-        specifier: workspace:*
-        version: link:../../packages/node
-    devDependencies:
-      '@kunkunsh/headless':
-        specifier: link:../../../kunkun/packages/headless
-        version: link:../../../kunkun/packages/headless
-      '@types/node':
-        specifier: ^25.9.3
-        version: 25.9.3
-      playwright:
-        specifier: ^1.60.0
-        version: 1.60.0
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-
   apps/tui:
     dependencies:
       '@effect/cli':

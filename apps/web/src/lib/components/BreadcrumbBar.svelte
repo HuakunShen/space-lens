@@ -13,32 +13,32 @@
   let { items, onSelect, onBack, canGoBack = false }: Props = $props();
 </script>
 
-<nav class="flex min-w-0 items-center gap-2" aria-label="Current path">
+<nav class="flex min-w-0 items-center gap-1" aria-label="Current path">
   <Button
     variant="ghost"
-    size="icon-sm"
+    size="icon-xs"
     type="button"
     onclick={onBack}
     disabled={!canGoBack}
     aria-label="Back"
   >
-    <ChevronLeft class="size-4" />
+    <ChevronLeft class="size-3.5" />
   </Button>
   <div class="flex min-w-0 items-center gap-1 overflow-hidden">
     {#each items as item, index (item.id)}
       {#if index > 0}
-        <ChevronRight class="size-3.5 shrink-0 text-muted-foreground" />
+        <ChevronRight class="size-3 shrink-0 text-muted-foreground" />
       {/if}
       <Button
         variant={index === items.length - 1 ? "secondary" : "ghost"}
-        size="sm"
+        size="xs"
         type="button"
-        class="max-w-40 shrink truncate px-2"
+        class="max-w-36 shrink truncate px-2"
         onclick={() => onSelect(item)}
         title={item.path}
       >
         {#if index === 0}
-          <Home class="size-4" />
+          <Home class="size-3.5" />
         {/if}
         {item.name}
       </Button>

@@ -1,7 +1,6 @@
 packages:
   - packages/node
   - apps/tui
-  - apps/kunkun-plugin
   - apps/web
 allowBuilds:
   '@parcel/watcher': true
