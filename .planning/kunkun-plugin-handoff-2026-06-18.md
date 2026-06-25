@@ -47,9 +47,9 @@ The Space Lens plugin depends on local Kunkun host changes for:
 
 ### 3. Native Artifact Matrix Is Incomplete
 
-The current submodule checkout does not have `space-lens.darwin-arm64.node` built under `packages/node`, so `apps/kunkun-plugin/dist/scanner-runtime-report.json` correctly reports `"currentPlatform.bundled": false`. The copy script now filters `.node` files to Space Lens' declared NAPI artifacts and no longer mistakes unrelated dev dependency binaries, such as `@oxc-node/core`, for the scanner.
+The current submodule checkout has the local Darwin arm64 artifact bundled, so `apps/kunkun-plugin/dist/scanner-runtime-report.json` reports `"currentPlatform.bundled": true`. The copy script filters `.node` files to Space Lens' declared NAPI artifacts and no longer mistakes unrelated dev dependency binaries, such as `@oxc-node/core`, for the scanner.
 
-Build or download the current-platform NAPI artifact before expecting real scanner mode to work from packaged plugin dist. Release CI should run:
+Cross-platform release coverage is still incomplete because only the current platform artifact is bundled locally. Release CI should run:
 
 ```sh
 SPACE_LENS_REQUIRE_ALL_NATIVE_ARTIFACTS=1 node apps/kunkun-plugin/scripts/copy-web-assets.mjs
@@ -89,7 +89,7 @@ The frontend is HMR-served by Vite; the backend is still spawned by Kunkun from 
 Most recent checks from the Kunkun submodule setup:
 
 - `bun test tests/*.test.ts` in `apps/web`: 10 tests passed.
-- `bun test tests/*.test.ts` in `apps/kunkun-plugin`: path-policy and packaging resolver tests passed, but browser/headless custom-view smokes need loopback server permission outside Codex's default sandbox, and the scanner runtime report correctly fails the current-platform bundled assertion until `space-lens.darwin-arm64.node` is built.
+- `bun test tests/*.test.ts` in `apps/kunkun-plugin`: path-policy and packaging resolver tests passed, but browser/headless custom-view smokes need loopback server permission outside Codex's default sandbox. The scanner runtime report now passes the current-platform bundled assertion while still reporting an incomplete cross-platform artifact matrix.
 - `pnpm --filter @kunkunsh/api typecheck`, `pnpm --filter @kunkunsh/plugin-runtime typecheck`, and `pnpm --filter @kunkunsh/core typecheck`: passed from the Kunkun root.
 - `pnpm --filter @kunkunsh/core test -- tests/backend-spawn-process.test.ts`: passed.
 - `pnpm --filter kunkun-electron exec vitest run electron/__tests__/plugin-host-api-service.test.ts electron/__tests__/plugin-manager-space-lens.test.ts`: passed.
