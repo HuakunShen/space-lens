@@ -6,7 +6,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
 import { startHeadlessServer } from '@kunkunsh/headless'
-import { createKunkunClient } from '../../web/src/lib/api/kunkun-client'
+import { createKunkunClientWithAdapter } from '../../web/src/lib/api/kunkun-client'
+import type { KunkunRuntimeAdapter } from '../../web/src/lib/api/kunkun-runtime'
 
 const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
 
@@ -55,7 +56,7 @@ describe('Space Lens headless custom-view smoke', () => {
         },
       })
 
-      const client = createKunkunClient()
+      const client = createKunkunClientWithAdapter(createUnavailableBackendAdapter(pluginRoot))
       await expect(
         withTimeout(client.startScan({
           paths: [pluginRoot],
@@ -71,6 +72,37 @@ describe('Space Lens headless custom-view smoke', () => {
     }
   })
 })
+
+function createUnavailableBackendAdapter(pluginRoot: string): KunkunRuntimeAdapter {
+  const storage = new Map<string, string>()
+  return {
+    path: {
+      homeDir: async () => pluginRoot,
+      desktopDir: async () => pluginRoot,
+      downloadDir: async () => pluginRoot,
+      documentDir: async () => pluginRoot,
+    },
+    permissions: {
+      check: async () => true,
+      request: async () => true,
+    },
+    storage: {
+      getItem: async (key) => storage.get(key),
+      setItem: async (key, value) => {
+        storage.set(key, value)
+      },
+      removeItem: async (key) => {
+        storage.delete(key)
+      },
+    },
+    confirmAlert: async () => true,
+    showInFinder: async () => undefined,
+    trash: async () => undefined,
+    spawnBackend: async () => {
+      throw new Error('Host capability "backend.spawn" is not available in headless runtime')
+    },
+  }
+}
 
 function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined

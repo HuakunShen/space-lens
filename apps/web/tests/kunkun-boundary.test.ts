@@ -8,7 +8,23 @@ import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+type PackageJson = {
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+};
+
 describe("Space Lens Kunkun web boundary", () => {
+  test("declares Kunkun API as an optional peer instead of an implicit dependency", async () => {
+    const packageJson = JSON.parse(
+      await readFile(resolve(import.meta.dir, "../package.json"), "utf8"),
+    ) as PackageJson;
+
+    expect(packageJson.dependencies?.["@kunkunsh/api"]).toBeUndefined();
+    expect(packageJson.peerDependencies?.["@kunkunsh/api"]).toBe("*");
+    expect(packageJson.peerDependenciesMeta?.["@kunkunsh/api"]?.optional).toBe(true);
+  });
+
   test("client factory dynamically imports runtime clients", async () => {
     const source = await readFile(
       resolve(import.meta.dir, "../src/lib/api/client.ts"),

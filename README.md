@@ -102,7 +102,7 @@ Space Lens also has a Svelte web UI in `apps/web`. The web UI is deliberately wr
 
 In this document, "standalone mode" means Space Lens is running outside Kunkun: a user starts `spacelens-web`, opens the printed local browser URL, and the browser talks to the local Space Lens process over WebSocket kkrpc. It is the NPX/browser host for Space Lens, not a Kunkun plugin.
 
-This is an advanced dual-host pattern rather than the simplest recommended Kunkun plugin demo. A normal Kunkun-only plugin can import `@kunkunsh/api/ui/custom` directly from its view. Space Lens uses an extra adapter layer because the same web app must also work as a standalone browser app without depending on Kunkun packages.
+This is an advanced dual-host pattern rather than the simplest recommended Kunkun plugin demo. A normal Kunkun-only plugin can import `@kunkunsh/api/ui/custom` directly from its view. Space Lens uses an extra adapter layer because the same web app must also work as a standalone browser app without taking Kunkun packages as normal dependencies. The web package declares `@kunkunsh/api` as an optional peer for Kunkun mode, and the Kunkun plugin build links the local Kunkun checkout to satisfy that peer.
 
 ```mermaid
 flowchart TD
