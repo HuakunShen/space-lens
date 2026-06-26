@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test'
 
-import { startHeadlessServer } from '@kunkunsh/headless'
+import { startHeadlessServer } from '@kunkunsh/sdk/headless'
 import { createKunkunClientWithAdapter } from '../../web/src/lib/api/kunkun-client'
 import type { KunkunRuntimeAdapter } from '../../web/src/lib/api/kunkun-runtime'
 

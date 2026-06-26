@@ -74,9 +74,9 @@ KKRPC/Hono WebSocket references outside this repo:
 Relevant Kunkun patterns from those samples:
 
 - `wterm-terminal-demo` uses a Svelte/Vite custom view and a separate backend process.
-- Frontend custom views import `@kunkunsh/api/ui/custom`.
+- Frontend custom views import `@kunkunsh/sdk/ui/custom`.
 - Frontend starts backend with `spawnBackend({ scriptPath: "$EXTENSION/dist/backend.js", runtime: "node" })`.
-- Backend exposes API with `exposeBackend()` from `@kunkunsh/api/backend`.
+- Backend exposes API with `exposeBackend()` from `@kunkunsh/sdk/backend`.
 - Kunkun frontend-to-backend communication is KKRPC over a backend process relay; the backend side uses stdio.
 - `ai-config-manager` already has a runtime mode pattern that switches between Kunkun, WebSocket, and demo modes.
 
@@ -384,7 +384,7 @@ Future KKRPC import strategy:
 - For future WebSocket RPC, refer to `/Users/hk/Dev/kkrpc/packages/kkrpc/__tests__/hono-websocket.test.ts` and `/Users/hk/Dev/kkrpc/docs/src/content/docs/examples/hono-websocket.md`.
 - The Hono WebSocket pattern is `createHonoWebSocketHandler({ expose })` on the server and `RPCChannel + webSocketClientTransport({ url })` on the browser/client side.
 - Do not make WebSocket/KKRPC mandatory for the first NPX implementation. Start with Hono JSON HTTP endpoints in `apps/tui`, then add WebSocket/KKRPC only when streaming progress or bidirectional RPC becomes necessary.
-- Use Kunkun `spawnBackend()` and `@kunkunsh/api/backend` `exposeBackend()` for plugin mode.
+- Use Kunkun `spawnBackend()` and `@kunkunsh/sdk/backend` `exposeBackend()` for plugin mode.
 
 The frontend must call a stable `SpaceLensAPI` interface. The UI must not directly know whether it is using HTTP, Kunkun stdio backend, or demo data.
 

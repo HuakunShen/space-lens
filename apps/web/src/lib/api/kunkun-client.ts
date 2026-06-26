@@ -52,7 +52,7 @@ const BACKEND_SCRIPT_PATH = "$EXTENSION/dist/backend.js";
 const BACKEND_RUNTIME = "deno" as const;
 const RECENT_SCAN_TARGETS_STORAGE_KEY = "space-lens.recentScanTargets.v1";
 const MAX_RECENT_SCAN_TARGETS = 12;
-const kunkunCustomApiSpecifier: string = "@kunkunsh/api/ui/custom";
+const kunkunCustomApiSpecifier: string = "@kunkunsh/sdk/ui/custom";
 const kunkunApiSpecifier: string = "@kunkunsh/api";
 
 let adapterPromise: Promise<KunkunRuntimeAdapter> | null = null;

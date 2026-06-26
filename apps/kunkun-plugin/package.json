@@ -95,11 +95,11 @@
   },
   "dependencies": {
     "@kunkunsh/api": "workspace:*",
+    "@kunkunsh/sdk": "workspace:*",
     "@space-lens/cli": "workspace:*",
     "space-lens": "workspace:*"
   },
   "devDependencies": {
-    "@kunkunsh/headless": "workspace:*",
     "@types/bun": "^1.3.14",
     "@types/node": "^25.9.3",
     "playwright": "^1.60.0",

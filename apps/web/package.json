@@ -46,10 +46,10 @@
     "mode-watcher": "^1.1.0"
   },
   "peerDependencies": {
-    "@kunkunsh/api": "*"
+    "@kunkunsh/sdk": "*"
   },
   "peerDependenciesMeta": {
-    "@kunkunsh/api": {
+    "@kunkunsh/sdk": {
       "optional": true
     }
   }

@@ -102,7 +102,7 @@ Space Lens also has a Svelte web UI in `apps/web`. The web UI is deliberately wr
 
 In this document, "standalone mode" means Space Lens is running outside Kunkun: a user starts `spacelens-web`, opens the printed local browser URL, and the browser talks to the local Space Lens process over WebSocket kkrpc. It is the NPX/browser host for Space Lens, not a Kunkun plugin.
 
-This is an advanced dual-host pattern rather than the simplest recommended Kunkun plugin demo. A normal Kunkun-only plugin can import `@kunkunsh/api/ui/custom` directly from its view. Space Lens uses an extra adapter layer because the same web app must also work as a standalone browser app without taking Kunkun packages as normal dependencies. The web package declares `@kunkunsh/api` as an optional peer for Kunkun mode, and the Kunkun plugin build links the local Kunkun checkout to satisfy that peer.
+This is an advanced dual-host pattern rather than the simplest recommended Kunkun plugin demo. A normal Kunkun-only plugin can import `@kunkunsh/sdk/ui/custom` directly from its view. Space Lens uses an extra adapter layer because the same web app must also work as a standalone browser app without taking Kunkun packages as normal dependencies. The web package declares `@kunkunsh/api` as an optional peer for Kunkun mode, and the Kunkun plugin build links the local Kunkun checkout to satisfy that peer.
 
 ```mermaid
 flowchart TD
@@ -115,7 +115,7 @@ flowchart TD
 
   API --> Kunkun["Kunkun client"]
   Kunkun --> Adapter["KunkunRuntimeAdapter"]
-  Adapter --> Host["@kunkunsh/api/ui/custom"]
+  Adapter --> Host["@kunkunsh/sdk/ui/custom"]
   Host --> Backend["spawnBackend($EXTENSION/dist/backend.js)"]
   Backend --> Scanner
 
@@ -163,12 +163,12 @@ flowchart TD
   Mode -- "rpc" --> Rpc["dynamic import ./rpc-client"]
   Rpc --> WS["kkrpc/ws to apps/tui /rpc"]
   Mode -- "kunkun" --> Kunkun["dynamic import ./kunkun-client"]
-  Kunkun --> API["@kunkunsh/api/ui/custom"]
+  Kunkun --> API["@kunkunsh/sdk/ui/custom"]
   API --> Host["Kunkun host APIs + spawnBackend"]
   Mode -- "demo" --> Demo["dynamic import ./demo-client"]
 ```
 
-`@kunkunsh/api/ui/custom` still auto-connects to the Kunkun custom-view host when imported, but Space Lens imports it only from `kunkun-client.ts` and only after runtime mode resolves to `kunkun`. Standalone browser mode therefore loads `rpc-client.ts` and never initializes the Kunkun custom-view channel.
+`@kunkunsh/sdk/ui/custom` still auto-connects to the Kunkun custom-view host when imported, but Space Lens imports it only from `kunkun-client.ts` and only after runtime mode resolves to `kunkun`. Standalone browser mode therefore loads `rpc-client.ts` and never initializes the Kunkun custom-view channel.
 
 Runtime mode detection is intentionally explicit. Space Lens enters Kunkun mode when one of these host signals is present:
 
@@ -178,7 +178,7 @@ Runtime mode detection is intentionally explicit. Space Lens enters Kunkun mode 
 
 Space Lens does not use raw `window.electron.ipcRenderer` presence as a Kunkun-mode signal. IPC availability is a transport detail, not an authorization signal and not a security boundary.
 
-In Electron custom-view windows, Kunkun exposes a limited bridge to the plugin window so `@kunkunsh/api/ui/custom` can connect back to the host. That bridge is still treated as untrusted plugin input:
+In Electron custom-view windows, Kunkun exposes a limited bridge to the plugin window so `@kunkunsh/sdk/ui/custom` can connect back to the host. That bridge is still treated as untrusted plugin input:
 
 ```mermaid
 flowchart TD
@@ -192,12 +192,12 @@ flowchart TD
 
 This means a plugin can use its own Kunkun host channel, but it should not be able to call the main app renderer channel or another plugin/backend channel by guessing names. Privileged operations must still be enforced by the host API implementation: storage requires `storage`, scans request scoped `fs-read`, deletion requires confirmation plus scoped `fs-write`, and backend process spawning is mediated by Kunkun permissions and runtime policy.
 
-`kunkun-client.ts` still uses a small internal `KunkunRuntimeAdapter` interface for testability and separation of concerns. The default adapter is built with lazy imports from `@kunkunsh/api/ui/custom` and `@kunkunsh/api`; tests can inject a fake adapter without constructing Kunkun RPC channels.
+`kunkun-client.ts` still uses a small internal `KunkunRuntimeAdapter` interface for testability and separation of concerns. The default adapter is built with lazy imports from `@kunkunsh/sdk/ui/custom` and `@kunkunsh/api`; tests can inject a fake adapter without constructing Kunkun RPC channels.
 
 Kunkun mode still uses the same `SpaceLensAPI` as standalone mode. The difference is transport ownership:
 
 - standalone owns transport in `apps/tui`: Hono + `kkrpc/ws`;
-- Kunkun owns transport in `@kunkunsh/api/ui/custom`: custom-view host connection + `spawnBackend()`;
+- Kunkun owns transport in `@kunkunsh/sdk/ui/custom`: custom-view host connection + `spawnBackend()`;
 - `apps/web` owns only UI behavior and Space Lens client composition.
 
 ## Benchmark CLI

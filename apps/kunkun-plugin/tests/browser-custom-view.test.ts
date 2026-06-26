@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test'
 import { chromium } from 'playwright'
 
-import { startHeadlessServer } from '@kunkunsh/headless'
+import { startHeadlessServer } from '@kunkunsh/sdk/headless'
 
 describe('Space Lens browser custom-view smoke', () => {
   test('renders the packaged custom view and fails closed on unavailable backend relay', async () => {

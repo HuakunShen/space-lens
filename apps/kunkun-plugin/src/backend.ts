@@ -7,7 +7,7 @@
  * The Kunkun backend helper is resolved through a local pnpm link while the API
  * package is unpublished.
  */
-import { exposeBackend } from '@kunkunsh/api/backend'
+import { exposeBackend } from '@kunkunsh/sdk/backend'
 import { createSpaceLensAPI } from '@space-lens/cli/web-service'
 import type { SpaceLensAPI } from '@space-lens/cli/web-api'
 import {

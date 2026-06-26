@@ -2,7 +2,7 @@
  * Runtime boundary used by Space Lens' shared web app for Kunkun mode.
  *
  * The web UI owns SpaceLensAPI behavior, while the Kunkun plugin package owns
- * host bootstrap and kkrpc transport wiring through @kunkunsh/api/ui/custom.
+ * host bootstrap and kkrpc transport wiring through @kunkunsh/sdk/ui/custom.
  */
 import type { SpaceLensAPI } from "./types.js";
 

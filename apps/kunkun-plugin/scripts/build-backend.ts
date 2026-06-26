@@ -2,7 +2,7 @@
  * Builds the Space Lens Kunkun backend from either the Kunkun root workspace or
  * the nested Space Lens workspace. Bun runs this TypeScript script directly,
  * while tsdown bundles the backend into one JS file. The shared web package
- * declares @kunkunsh/api as an optional peer; this script links the local
+ * declares @kunkunsh/sdk as an optional peer; this script links the local
  * Kunkun checkout to satisfy that peer for plugin builds. The bundle is checked
  * so only Node builtins and the copied native `space-lens` scanner package
  * remain as runtime imports.
@@ -25,21 +25,23 @@ process.chdir(pluginRoot);
 
 if (!kunkunRoot) {
   throw new Error(
-    "Cannot build the Kunkun backend: @kunkunsh/api is unpublished and this package is not inside a Kunkun checkout.",
+    "Cannot build the Kunkun backend: @kunkunsh/sdk is unpublished and this package is not inside a Kunkun checkout.",
   );
 }
 
 const kunkunWorkspaceRoot = kunkunRoot;
 const kunkunApiPackage = resolve(kunkunWorkspaceRoot, "packages/api");
-const kunkunApiRequiredEntries = [
-  resolve(kunkunApiPackage, "dist/index.js"),
-  resolve(kunkunApiPackage, "dist/ui/custom.js"),
-  resolve(kunkunApiPackage, "dist/backend/index.js"),
+const kunkunSdkPackage = resolve(kunkunWorkspaceRoot, "packages/sdk");
+const kunkunRequiredEntries = [
+  resolve(kunkunApiPackage, "manifest-schema.json"),
+  resolve(kunkunSdkPackage, "dist/index.js"),
+  resolve(kunkunSdkPackage, "dist/ui/custom.js"),
+  resolve(kunkunSdkPackage, "dist/backend/index.js"),
 ];
-const missingKunkunApiEntry = kunkunApiRequiredEntries.find((entry) => !existsSync(entry));
-if (missingKunkunApiEntry) {
+const missingKunkunEntry = kunkunRequiredEntries.find((entry) => !existsSync(entry));
+if (missingKunkunEntry) {
   throw new Error(
-    `Cannot build the Kunkun plugin: ${missingKunkunApiEntry} is missing. Build @kunkunsh/api first from the Kunkun root.`,
+    `Cannot build the Kunkun plugin: ${missingKunkunEntry} is missing. Build @kunkunsh/sdk first from the Kunkun root.`,
   );
 }
 
@@ -93,10 +95,11 @@ async function ensureKunkunWorkspaceLinks(): Promise<void> {
   const webRoot = resolve(spaceLensRoot, "apps/web");
 
   await ensurePackageLink("@kunkunsh/api", kunkunApiPackage);
+  await ensurePackageLink("@kunkunsh/sdk", kunkunSdkPackage);
   await ensurePackageLink("@kunkunsh/observability", observabilityPackage);
   await ensurePackageLink("kkrpc", kkrpcPackage);
 
-  await ensurePackageLinkAt(webRoot, "@kunkunsh/api", kunkunApiPackage);
+  await ensurePackageLinkAt(webRoot, "@kunkunsh/sdk", kunkunSdkPackage);
   await ensurePackageLinkAt(kunkunWorkspaceRoot, "@kunkunsh/observability", observabilityPackage);
   await ensurePackageLinkAt(kunkunWorkspaceRoot, "kkrpc", kkrpcPackage);
 }

@@ -1,7 +1,7 @@
 /**
  * Boundary tests for the Space Lens Kunkun web adapter.
  *
- * Kunkun custom-view transport setup belongs in @kunkunsh/api/ui/custom, not in
+ * Kunkun custom-view transport setup belongs in @kunkunsh/sdk/ui/custom, not in
  * Space Lens' shared Svelte web app. Standalone browser RPC remains separate.
  */
 import { describe, expect, test } from "bun:test";
@@ -15,14 +15,14 @@ type PackageJson = {
 };
 
 describe("Space Lens Kunkun web boundary", () => {
-  test("declares Kunkun API as an optional peer instead of an implicit dependency", async () => {
+  test("declares Kunkun SDK as an optional peer instead of an implicit dependency", async () => {
     const packageJson = JSON.parse(
       await readFile(resolve(import.meta.dir, "../package.json"), "utf8"),
     ) as PackageJson;
 
-    expect(packageJson.dependencies?.["@kunkunsh/api"]).toBeUndefined();
-    expect(packageJson.peerDependencies?.["@kunkunsh/api"]).toBe("*");
-    expect(packageJson.peerDependenciesMeta?.["@kunkunsh/api"]?.optional).toBe(true);
+    expect(packageJson.dependencies?.["@kunkunsh/sdk"]).toBeUndefined();
+    expect(packageJson.peerDependencies?.["@kunkunsh/sdk"]).toBe("*");
+    expect(packageJson.peerDependenciesMeta?.["@kunkunsh/sdk"]?.optional).toBe(true);
   });
 
   test("client factory dynamically imports runtime clients", async () => {
