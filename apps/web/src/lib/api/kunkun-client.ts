@@ -53,7 +53,7 @@ const BACKEND_RUNTIME = "deno" as const;
 const RECENT_SCAN_TARGETS_STORAGE_KEY = "space-lens.recentScanTargets.v1";
 const MAX_RECENT_SCAN_TARGETS = 12;
 const kunkunCustomApiSpecifier: string = "@kunkunsh/sdk/ui/custom";
-const kunkunApiSpecifier: string = "@kunkunsh/api";
+const kunkunApiSpecifier: string = "@kunkunsh/sdk";
 
 let adapterPromise: Promise<KunkunRuntimeAdapter> | null = null;
 

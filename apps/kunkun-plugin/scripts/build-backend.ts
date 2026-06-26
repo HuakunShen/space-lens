@@ -30,10 +30,9 @@ if (!kunkunRoot) {
 }
 
 const kunkunWorkspaceRoot = kunkunRoot;
-const kunkunApiPackage = resolve(kunkunWorkspaceRoot, "packages/api");
 const kunkunSdkPackage = resolve(kunkunWorkspaceRoot, "packages/sdk");
 const kunkunRequiredEntries = [
-  resolve(kunkunApiPackage, "manifest-schema.json"),
+  resolve(kunkunSdkPackage, "manifest-schema.json"),
   resolve(kunkunSdkPackage, "dist/index.js"),
   resolve(kunkunSdkPackage, "dist/ui/custom.js"),
   resolve(kunkunSdkPackage, "dist/backend/index.js"),
@@ -76,7 +75,7 @@ if (scannerOnly || copyWebAssets) {
 function findKunkunRoot(startDir: string): string | null {
   let current = startDir;
   while (true) {
-    if (existsSync(resolve(current, "packages/api/package.json"))) {
+    if (existsSync(resolve(current, "packages/sdk/package.json"))) {
       return current;
     }
     const parent = dirname(current);
@@ -94,7 +93,6 @@ async function ensureKunkunWorkspaceLinks(): Promise<void> {
   const kkrpcPackage = resolve(kunkunWorkspaceRoot, "vendors/kkrpc/packages/kkrpc");
   const webRoot = resolve(spaceLensRoot, "apps/web");
 
-  await ensurePackageLink("@kunkunsh/api", kunkunApiPackage);
   await ensurePackageLink("@kunkunsh/sdk", kunkunSdkPackage);
   await ensurePackageLink("@kunkunsh/observability", observabilityPackage);
   await ensurePackageLink("kkrpc", kkrpcPackage);

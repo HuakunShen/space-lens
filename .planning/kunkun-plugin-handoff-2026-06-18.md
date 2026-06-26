@@ -27,11 +27,11 @@ The Kunkun plugin wrapper lives in `apps/kunkun-plugin`. Its backend wraps the s
 Space Lens is now expected to live under the Kunkun repo as `extensions/space-lens` and to use pnpm workspaces. The plugin imports unpublished packages by package name:
 
 ```ts
-import { exposeBackend } from '@kunkunsh/api/backend'
+import { exposeBackend } from '@kunkunsh/sdk/backend'
 import { startHeadlessServer } from '@kunkunsh/headless'
 ```
 
-The Kunkun root `pnpm-workspace.yaml` must keep `extensions/space-lens/apps/kunkun-plugin` in scope so `@kunkunsh/api` and `@kunkunsh/headless` resolve through workspace links until those packages are published.
+The Kunkun root `pnpm-workspace.yaml` must keep `extensions/space-lens/apps/kunkun-plugin` in scope so `@kunkunsh/sdk` and `@kunkunsh/headless` resolve through workspace links until those packages are published.
 
 ### 2. Kunkun Host Changes Are in the Kunkun Worktree
 
@@ -90,7 +90,7 @@ Most recent checks from the Kunkun submodule setup:
 
 - `bun test tests/*.test.ts` in `apps/web`: 10 tests passed.
 - `bun test tests/*.test.ts` in `apps/kunkun-plugin`: path-policy and packaging resolver tests passed, but browser/headless custom-view smokes need loopback server permission outside Codex's default sandbox. The scanner runtime report now passes the current-platform bundled assertion while still reporting an incomplete cross-platform artifact matrix.
-- `pnpm --filter @kunkunsh/api typecheck`, `pnpm --filter @kunkunsh/plugin-runtime typecheck`, and `pnpm --filter @kunkunsh/core typecheck`: passed from the Kunkun root.
+- `pnpm --filter @kunkunsh/sdk typecheck`, `pnpm --filter @kunkunsh/plugin-runtime typecheck`, and `pnpm --filter @kunkunsh/core typecheck`: passed from the Kunkun root.
 - `pnpm --filter @kunkunsh/core test -- tests/backend-spawn-process.test.ts`: passed.
 - `pnpm --filter kunkun-electron exec vitest run electron/__tests__/plugin-host-api-service.test.ts electron/__tests__/plugin-manager-space-lens.test.ts`: passed.
 

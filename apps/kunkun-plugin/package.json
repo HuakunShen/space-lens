@@ -1,5 +1,5 @@
 {
-  "$schema": "./node_modules/@kunkunsh/api/manifest-schema.json",
+  "$schema": "./node_modules/@kunkunsh/sdk/manifest-schema.json",
   "name": "@space-lens/kunkun-plugin",
   "private": true,
   "version": "0.2.1",
@@ -94,7 +94,6 @@
     ]
   },
   "dependencies": {
-    "@kunkunsh/api": "workspace:*",
     "@kunkunsh/sdk": "workspace:*",
     "@space-lens/cli": "workspace:*",
     "space-lens": "workspace:*"
