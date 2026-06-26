@@ -32,6 +32,7 @@ const scannerOnly = process.argv.includes("--scanner-only");
 
 await mkdir(dist, { recursive: true });
 if (!scannerOnly) {
+  await removePreviousWebAssets();
   await cp(webBuild, dist, { recursive: true });
   await rewriteIndexForCustomViewRoute(resolve(dist, "index.html"));
 }
@@ -45,6 +46,13 @@ async function rewriteIndexForCustomViewRoute(indexPath: string): Promise<void> 
     .replaceAll('import("/_app/', 'import("./_app/');
 
   await writeFile(indexPath, rewritten);
+}
+
+async function removePreviousWebAssets(): Promise<void> {
+  const entries = await readdir(webBuild, { withFileTypes: true });
+  await Promise.all(
+    entries.map((entry) => rm(resolve(dist, entry.name), { recursive: true, force: true })),
+  );
 }
 
 async function copyScannerRuntime(): Promise<void> {

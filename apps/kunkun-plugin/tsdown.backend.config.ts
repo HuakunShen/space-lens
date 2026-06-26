@@ -18,7 +18,7 @@ export default {
   outExtensions: () => ({ js: ".js" }),
   deps: {
     alwaysBundle: [
-      /^@kunkunsh\/api(?:\/.*)?$/,
+      /^@kunkunsh\/sdk(?:\/.*)?$/,
       /^@kunkunsh\/observability(?:\/.*)?$/,
       /^@space-lens\/cli(?:\/.*)?$/,
       /^kkrpc(?:\/.*)?$/,

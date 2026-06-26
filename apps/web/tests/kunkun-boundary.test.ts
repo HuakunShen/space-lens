@@ -10,19 +10,21 @@ import { resolve } from "node:path";
 
 type PackageJson = {
   dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
 };
 
 describe("Space Lens Kunkun web boundary", () => {
-  test("declares Kunkun SDK as an optional peer instead of an implicit dependency", async () => {
+  test("does not declare unpublished Kunkun SDK in the web package manifest", async () => {
     const packageJson = JSON.parse(
       await readFile(resolve(import.meta.dir, "../package.json"), "utf8"),
     ) as PackageJson;
 
     expect(packageJson.dependencies?.["@kunkunsh/sdk"]).toBeUndefined();
-    expect(packageJson.peerDependencies?.["@kunkunsh/sdk"]).toBe("*");
-    expect(packageJson.peerDependenciesMeta?.["@kunkunsh/sdk"]?.optional).toBe(true);
+    expect(packageJson.devDependencies?.["@kunkunsh/sdk"]).toBeUndefined();
+    expect(packageJson.peerDependencies?.["@kunkunsh/sdk"]).toBeUndefined();
+    expect(packageJson.peerDependenciesMeta?.["@kunkunsh/sdk"]).toBeUndefined();
   });
 
   test("client factory dynamically imports runtime clients", async () => {
@@ -39,17 +41,27 @@ describe("Space Lens Kunkun web boundary", () => {
     expect(source).not.toContain('import { createDemoClient }');
   });
 
-  test("vite config does not use build-target runtime aliasing", async () => {
+  test("vite config aliases only the Kunkun SDK loader by build mode", async () => {
     const source = await readFile(
       resolve(import.meta.dir, "../vite.config.ts"),
       "utf8",
     );
 
-    expect(source).not.toContain("SPACE_LENS_BUILD_TARGET");
+    expect(source).toContain("SPACE_LENS_KUNKUN_BUILD");
+    expect(source).toContain("#space-lens/kunkun-sdk-loader");
+    expect(source).toContain("kunkun-sdk-loader.kunkun.ts");
     expect(source).not.toContain("#space-lens/kunkun-runtime");
-    expect(source).not.toContain("kunkunRuntimeAdapter");
-    expect(source).not.toContain("kunkun-runtime.stub");
-    expect(source).not.toContain("kunkun-runtime.adapter");
+  });
+
+  test("Kunkun SDK loader uses literal imports for Vite bundling", async () => {
+    const source = await readFile(
+      resolve(import.meta.dir, "../src/lib/api/kunkun-sdk-loader.kunkun.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain('import("@kunkunsh/sdk/ui/custom")');
+    expect(source).toContain('import("@kunkunsh/sdk")');
+    expect(source).not.toContain("import(kunkun");
   });
 
   test("kunkun-client does not construct Kunkun host kkrpc transports", async () => {

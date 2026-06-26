@@ -102,7 +102,7 @@ Space Lens also has a Svelte web UI in `apps/web`. The web UI is deliberately wr
 
 In this document, "standalone mode" means Space Lens is running outside Kunkun: a user starts `spacelens-web`, opens the printed local browser URL, and the browser talks to the local Space Lens process over WebSocket kkrpc. It is the NPX/browser host for Space Lens, not a Kunkun plugin.
 
-This is an advanced dual-host pattern rather than the simplest recommended Kunkun plugin demo. A normal Kunkun-only plugin can import `@kunkunsh/sdk/ui/custom` directly from its view. Space Lens uses an extra adapter layer because the same web app must also work as a standalone browser app without taking Kunkun packages as normal dependencies. The web package declares `@kunkunsh/sdk` as an optional peer for Kunkun mode, and the Kunkun plugin build links the local Kunkun checkout to satisfy that peer.
+This is an advanced dual-host pattern rather than the simplest recommended Kunkun plugin demo. A normal Kunkun-only plugin can import `@kunkunsh/sdk/ui/custom` directly from its view. Space Lens uses an extra adapter layer because the same web app must also work as a standalone browser app without taking Kunkun packages as normal dependencies. The web package intentionally does not declare `@kunkunsh/sdk` in any dependency field; Kunkun mode lazy-loads the SDK only at runtime, and the Kunkun plugin build links the local Kunkun checkout before building the web app.
 
 ```mermaid
 flowchart TD
@@ -192,7 +192,7 @@ flowchart TD
 
 This means a plugin can use its own Kunkun host channel, but it should not be able to call the main app renderer channel or another plugin/backend channel by guessing names. Privileged operations must still be enforced by the host API implementation: storage requires `storage`, scans request scoped `fs-read`, deletion requires confirmation plus scoped `fs-write`, and backend process spawning is mediated by Kunkun permissions and runtime policy.
 
-`kunkun-client.ts` still uses a small internal `KunkunRuntimeAdapter` interface for testability and separation of concerns. The default adapter is built with lazy imports from `@kunkunsh/sdk/ui/custom` and `@kunkunsh/sdk`; tests can inject a fake adapter without constructing Kunkun RPC channels.
+`kunkun-client.ts` still uses a small internal `KunkunRuntimeAdapter` interface for testability and separation of concerns. The default adapter is built with lazy imports from `@kunkunsh/sdk/ui/custom` and `@kunkunsh/sdk`; these imports are runtime-only Kunkun mode hooks, not package manifest dependencies. Tests can inject a fake adapter without constructing Kunkun RPC channels.
 
 Kunkun mode still uses the same `SpaceLensAPI` as standalone mode. The difference is transport ownership:
 

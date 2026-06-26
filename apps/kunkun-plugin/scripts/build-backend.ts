@@ -2,10 +2,10 @@
  * Builds the Space Lens Kunkun backend from either the Kunkun root workspace or
  * the nested Space Lens workspace. Bun runs this TypeScript script directly,
  * while tsdown bundles the backend into one JS file. The shared web package
- * declares @kunkunsh/sdk as an optional peer; this script links the local
- * Kunkun checkout to satisfy that peer for plugin builds. The bundle is checked
- * so only Node builtins and the copied native `space-lens` scanner package
- * remain as runtime imports.
+ * does not declare @kunkunsh/sdk as a dependency because the SDK is unpublished
+ * during local migration; this script links the local Kunkun checkout for
+ * plugin builds. The bundle is checked so only Node builtins and the copied
+ * native `space-lens` scanner package remain as runtime imports.
  */
 import { $ } from "bun";
 import { existsSync } from "node:fs";
@@ -47,7 +47,17 @@ if (missingKunkunEntry) {
 await ensureKunkunWorkspaceLinks();
 
 if (buildWeb) {
-  await $`pnpm --dir ${spaceLensRoot} --filter web build`;
+  const previousKunkunBuild = process.env.SPACE_LENS_KUNKUN_BUILD;
+  process.env.SPACE_LENS_KUNKUN_BUILD = "1";
+  try {
+    await $`pnpm --dir ${spaceLensRoot} --filter web build`;
+  } finally {
+    if (previousKunkunBuild === undefined) {
+      delete process.env.SPACE_LENS_KUNKUN_BUILD;
+    } else {
+      process.env.SPACE_LENS_KUNKUN_BUILD = previousKunkunBuild;
+    }
+  }
 }
 
 await $`pnpm --dir ${spaceLensRoot} --filter @space-lens/cli build`;

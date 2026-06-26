@@ -10,6 +10,7 @@ import type {
   KunkunBackendConnection,
   KunkunRuntimeAdapter,
 } from "./kunkun-runtime";
+import { loadKunkunSdkModules } from "#space-lens/kunkun-sdk-loader";
 import type {
   CleanupOutcome,
   ExecuteCleanupOptions,
@@ -32,28 +33,10 @@ interface RecentScanTargetEntry {
   scanCount: number;
 }
 
-type KunkunCustomApiModule = {
-  readonly LocalStorage: KunkunRuntimeAdapter["storage"];
-  confirmAlert: KunkunRuntimeAdapter["confirmAlert"];
-  showInFinder: KunkunRuntimeAdapter["showInFinder"];
-  trash: KunkunRuntimeAdapter["trash"];
-  spawnBackend(options: {
-    scriptPath: string;
-    runtime?: "auto" | "node" | "bun" | "deno";
-  }): Promise<KunkunBackendConnection<Record<string, (...args: unknown[]) => unknown>>>;
-};
-
-type KunkunApiModule = {
-  readonly path: KunkunRuntimeAdapter["path"];
-  readonly permissions: KunkunRuntimeAdapter["permissions"];
-};
-
 const BACKEND_SCRIPT_PATH = "$EXTENSION/dist/backend.js";
 const BACKEND_RUNTIME = "deno" as const;
 const RECENT_SCAN_TARGETS_STORAGE_KEY = "space-lens.recentScanTargets.v1";
 const MAX_RECENT_SCAN_TARGETS = 12;
-const kunkunCustomApiSpecifier: string = "@kunkunsh/sdk/ui/custom";
-const kunkunApiSpecifier: string = "@kunkunsh/sdk";
 
 let adapterPromise: Promise<KunkunRuntimeAdapter> | null = null;
 
@@ -221,10 +204,7 @@ async function getDefaultAdapter(): Promise<KunkunRuntimeAdapter> {
 }
 
 async function createDefaultKunkunRuntimeAdapter(): Promise<KunkunRuntimeAdapter> {
-  const [customApi, api] = await Promise.all([
-    import(kunkunCustomApiSpecifier) as Promise<KunkunCustomApiModule>,
-    import(kunkunApiSpecifier) as Promise<KunkunApiModule>,
-  ]);
+  const { customApi, api } = await loadKunkunSdkModules();
   const {
     LocalStorage,
     confirmAlert,
