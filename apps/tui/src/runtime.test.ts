@@ -12,6 +12,6 @@ test('assertSupportedRuntime explains the OpenTUI Bun requirement', () => {
   assert.doesNotThrow(() => assertSupportedRuntime({ Bun: {} }))
   assert.throws(
     () => assertSupportedRuntime({}),
-    /OpenTUI currently requires Bun. Run this CLI with `bun` or `yarn tui`./,
+    /OpenTUI currently requires Bun. Run this CLI with `bun` or `pnpm tui`./,
   )
 })

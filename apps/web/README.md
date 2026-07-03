@@ -1,0 +1,1 @@
+@kksh/svelte5 is installed

@@ -37,21 +37,23 @@ jobs:
         with:
           components: clippy, rustfmt
       - name: Install dependencies
-        run: yarn install
+        run: pnpm install --frozen-lockfile
       - name: Node lint
-        run: yarn lint
+        run: pnpm lint
       - name: Node typecheck
-        run: yarn typecheck
+        run: pnpm typecheck
       - name: Cargo fmt
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets
       - name: Cargo test
         run: cargo test --workspace
+      - name: Build debug binding
+        run: pnpm build:debug
       - name: Node tests
         run: |
-          yarn workspace space-lens test
-          yarn workspace @space-lens/cli test
+          pnpm --filter space-lens test
+          pnpm --filter @space-lens/cli test
   build:
     strategy:
       fail-fast: false
@@ -59,28 +61,28 @@ jobs:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
-            build: yarn workspace space-lens build --target x86_64-apple-darwin
+            build: pnpm --filter space-lens build --target x86_64-apple-darwin
           - host: windows-latest
-            build: yarn workspace space-lens build --target x86_64-pc-windows-msvc
+            build: pnpm --filter space-lens build --target x86_64-pc-windows-msvc
             target: x86_64-pc-windows-msvc
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            build: yarn workspace space-lens build --target x86_64-unknown-linux-gnu --use-napi-cross
+            build: pnpm --filter space-lens build --target x86_64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            build: yarn workspace space-lens build --target x86_64-unknown-linux-musl -x
+            build: pnpm --filter space-lens build --target x86_64-unknown-linux-musl -x
           - host: macos-latest
             target: aarch64-apple-darwin
-            build: yarn workspace space-lens build --target aarch64-apple-darwin
+            build: pnpm --filter space-lens build --target aarch64-apple-darwin
           - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            build: yarn workspace space-lens build --target aarch64-unknown-linux-gnu --use-napi-cross
+            build: pnpm --filter space-lens build --target aarch64-unknown-linux-gnu --use-napi-cross
           - host: ubuntu-latest
             target: aarch64-unknown-linux-musl
-            build: yarn workspace space-lens build --target aarch64-unknown-linux-musl -x
+            build: pnpm --filter space-lens build --target aarch64-unknown-linux-musl -x
           - host: windows-latest
             target: aarch64-pc-windows-msvc
-            build: yarn workspace space-lens build --target aarch64-pc-windows-msvc
+            build: pnpm --filter space-lens build --target aarch64-pc-windows-msvc
     name: stable - ${{ matrix.settings.target }} - node@22
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -123,7 +125,7 @@ jobs:
         if: ${{ matrix.settings.setup }}
         shell: bash
       - name: Install dependencies
-        run: yarn install
+        run: pnpm install --frozen-lockfile
       - name: Build
         run: ${{ matrix.settings.build }}
         shell: bash
@@ -169,7 +171,7 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
       - name: Install dependencies
-        run: yarn install
+        run: pnpm install --frozen-lockfile
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
@@ -179,7 +181,7 @@ jobs:
         run: ls -R packages/node
         shell: bash
       - name: Test bindings
-        run: yarn workspace space-lens test
+        run: pnpm --filter space-lens test
   test-linux-binding:
     name: Test ${{ matrix.target }} - node@${{ matrix.node }}
     needs:
@@ -227,10 +229,7 @@ jobs:
             }
           " >> $GITHUB_OUTPUT
       - name: Install dependencies
-        run: |
-          yarn config set --json supportedArchitectures.cpu '["current", "arm64", "x64", "arm"]'
-          yarn config set --json supportedArchitectures.libc '["current", "musl", "gnu"]'
-          yarn install
+        run: pnpm install --frozen-lockfile
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
@@ -252,7 +251,7 @@ jobs:
           image: ${{ steps.docker.outputs.IMAGE }}
           name: test-bindings-${{ matrix.target }}
           options: '-v ${{ github.workspace }}:${{ github.workspace }} -w ${{ github.workspace }} --platform ${{ steps.docker.outputs.PLATFORM }}'
-          args: sh -c "corepack enable && yarn workspace space-lens test"
+          args: sh -c "corepack enable && pnpm --filter space-lens test"
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -272,15 +271,15 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
       - name: Install dependencies
-        run: yarn install
+        run: pnpm install --frozen-lockfile
       - name: create npm dirs
-        run: yarn workspace space-lens napi create-npm-dirs
+        run: pnpm --filter space-lens exec napi create-npm-dirs
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
           path: packages/node/artifacts
       - name: Move artifacts
-        run: yarn workspace space-lens artifacts
+        run: pnpm --filter space-lens artifacts
       - name: List packages
         run: ls -R ./packages/node/npm
         shell: bash

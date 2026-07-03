@@ -8,6 +8,6 @@ export function isBunRuntime(runtime: RuntimeGlobal = globalThis as RuntimeGloba
 
 export function assertSupportedRuntime(runtime: RuntimeGlobal = globalThis as RuntimeGlobal): void {
   if (!isBunRuntime(runtime)) {
-    throw new Error('OpenTUI currently requires Bun. Run this CLI with `bun` or `yarn tui`.')
+    throw new Error('OpenTUI currently requires Bun. Run this CLI with `bun` or `pnpm tui`.')
   }
 }

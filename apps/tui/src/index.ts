@@ -24,3 +24,5 @@ export {
 } from './model.js'
 
 export { normalizeCliConfig, parsePresetList, parseSortMode, PRESETS, SORT_MODES } from './cli-config.js'
+export { createWebApp, startWebServer } from './web-server.js'
+export type { RunningWebServer, WebServerOptions } from './web-server.js'

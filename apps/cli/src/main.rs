@@ -218,6 +218,7 @@ fn preset_name(preset: CleanupPreset) -> &'static str {
     CleanupPreset::Node => "node",
     CleanupPreset::Rust => "rust",
     CleanupPreset::Gitignored => "gitignored",
+    CleanupPreset::Manual => "manual",
   }
 }
 

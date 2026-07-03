@@ -1,0 +1,195 @@
+{
+  "version": "2025-06-13",
+  "last_commit": "4c0dc0a7739cda387180013cf597fb5612405a83",
+  "wiki_items": [
+    {
+      "id": "7c3a1e2d-8f4b-4c6a-9d1e-5f2a7b3c8e4f",
+      "uuid": "7c3a1e2d-8f4b-4c6a-9d1e-5f2a7b3c8e4f",
+      "title": "System Overview",
+      "path": "System Overview.md",
+      "category": "Root_Pages"
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "title": "Getting Started Guide",
+      "path": "Getting Started Guide.md",
+      "category": "Root_Pages"
+    },
+    {
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "title": "Development Guidelines",
+      "path": "Development Guidelines.md",
+      "category": "Root_Pages"
+    },
+    {
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "uuid": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "title": "Architecture Overview",
+      "path": "Architecture/Architecture Overview.md",
+      "category": "Architecture"
+    },
+    {
+      "id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+      "uuid": "d4e5f6a7-b8c9-0123-defa-234567890123",
+      "title": "Monorepo Architecture",
+      "path": "Architecture/Monorepo Architecture.md",
+      "category": "Architecture"
+    },
+    {
+      "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+      "uuid": "e5f6a7b8-c9d0-1234-efab-345678901234",
+      "title": "Technology Stack",
+      "path": "Technology Stack/Technology Stack.md",
+      "category": "Technology_Stack"
+    },
+    {
+      "id": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+      "uuid": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+      "title": "Core Library",
+      "path": "Core Library/Core Library.md",
+      "category": "Services"
+    },
+    {
+      "id": "a7b8c9d0-e1f2-3456-abcd-567890123456",
+      "uuid": "a7b8c9d0-e1f2-3456-abcd-567890123456",
+      "title": "NAPI Bindings",
+      "path": "NAPI Bindings/NAPI Bindings.md",
+      "category": "Services"
+    },
+    {
+      "id": "b8c9d0e1-f2a3-4567-bcde-678901234567",
+      "uuid": "b8c9d0e1-f2a3-4567-bcde-678901234567",
+      "title": "Rust CLI",
+      "path": "CLI Applications/Rust CLI.md",
+      "category": "CLI_Applications"
+    },
+    {
+      "id": "c9d0e1f2-a3b4-5678-cdef-789012345678",
+      "uuid": "c9d0e1f2-a3b4-5678-cdef-789012345678",
+      "title": "TUI Application",
+      "path": "CLI Applications/TUI Application.md",
+      "category": "CLI_Applications"
+    },
+    {
+      "id": "d0e1f2a3-b4c5-6789-defa-890123456789",
+      "uuid": "d0e1f2a3-b4c5-6789-defa-890123456789",
+      "title": "CI and Deployment",
+      "path": "CI and Deployment/CI and Deployment.md",
+      "category": "Infrastructure"
+    }
+  ],
+  "knowledge_relations": [
+    {
+      "id": 1,
+      "source_id": "7c3a1e2d-8f4b-4c6a-9d1e-5f2a7b3c8e4f",
+      "target_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: System Overview -> Architecture Overview",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    },
+    {
+      "id": 2,
+      "source_id": "7c3a1e2d-8f4b-4c6a-9d1e-5f2a7b3c8e4f",
+      "target_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: System Overview -> Getting Started Guide",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    },
+    {
+      "id": 3,
+      "source_id": "7c3a1e2d-8f4b-4c6a-9d1e-5f2a7b3c8e4f",
+      "target_id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: System Overview -> Development Guidelines",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    },
+    {
+      "id": 4,
+      "source_id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "target_id": "d4e5f6a7-b8c9-0123-defa-234567890123",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: Architecture Overview -> Monorepo Architecture",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    },
+    {
+      "id": 5,
+      "source_id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+      "target_id": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: Technology Stack -> Core Library",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    },
+    {
+      "id": 6,
+      "source_id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+      "target_id": "a7b8c9d0-e1f2-3456-abcd-567890123456",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: Technology Stack -> NAPI Bindings",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    },
+    {
+      "id": 7,
+      "source_id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+      "target_id": "b8c9d0e1-f2a3-4567-bcde-678901234567",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: Technology Stack -> Rust CLI",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    },
+    {
+      "id": 8,
+      "source_id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+      "target_id": "c9d0e1f2-a3b4-5678-cdef-789012345678",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: Technology Stack -> TUI Application",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    },
+    {
+      "id": 9,
+      "source_id": "7c3a1e2d-8f4b-4c6a-9d1e-5f2a7b3c8e4f",
+      "target_id": "d0e1f2a3-b4c5-6789-defa-890123456789",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: System Overview -> CI and Deployment",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    },
+    {
+      "id": 10,
+      "source_id": "c9d0e1f2-a3b4-5678-cdef-789012345678",
+      "target_id": "b8c9d0e1-f2a3-4567-bcde-678901234567",
+      "source_type": "WIKI_ITEM",
+      "target_type": "WIKI_ITEM",
+      "relationship_type": "PARENT_CHILD",
+      "extra": "Wiki parent-child relationship: TUI Application -> Rust CLI (peer CLI apps)",
+      "gmt_create": "2025-06-13T10:00:00.000Z",
+      "gmt_modified": "2025-06-13T10:00:00.000Z"
+    }
+  ]
+}

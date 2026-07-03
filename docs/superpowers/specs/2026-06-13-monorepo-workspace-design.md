@@ -23,7 +23,7 @@ The project will replace the older `devclean` direction by moving new scan, clea
 ## Non-Goals
 
 - Do not implement the desktop app, TUI, or HTTP UI in the first migration.
-- Do not replace Yarn with pnpm.
+- Do not keep package-manager-specific assumptions in Rust or package layout.
 - Do not keep `devclean` as a parallel maintained project.
 - Do not make cleanup destructive by default.
 - Do not couple the Rust core to CLI prompts, progress bars, NAPI types, or UI-specific formatting.
@@ -34,8 +34,8 @@ The project will replace the older `devclean` direction by moving new scan, clea
 space-lens/
   Cargo.toml
   package.json
-  yarn.lock
-  .yarnrc.yml
+  pnpm-lock.yaml
+  pnpm-workspace.yaml
 
   packages/
     space-lens/
@@ -171,14 +171,15 @@ Initial flags:
 
 `--execute` is valid only for `clean`. Without `--execute`, `clean` prints a dry-run removal plan.
 
-## Yarn Workspace Design
+## pnpm Workspace Design
 
-The root `package.json` becomes a private Yarn workspace root. Yarn stays on the current version family and keeps `nodeLinker: node-modules`.
+The root `package.json` is a private JavaScript workspace root. Workspace membership and pnpm-specific settings live in `pnpm-workspace.yaml`.
 
 Workspace members:
 
-```json
-["packages/node"]
+```yaml
+packages:
+  - packages/node
 ```
 
 `packages/node` remains publishable. `apps/npx` can be added as a workspace member when the NPX app is implemented. Rust-only packages do not need npm workspace entries.
@@ -205,7 +206,7 @@ CI must be updated because the NAPI package moves from repository root to `packa
 
 Required changes:
 
-- Run Yarn install from the repository root.
+- Run pnpm install from the repository root.
 - Run NAPI build, test, artifact movement, and npm publish commands with the NAPI package working directory.
 - Upload and download NAPI artifacts relative to `packages/node`.
 - Keep npm trusted publisher OIDC and provenance enabled.
@@ -227,7 +228,7 @@ Initial verification should include:
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets`
 - `cargo test --workspace`
-- Yarn install from root
+- pnpm install from root
 - NAPI build from `packages/node`
 - NAPI tests from `packages/node`
 - CLI smoke test against a temporary fixture
@@ -243,7 +244,7 @@ Tests should cover:
 
 ## Migration Plan
 
-1. Create root Cargo and Yarn workspace configuration.
+1. Create root Cargo and pnpm workspace configuration.
 2. Move the current pure scanner logic into `packages/space-lens`.
 3. Move the current NAPI package into `packages/node`.
 4. Convert the NAPI wrapper to call the core package.

@@ -561,3 +561,4 @@ module.exports.executeCleanup = nativeBinding.executeCleanup
 module.exports.findCleanupCandidates = nativeBinding.findCleanupCandidates
 module.exports.planCleanup = nativeBinding.planCleanup
 module.exports.scanDirectory = nativeBinding.scanDirectory
+module.exports.scanDirectoryWithProgress = nativeBinding.scanDirectoryWithProgress
