@@ -82,7 +82,7 @@ cargo run -p space-lens-cli -- clean ~/Dev --preset node
 
 ## spacelens TUI CLI
 
-The workspace also includes `spacelens`, an OpenTUI app with two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. OpenTUI 0.4.x uses native FFI that currently needs Bun at runtime:
+The workspace also includes `spacelens`, a Solid/Uniview app with two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. It runs on Node.js:
 
 ```bash
 yarn tui ~/Dev --preset rust
@@ -129,7 +129,7 @@ Useful local commands:
 
 - `yarn build`: build release bindings for the current platform.
 - `yarn build:debug`: build debug bindings for local testing.
-- `yarn tui`: run the Bun/OpenTUI cleanup candidate viewer.
+- `yarn tui`: run the Solid/Uniview cleanup candidate viewer.
 - `yarn test`: run Rust workspace tests and AVA tests.
 - `yarn typecheck`: type-check the TypeScript workspaces.
 - `yarn bench`: run the benchmark CLI from the `space-lens` npm workspace.
