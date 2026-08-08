@@ -6,6 +6,12 @@
       "sourceType": "github",
       "skillPath": "skills/effect-ts/SKILL.md",
       "computedHash": "301521e167410dd42d834dd0e7cedbe9cfffa519f630a12241dbea7b1d932324"
+    },
+    "uniview-tui": {
+      "source": "HuakunShen/uniview",
+      "sourceType": "github",
+      "skillPath": "skills/uniview-tui/SKILL.md",
+      "computedHash": "a3263415b372c867e85675dc99659b64aa6505acc4c82fceabf88bb7bc11a30f"
     }
   }
 }
