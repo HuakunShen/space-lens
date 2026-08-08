@@ -180,6 +180,8 @@ jobs:
         run: node scripts/prepare-ci-install.mjs strip
       - name: Install dependencies
         run: yarn install
+      - name: Restore package metadata
+        run: node scripts/prepare-ci-install.mjs restore
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
@@ -243,6 +245,8 @@ jobs:
           yarn config set --json supportedArchitectures.cpu '["current", "arm64", "x64", "arm"]'
           yarn config set --json supportedArchitectures.libc '["current", "musl", "gnu"]'
           yarn install
+      - name: Restore package metadata
+        run: node scripts/prepare-ci-install.mjs restore
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
