@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, For, Show, type JSX } from 'solid-js'
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from 'solid-js'
 import {
   AnsiCellSurface,
   clampScroll,
@@ -32,6 +32,7 @@ interface SpaceLensAppProps {
   options: TuiOptions
   terminalHeight: () => number
   onQuit: () => void
+  registerTabHandler?: (handler: (() => void) | undefined) => void
 }
 
 export function runTui(options: TuiOptions): Promise<void> {
@@ -49,6 +50,7 @@ export function runTui(options: TuiOptions): Promise<void> {
     const root = createTuiSolidRoot({ surface, styles, size: initialSize })
     let stopped = false
     let driverStarted = false
+    let tabHandler: (() => void) | undefined
 
     const quit = () => {
       if (stopped) return
@@ -67,6 +69,8 @@ export function runTui(options: TuiOptions): Promise<void> {
         if (event.type === 'resize') {
           setTerminalSize({ width: event.width, height: event.height })
           root.host.renderer.resize({ width: event.width, height: event.height })
+        } else if (event.type === 'key' && event.key === 'Tab' && tabHandler) {
+          tabHandler()
         } else {
           root.dispatchInput(event)
         }
@@ -76,7 +80,16 @@ export function runTui(options: TuiOptions): Promise<void> {
     try {
       driver.start()
       driverStarted = true
-      root.render(() => <SpaceLensApp options={options} terminalHeight={() => terminalSize().height} onQuit={quit} />)
+      root.render(() => (
+        <SpaceLensApp
+          options={options}
+          terminalHeight={() => terminalSize().height}
+          onQuit={quit}
+          registerTabHandler={(handler) => {
+            tabHandler = handler
+          }}
+        />
+      ))
       process.stdin.on?.('end', quit)
     } catch (error) {
       try {
@@ -100,6 +113,8 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
     applyTuiAction(state, action)
     touch()
   }
+  props.registerTabHandler?.(() => act({ type: 'switch-mode' }))
+  onCleanup(() => props.registerTabHandler?.(undefined))
   const scan = createMemo(() => {
     revision()
     return createScanViewModel(data().scanTrees, state)
@@ -135,6 +150,14 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
     const row = clean().rows[clean().cursor]
     if (row) act({ type: 'toggle-selected', path: row.path })
   }
+  const toggleScanPath = (path: string) => {
+    act({ type: 'toggle-expanded', path })
+  }
+  const toggleScanCurrent = () => {
+    if (activeMode() !== 'scan') return
+    const row = scan().rows[scan().cursor]
+    if (row?.expandable) toggleScanPath(row.path)
+  }
   const executeSelected = () => {
     const entries = selected()
     if (entries.length === 0) {
@@ -160,7 +183,10 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
     if (executing()) return
     if (key.ctrl) return props.onQuit()
     if (key.tab) return act({ type: 'switch-mode' })
-    if (key.return) return confirmExecute() ? executeSelected() : undefined
+    if (key.return) {
+      if (activeMode() === 'scan') return toggleScanCurrent()
+      return confirmExecute() ? executeSelected() : undefined
+    }
     if (key.escape) return act({ type: 'cancel-execute' })
     if (input === 'q') return props.onQuit()
     if (input === 'j' || key.downArrow) return move(1)
@@ -176,7 +202,8 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
   return (
     <Box flexDirection="column" gap={1} padding={1} width="100%" height="100%">
       <Text color="cyan">
-        Space Lens | {activeMode() === 'scan' ? 'SCAN' : 'CLEAN'} | tab switch | j/k move | q quit
+        Space Lens | {activeMode() === 'scan' ? 'SCAN' : 'CLEAN'} | tab switch | j/k move |{' '}
+        {activeMode() === 'scan' ? 'enter expand' : 'space select'} | q quit
       </Text>
       <Text color="white">
         {activeMode() === 'scan'
@@ -198,7 +225,7 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
             empty="No cleanup candidates found."
             renderRow={(row) => (
               <Text color={row.active ? 'cyan' : colorForPreset(row.preset)}>
-                {`${row.active ? '>' : ' '} ${row.selected ? '[x]' : '[ ]'} ${row.sizeLabel.padEnd(24)} ${row.preset.padEnd(10)} ${row.path}  ${row.reason}`}
+                {`${row.active ? '>' : ' '} ${row.selected ? '[x]' : '[ ]'} ${row.sizeLabel.padEnd(12)} ${row.preset.padEnd(10)} ${row.path}  ${row.reason}`}
               </Text>
             )}
           />
@@ -211,8 +238,14 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
           height={viewportHeight()}
           empty="No scan results."
           renderRow={(row) => (
-            <Text color={row.active ? 'cyan' : row.ignored ? 'yellow' : 'white'}>
-              {`${row.active ? '>' : ' '} ${row.sizeLabel.padEnd(24)} ${row.label}`}
+            <Text
+              color={row.active ? 'cyan' : row.ignored ? 'yellow' : 'white'}
+              selectable={false}
+              onClick={() => {
+                if (row.expandable) toggleScanPath(row.path)
+              }}
+            >
+              {`${row.active ? '>' : ' '} ${row.sizeLabel.padEnd(12)} ${row.label}`}
             </Text>
           )}
         />

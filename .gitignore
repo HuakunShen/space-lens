@@ -130,4 +130,5 @@ Cargo.lock
 /npm
 /packages/node/artifacts
 /packages/node/npm
+/packages/node/bin
 .DS_Store

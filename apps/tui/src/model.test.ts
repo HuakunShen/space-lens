@@ -8,13 +8,14 @@ import {
   createScanViewModel,
   formatBytes,
   getSelectedEntries,
+  type DirectoryNode,
 } from './model.js'
 
-test('formatBytes renders binary units with raw bytes for non-byte values', () => {
+test('formatBytes renders binary units without repeating raw byte counts', () => {
   assert.equal(formatBytes(0), '0 B')
   assert.equal(formatBytes(999), '999 B')
-  assert.equal(formatBytes(1024), '1.0 KiB (1024 bytes)')
-  assert.equal(formatBytes(1_572_864), '1.5 MiB (1572864 bytes)')
+  assert.equal(formatBytes(1024), '1.0 KiB')
+  assert.equal(formatBytes(1_572_864), '1.5 MiB')
 })
 
 test('createCleanViewModel sorts rows by size and summarizes the plan', () => {
@@ -42,18 +43,98 @@ test('createCleanViewModel sorts rows by size and summarizes the plan', () => {
   )
 
   assert.equal(viewModel.title, 'Space Lens')
-  assert.equal(viewModel.summary, '2 candidates | 1.5 MiB (1573888 bytes) | selected 0 B')
+  assert.equal(viewModel.summary, '2 candidates | 1.5 MiB | selected 0 B')
   assert.deepEqual(
     viewModel.rows.map((row) => row.path),
     ['/repo/target', '/repo/node_modules'],
   )
-  assert.equal(viewModel.rows[0].sizeLabel, '1.5 MiB (1572864 bytes)')
+  assert.equal(viewModel.rows[0].sizeLabel, '1.5 MiB')
   assert.equal(viewModel.rows[0].selected, false)
   assert.equal(viewModel.cursor, 0)
   assert.deepEqual(viewModel.errors, ['one unreadable path'])
 })
 
-test('createScanViewModel flattens directory trees with branch prefixes and sizes', () => {
+test('createScanViewModel expands a folder and sorts visible children by size', () => {
+  const state = createInitialTuiState()
+  const trees: DirectoryNode[] = [
+    {
+      name: 'repo',
+      path: '/repo',
+      size: 7168,
+      depth: 0,
+      ignored: false,
+      collapsed: false,
+      children: [
+        {
+          name: 'small.txt',
+          path: '/repo/small.txt',
+          size: 1024,
+          depth: 1,
+          ignored: false,
+          collapsed: false,
+          children: [],
+        },
+        {
+          name: 'large.bin',
+          path: '/repo/large.bin',
+          size: 4096,
+          depth: 1,
+          ignored: false,
+          collapsed: false,
+          children: [],
+        },
+        {
+          name: 'cache',
+          path: '/repo/cache',
+          size: 2048,
+          depth: 1,
+          ignored: false,
+          collapsed: false,
+          children: [
+            {
+              name: 'nested.bin',
+              path: '/repo/cache/nested.bin',
+              size: 2048,
+              depth: 2,
+              ignored: false,
+              collapsed: false,
+              children: [],
+            },
+          ],
+        },
+      ],
+    },
+  ]
+
+  const initial = createScanViewModel(trees, state)
+  assert.deepEqual(initial.rows.map((row) => row.path), ['/repo', '/repo/large.bin', '/repo/cache', '/repo/small.txt'])
+  assert.equal(initial.rows[0].expandable, false)
+  assert.equal(initial.rows[0].expanded, true)
+  assert.equal(initial.rows[2].expandable, true)
+  assert.equal(initial.rows[2].expanded, false)
+
+  applyTuiAction(state, { type: 'toggle-expanded', path: '/repo/cache' })
+  const expanded = createScanViewModel(trees, state)
+  assert.deepEqual(
+    expanded.rows.map((row) => row.path),
+    ['/repo', '/repo/large.bin', '/repo/cache', '/repo/cache/nested.bin', '/repo/small.txt'],
+  )
+  assert.equal(expanded.rows[0].sizeLabel, '7.0 KiB')
+  assert.equal(expanded.rows[1].sizeLabel, '4.0 KiB')
+  assert.equal(expanded.rows[2].expanded, true)
+})
+
+test('applyTuiAction toggles folder expansion state', () => {
+  const state = createInitialTuiState()
+
+  applyTuiAction(state, { type: 'toggle-expanded', path: '/repo/cache' })
+  assert.deepEqual([...state.expandedScanPaths], ['/repo/cache'])
+
+  applyTuiAction(state, { type: 'toggle-expanded', path: '/repo/cache' })
+  assert.deepEqual([...state.expandedScanPaths], [])
+})
+
+test('createScanViewModel keeps ignored collapsed leaf rows visible', () => {
   const viewModel = createScanViewModel(
     [
       {
@@ -88,12 +169,12 @@ test('createScanViewModel flattens directory trees with branch prefixes and size
     createInitialTuiState(),
   )
 
-  assert.equal(viewModel.summary, '3 nodes | 4.0 KiB (4096 bytes)')
+  assert.equal(viewModel.summary, '3 nodes | 4.0 KiB')
   assert.deepEqual(
     viewModel.rows.map((row) => row.label),
-    ['repo', '  src', '  target [ignored] [collapsed]'],
+    ['▾ repo', '    target [ignored] [collapsed]', '    src'],
   )
-  assert.equal(viewModel.rows[2].sizeLabel, '3.0 KiB (3072 bytes)')
+  assert.equal(viewModel.rows[1].sizeLabel, '3.0 KiB')
 })
 
 test('applyTuiAction switches modes, moves the active cursor, toggles selection, and confirms execute', () => {

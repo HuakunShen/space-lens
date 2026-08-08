@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [univiewSolid()],
   ssr: {
     external: ['space-lens', 'web-tree-sitter'],
-    noExternal: ['@uniview/tui-solid', 'solid-js'],
+    noExternal: true,
   },
   test: {
     server: {

@@ -48,6 +48,8 @@ export interface TreeRow {
   depth: number
   ignored: boolean
   collapsed: boolean
+  expandable: boolean
+  expanded: boolean
   active: boolean
 }
 
@@ -70,6 +72,7 @@ export interface TuiState {
   mode: TuiMode
   scanCursor: number
   cleanCursor: number
+  expandedScanPaths: Set<string>
   selectedPaths: Set<string>
   confirmExecute: boolean
   status: string
@@ -78,6 +81,7 @@ export interface TuiState {
 export type TuiAction =
   | { type: 'switch-mode' }
   | { type: 'move'; delta: number; rowCount: number }
+  | { type: 'toggle-expanded'; path: string }
   | { type: 'toggle-selected'; path: string }
   | { type: 'toggle-all'; paths: string[] }
   | { type: 'request-execute' }
@@ -90,6 +94,7 @@ export function createInitialTuiState(): TuiState {
     mode: 'scan',
     scanCursor: 0,
     cleanCursor: 0,
+    expandedScanPaths: new Set(),
     selectedPaths: new Set(),
     confirmExecute: false,
     status: '',
@@ -121,13 +126,16 @@ export function createCleanViewModel(
 }
 
 export function createScanViewModel(trees: DirectoryNode[], state: TuiState): ScanViewModel {
-  const rows = trees.flatMap((tree) => flattenTree(tree))
+  const rows = [...trees]
+    .sort(compareTreeNodes)
+    .flatMap((tree) => flattenTree(tree, state.expandedScanPaths))
   const totalSize = trees.reduce((total, tree) => total + tree.size, 0)
+  const nodeCount = trees.reduce((total, tree) => total + countTreeNodes(tree), 0)
   const cursor = clampCursor(state.scanCursor, rows.length)
 
   return {
     title: 'Space Lens',
-    summary: `${rows.length} ${rows.length === 1 ? 'node' : 'nodes'} | ${formatBytes(totalSize)}`,
+    summary: `${nodeCount} ${nodeCount === 1 ? 'node' : 'nodes'} | ${formatBytes(totalSize)}`,
     rows: rows.map((row, index) => ({
       ...row,
       index: index + 1,
@@ -148,6 +156,14 @@ export function applyTuiAction(state: TuiState, action: TuiAction): void {
         state.scanCursor = moveCursor(state.scanCursor, action.delta, action.rowCount)
       } else {
         state.cleanCursor = moveCursor(state.cleanCursor, action.delta, action.rowCount)
+      }
+      state.confirmExecute = false
+      return
+    case 'toggle-expanded':
+      if (state.expandedScanPaths.has(action.path)) {
+        state.expandedScanPaths.delete(action.path)
+      } else {
+        state.expandedScanPaths.add(action.path)
       }
       state.confirmExecute = false
       return
@@ -210,7 +226,7 @@ export function formatBytes(input: number): string {
     unit += 1
   }
 
-  return `${value.toFixed(1)} ${units[unit]} (${bytes} bytes)`
+  return `${value.toFixed(1)} ${units[unit]}`
 }
 
 function compareEntries(sort: SortMode) {
@@ -223,9 +239,17 @@ function compareEntries(sort: SortMode) {
   }
 }
 
-function flattenTree(node: DirectoryNode, depth = 0): Omit<TreeRow, 'index' | 'active'>[] {
+function flattenTree(
+  node: DirectoryNode,
+  expandedPaths: ReadonlySet<string>,
+  depth = 0,
+): Omit<TreeRow, 'index' | 'active'>[] {
+  const hasChildren = node.children.length > 0
+  const expandable = hasChildren && depth > 0
+  const expanded = hasChildren && (depth === 0 || expandedPaths.has(node.path))
   const suffix = [node.ignored ? '[ignored]' : '', node.collapsed ? '[collapsed]' : ''].filter(Boolean).join(' ')
-  const label = `${'  '.repeat(depth)}${node.name}${suffix ? ` ${suffix}` : ''}`
+  const marker = hasChildren ? (expanded ? '▾ ' : '▸ ') : '  '
+  const label = `${'  '.repeat(depth)}${marker}${node.name}${suffix ? ` ${suffix}` : ''}`
 
   return [
     {
@@ -236,9 +260,21 @@ function flattenTree(node: DirectoryNode, depth = 0): Omit<TreeRow, 'index' | 'a
       depth,
       ignored: node.ignored,
       collapsed: node.collapsed,
+      expandable,
+      expanded,
     },
-    ...node.children.flatMap((child) => flattenTree(child, depth + 1)),
+    ...(expanded
+      ? [...node.children].sort(compareTreeNodes).flatMap((child) => flattenTree(child, expandedPaths, depth + 1))
+      : []),
   ]
+}
+
+function compareTreeNodes(left: DirectoryNode, right: DirectoryNode): number {
+  return right.size - left.size || left.name.localeCompare(right.name)
+}
+
+function countTreeNodes(node: DirectoryNode): number {
+  return 1 + node.children.reduce((total, child) => total + countTreeNodes(child), 0)
 }
 
 function moveCursor(cursor: number, delta: number, rowCount: number): number {

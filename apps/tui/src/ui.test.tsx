@@ -44,19 +44,61 @@ function fixture(): SpaceLensData {
   }
 }
 
-function mount(height = 20) {
+function nestedFixture(): SpaceLensData {
+  const data = fixture()
+  const root = data.scanTrees[0]
+  const folder = root.children.find((child) => child.name === 'node-39')
+  if (!folder) throw new Error('fixture folder missing')
+
+  root.children = root.children.map((child) =>
+    child === folder
+      ? {
+          ...child,
+          name: 'folder',
+          path: 'folder',
+          children: [
+            {
+              ...child,
+              name: 'inside.txt',
+              path: 'folder/inside.txt',
+              depth: 2,
+            },
+          ],
+        }
+      : child,
+  )
+  return data
+}
+
+function mount(height = 20, data = fixture()) {
   const styles = new StyleTable()
   const surface = new MemoryCellSurface({ styles })
   const root = createTuiSolidRoot({ surface, styles, size: { width: 100, height } })
-  const data = fixture()
+  let tabHandler: (() => void) | undefined
   const options: TuiOptions = {
     initialData: data,
     sort: 'path',
     refreshData: () => data,
     executeEntries: (selected) => ({ removed: selected, bytesRemoved: selected.length, errors: [] }),
   }
-  root.render(() => <SpaceLensApp options={options} terminalHeight={() => height} onQuit={() => {}} />)
-  return { root, surface }
+  root.render(() => (
+    <SpaceLensApp
+      options={options}
+      terminalHeight={() => height}
+      onQuit={() => {}}
+      registerTabHandler={(handler) => {
+        tabHandler = handler
+      }}
+    />
+  ))
+  const dispatch = (event: Parameters<typeof root.dispatchInput>[0]) => {
+    if (event.type === 'key' && event.key === 'Tab' && tabHandler) {
+      tabHandler()
+      return
+    }
+    root.dispatchInput(event)
+  }
+  return { root, surface, dispatch }
 }
 
 const textKey = (text: string) => ({ type: 'text' as const, text })
@@ -64,38 +106,78 @@ const namedKey = (key: string) => ({ type: 'key' as const, key, ctrl: false, alt
 
 describe('Space Lens Uniview Solid TUI', () => {
   it('renders a bounded list with a scrollbar and follows j/k movement', async () => {
-    const { root, surface } = mount()
-    await tick()
-    const initial = surface.text({ trimRight: true })
-    expect(initial).toContain('scan tree')
-    expect(initial).toContain('8 / 41')
-    expect(initial).toContain('│')
-    expect(initial).not.toContain('node-39')
+    const { root, surface, dispatch } = mount()
+    try {
+      await tick()
+      const initial = surface.text({ trimRight: true })
+      expect(initial).toContain('scan tree')
+      expect(initial).toContain('8 / 41')
+      expect(initial).toContain('│')
+      expect(initial).toContain('node-39')
+      expect(initial).not.toContain('node-0')
 
-    for (let index = 0; index < 20; index += 1) root.dispatchInput(textKey('j'))
-    await tick()
-    const moved = surface.text({ trimRight: true })
-    expect(moved).toContain('node-19')
-    expect(moved).toContain('21 / 41')
-    expect(moved).not.toContain('node-0')
-    root.destroy()
+      for (let index = 0; index < 20; index += 1) dispatch(textKey('j'))
+      await tick()
+      const moved = surface.text({ trimRight: true })
+      expect(moved).toContain('node-20')
+      expect(moved).toContain('21 / 41')
+      expect(moved).not.toContain('node-0')
+    } finally {
+      root.destroy()
+    }
+  })
+
+  it('keeps the top-level folder expanded when Enter is pressed', async () => {
+    const { root, surface, dispatch } = mount()
+    try {
+      await tick()
+
+      const initial = surface.text({ trimRight: true })
+      expect(initial).toContain('▾ .')
+      expect(initial).toContain('node-39')
+
+      dispatch(namedKey('Enter'))
+      await tick()
+      expect(surface.text({ trimRight: true })).toContain('node-39')
+    } finally {
+      root.destroy()
+    }
+  })
+
+  it('expands a nested folder when its row is clicked', async () => {
+    const { root, surface, dispatch } = mount(20, nestedFixture())
+    try {
+      await tick()
+      const initial = surface.text({ trimRight: true })
+      expect(initial).toContain('▸ folder')
+      expect(initial).not.toContain('inside.txt')
+
+      dispatch({ type: 'mouse', action: 'up', button: 'left', x: 24, y: 9, ctrl: false, alt: false, shift: false })
+      await tick()
+      expect(surface.text({ trimRight: true })).toContain('inside.txt')
+    } finally {
+      root.destroy()
+    }
   })
 
   it('keeps the CLI controls for mode switch, selection, confirmation, and cancel', async () => {
-    const { root, surface } = mount()
-    await tick()
-    root.dispatchInput(namedKey('Tab'))
-    await tick()
-    expect(surface.text({ trimRight: true })).toContain('CLEAN')
+    const { root, surface, dispatch } = mount()
+    try {
+      await tick()
+      dispatch(namedKey('Tab'))
+      await tick()
+      expect(surface.text({ trimRight: true })).toContain('CLEAN')
 
-    root.dispatchInput(textKey(' '))
-    root.dispatchInput(textKey('x'))
-    await tick()
-    expect(surface.text({ trimRight: true })).toContain('Confirm delete 1 paths')
+      dispatch(textKey(' '))
+      dispatch(textKey('x'))
+      await tick()
+      expect(surface.text({ trimRight: true })).toContain('Confirm delete 1 paths')
 
-    root.dispatchInput(namedKey('Escape'))
-    await tick()
-    expect(surface.text({ trimRight: true })).not.toContain('Confirm delete')
-    root.destroy()
+      dispatch(namedKey('Escape'))
+      await tick()
+      expect(surface.text({ trimRight: true })).not.toContain('Confirm delete')
+    } finally {
+      root.destroy()
+    }
   })
 })

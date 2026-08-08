@@ -21,5 +21,7 @@ The package uses `@uniview/tui-solid` and requires Node.js 20 or newer.
 
 ## Controls
 
-`tab`, `j/k` or arrows, `space`, `a`, `x`, `enter`,
-`esc`, `q`, and Ctrl-C.
+In Scan mode, use `j/k` or arrows to move and `enter` to expand or collapse
+the active folder. In Clean mode, use `space` to select, `a` to select all,
+and `x` followed by `enter` to delete. `tab` switches modes; `esc`, `q`, and
+Ctrl-C cancel or exit.

@@ -80,14 +80,24 @@ cargo run -p space-lens-cli -- clean ~/Dev --preset node
 
 `clean` defaults to dry-run. Add `--execute` only when you want to remove the planned paths.
 
-## spacelens TUI CLI
+The published `space-lens` package supports both the native library and the TUI executable:
 
-The workspace also includes `spacelens`, a Solid/Uniview app with two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. It runs on Node.js:
+```ts
+import { scanDirectory } from 'space-lens'
+```
+
+```bash
+npx space-lens ~/Dev --preset rust
+```
+
+## space-lens TUI CLI
+
+The `space-lens` package remains importable as a native library and also exposes the Solid/Uniview TUI as a `space-lens` executable. It has two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. It runs on Node.js 20 or newer:
 
 ```bash
 yarn tui ~/Dev --preset rust
 yarn tui ~/Dev --preset node,gitignored --sort path
-npx @space-lens/cli ~/Dev --preset rust
+npx space-lens ~/Dev --preset rust
 ```
 
 Inside the TUI, press `tab` to switch modes, `space` to select a cleanup candidate, `x` to request deletion, and `enter` to confirm. Use `Ctrl+C` or `q` to quit.

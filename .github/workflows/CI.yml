@@ -275,6 +275,10 @@ jobs:
         run: corepack enable
       - name: Install dependencies
         run: yarn install
+      - name: Build TUI bundle for space-lens bin
+        run: yarn workspace @space-lens/cli build
+      - name: Prepare space-lens bin
+        run: yarn workspace space-lens prepare:cli
       - name: create npm dirs
         run: yarn workspace space-lens napi create-npm-dirs
       - name: Download all artifacts
