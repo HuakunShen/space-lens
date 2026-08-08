@@ -7,7 +7,7 @@ import { normalizeCliConfig, SORT_MODES } from './cli-config.js'
 import type { CliOptions } from './model.js'
 import { runTui } from './ui.js'
 
-const APP_VERSION = '0.2.2'
+const APP_VERSION = '0.2.3'
 
 const command = Command.make(
   'spacelens',

@@ -26,6 +26,7 @@ export default defineConfig({
       },
       output: {
         entryFileNames: '[name].mjs',
+        banner: '#!/usr/bin/env node',
       },
     },
   },

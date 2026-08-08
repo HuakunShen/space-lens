@@ -1,7 +1,7 @@
 {
   "name": "@space-lens/cli",
   "type": "module",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Solid-based Uniview TUI for Space Lens scanning and cleanup.",
   "repository": {
     "type": "git",
@@ -27,7 +27,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "vite build --config vite.config.ts",
+    "build": "vite build --config vite.config.ts && node scripts/mark-cli-executable.mjs",
     "dev": "vite-node src/cli.ts",
     "lint": "tsc --noEmit",
     "test": "vitest run src/ui.test.tsx && node --import tsx --test \"src/**/*.test.ts\"",
