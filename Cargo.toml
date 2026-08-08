@@ -7,7 +7,7 @@ resolver = "2"
   edition    = "2021"
   license    = "MIT"
   repository = "https://github.com/HuakunShen/space-lens"
-  version    = "0.2.5"
+  version    = "0.2.6"
 
 [profile.release]
 lto   = true
