@@ -52,6 +52,8 @@ jobs:
         run: cargo test --workspace
       - name: Build debug binding
         run: yarn workspace space-lens build:debug
+      - name: Restore package metadata
+        run: node scripts/prepare-ci-install.mjs restore
       - name: Node tests
         run: |
           yarn workspace space-lens test
