@@ -1,6 +1,6 @@
 {
   "name": "space-lens",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Fast disk usage scanner and cleanup candidate finder powered by Rust.",
   "main": "index.js",
   "types": "index.d.ts",

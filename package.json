@@ -21,7 +21,7 @@
     "lint:node": "yarn workspace space-lens lint",
     "lint:tui": "yarn workspace @space-lens/cli lint",
     "test": "cargo test --workspace && yarn workspace space-lens test && yarn workspace @space-lens/cli test",
-    "tui": "vite-node --config apps/tui/vite.config.ts apps/tui/src/cli.ts",
+    "tui": "yarn workspace @space-lens/cli dev",
     "typecheck": "run-p typecheck:node typecheck:tui",
     "typecheck:node": "yarn workspace space-lens typecheck",
     "typecheck:tui": "yarn workspace @space-lens/cli typecheck"
