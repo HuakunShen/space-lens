@@ -272,6 +272,10 @@ fn remove_path(path: &Path) -> std::io::Result<()> {
   }
 }
 
+pub fn delete_path(path: &Path) -> std::io::Result<()> {
+  remove_path(path)
+}
+
 fn is_hidden(path: &Path) -> bool {
   path
     .file_name()
@@ -349,6 +353,18 @@ mod tests {
     assert_eq!(outcome.removed.len(), 1);
     assert!(!root.join("node_modules").exists());
 
+    remove_dir_all(root).unwrap();
+  }
+
+  #[test]
+  fn deletes_an_arbitrary_file_or_directory_path() {
+    let root = fixture("arbitrary-delete");
+    create_dir_all(root.join("folder/nested")).unwrap();
+    write(root.join("folder/nested/file.txt"), "delete me\n").unwrap();
+
+    delete_path(&root.join("folder")).unwrap();
+
+    assert!(!root.join("folder").exists());
     remove_dir_all(root).unwrap();
   }
 

@@ -80,6 +80,7 @@ function mount(height = 20, data = fixture()) {
     sort: 'path',
     refreshData: () => data,
     executeEntries: (selected) => ({ removed: selected, bytesRemoved: selected.length, errors: [] }),
+    deletePath: (target) => ({ path: target.path, bytesRemoved: target.size }),
   }
   root.render(() => (
     <SpaceLensApp
@@ -176,6 +177,33 @@ describe('Space Lens Uniview Solid TUI', () => {
       dispatch(namedKey('Escape'))
       await tick()
       expect(surface.text({ trimRight: true })).not.toContain('Confirm delete')
+    } finally {
+      root.destroy()
+    }
+  })
+
+  it('opens a confirmation dialog for an arbitrary scan row with d', async () => {
+    const { root, surface, dispatch } = mount(20, nestedFixture())
+    try {
+      await tick()
+      dispatch(textKey('j'))
+      dispatch(textKey('d'))
+      await tick()
+      expect(surface.text({ trimRight: true })).toContain('Confirm delete')
+      expect(surface.text({ trimRight: true })).toContain('folder')
+      expect(surface.text({ trimRight: true })).toContain('Enter confirm')
+    } finally {
+      root.destroy()
+    }
+  })
+
+  it('opens a batch confirmation dialog for all preset candidates with A', async () => {
+    const { root, surface, dispatch } = mount()
+    try {
+      await tick()
+      dispatch(textKey('A'))
+      await tick()
+      expect(surface.text({ trimRight: true })).toContain('Delete all preset candidates')
     } finally {
       root.destroy()
     }

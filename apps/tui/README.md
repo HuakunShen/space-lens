@@ -22,6 +22,9 @@ The package uses `@uniview/tui-solid` and requires Node.js 20 or newer.
 ## Controls
 
 In Scan mode, use `j/k` or arrows to move and `enter` to expand or collapse
-the active folder. In Clean mode, use `space` to select, `a` to select all,
-and `x` followed by `enter` to delete. `tab` switches modes; `esc`, `q`, and
-Ctrl-C cancel or exit.
+the active folder. Click a row to focus it; clicking a folder also toggles its
+expansion. Preset candidates such as `node_modules` and `target` are shown in
+red. Press `d` followed by `enter` to delete the current file or directory, or
+`A` followed by `enter` to delete all preset candidates at once. In Clean mode,
+use `space` to select, `a` to select all, and `x` followed by `enter` to delete.
+`tab` switches modes; `esc`, `q`, and Ctrl-C cancel or exit.

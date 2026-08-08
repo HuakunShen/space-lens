@@ -557,6 +557,7 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.deletePath = nativeBinding.deletePath
 module.exports.executeCleanup = nativeBinding.executeCleanup
 module.exports.findCleanupCandidates = nativeBinding.findCleanupCandidates
 module.exports.planCleanup = nativeBinding.planCleanup

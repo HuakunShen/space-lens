@@ -107,7 +107,10 @@ test('createScanViewModel expands a folder and sorts visible children by size', 
   ]
 
   const initial = createScanViewModel(trees, state)
-  assert.deepEqual(initial.rows.map((row) => row.path), ['/repo', '/repo/large.bin', '/repo/cache', '/repo/small.txt'])
+  assert.deepEqual(
+    initial.rows.map((row) => row.path),
+    ['/repo', '/repo/large.bin', '/repo/cache', '/repo/small.txt'],
+  )
   assert.equal(initial.rows[0].expandable, false)
   assert.equal(initial.rows[0].expanded, true)
   assert.equal(initial.rows[2].expandable, true)
@@ -122,6 +125,38 @@ test('createScanViewModel expands a folder and sorts visible children by size', 
   assert.equal(expanded.rows[0].sizeLabel, '7.0 KiB')
   assert.equal(expanded.rows[1].sizeLabel, '4.0 KiB')
   assert.equal(expanded.rows[2].expanded, true)
+})
+
+test('createScanViewModel marks preset candidates in the complete scan tree', () => {
+  const state = createInitialTuiState()
+  const viewModel = createScanViewModel(
+    [
+      {
+        name: 'repo',
+        path: '/repo',
+        size: 4096,
+        depth: 0,
+        ignored: false,
+        collapsed: false,
+        children: [
+          {
+            name: 'target',
+            path: '/repo/target',
+            size: 4096,
+            depth: 1,
+            ignored: false,
+            collapsed: false,
+            children: [],
+          },
+        ],
+      },
+    ],
+    state,
+    new Map([['/repo/target', 'rust']]),
+  )
+
+  assert.equal(viewModel.rows[1].preset, 'rust')
+  assert.equal(viewModel.rows[1].directory, false)
 })
 
 test('applyTuiAction toggles folder expansion state', () => {
@@ -219,4 +254,20 @@ test('applyTuiAction toggles all visible clean rows and returns selected entries
 
   applyTuiAction(state, { type: 'toggle-all', paths: rows.map((row) => row.path) })
   assert.deepEqual([...state.selectedPaths], [])
+})
+
+test('applyTuiAction requests deletion for the current scan row and all preset candidates', () => {
+  const state = createInitialTuiState()
+
+  applyTuiAction(state, {
+    type: 'request-delete',
+    target: { path: './notes', size: 2048, directory: true },
+  })
+  assert.deepEqual(state.confirmDelete, { path: './notes', size: 2048, directory: true })
+
+  applyTuiAction(state, { type: 'cancel-delete' })
+  assert.equal(state.confirmDelete, undefined)
+
+  applyTuiAction(state, { type: 'request-delete-all' })
+  assert.equal(state.confirmDeleteAll, true)
 })

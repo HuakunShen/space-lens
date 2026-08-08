@@ -92,7 +92,7 @@ npx space-lens ~/Dev --preset rust
 
 ## space-lens TUI CLI
 
-The `space-lens` package remains importable as a native library and also exposes the Solid/Uniview TUI as a `space-lens` executable. It has two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. It runs on Node.js 20 or newer:
+The `space-lens` package remains importable as a native library and also exposes the Solid/Uniview TUI as a `space-lens` executable. It has two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. In Scan mode, `d` deletes the current file or directory after confirmation, while `A` deletes all discovered preset candidates at once. Preset candidates are highlighted in red, and scan rows support mouse focus and folder expansion. It runs on Node.js 20 or newer:
 
 ```bash
 yarn tui ~/Dev --preset rust
@@ -100,7 +100,7 @@ yarn tui ~/Dev --preset node,gitignored --sort path
 npx space-lens ~/Dev --preset rust
 ```
 
-Inside the TUI, press `tab` to switch modes, `space` to select a cleanup candidate, `x` to request deletion, and `enter` to confirm. Use `Ctrl+C` or `q` to quit.
+Inside the TUI, press `tab` to switch modes, `space` to select a cleanup candidate, `x` to request deletion, and `enter` to confirm. In Scan mode, use `d` for the current row or `A` for all preset candidates. Use `Ctrl+C` or `q` to quit.
 
 ## Benchmark CLI
 

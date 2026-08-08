@@ -16,6 +16,12 @@ export interface PlanEntry {
   reason: string
 }
 
+export interface DeleteTarget {
+  path: string
+  size: number
+  directory: boolean
+}
+
 export interface PlanLike {
   entries: PlanEntry[]
   totalSize: number
@@ -50,6 +56,8 @@ export interface TreeRow {
   collapsed: boolean
   expandable: boolean
   expanded: boolean
+  directory: boolean
+  preset?: string
   active: boolean
 }
 
@@ -75,17 +83,23 @@ export interface TuiState {
   expandedScanPaths: Set<string>
   selectedPaths: Set<string>
   confirmExecute: boolean
+  confirmDelete?: DeleteTarget
+  confirmDeleteAll: boolean
   status: string
 }
 
 export type TuiAction =
   | { type: 'switch-mode' }
   | { type: 'move'; delta: number; rowCount: number }
+  | { type: 'focus-row'; index: number; rowCount: number }
   | { type: 'toggle-expanded'; path: string }
   | { type: 'toggle-selected'; path: string }
   | { type: 'toggle-all'; paths: string[] }
   | { type: 'request-execute' }
+  | { type: 'request-delete'; target: DeleteTarget }
+  | { type: 'request-delete-all' }
   | { type: 'cancel-execute' }
+  | { type: 'cancel-delete' }
   | { type: 'set-status'; status: string }
   | { type: 'clear-selection' }
 
@@ -97,6 +111,7 @@ export function createInitialTuiState(): TuiState {
     expandedScanPaths: new Set(),
     selectedPaths: new Set(),
     confirmExecute: false,
+    confirmDeleteAll: false,
     status: '',
   }
 }
@@ -125,10 +140,14 @@ export function createCleanViewModel(
   }
 }
 
-export function createScanViewModel(trees: DirectoryNode[], state: TuiState): ScanViewModel {
+export function createScanViewModel(
+  trees: DirectoryNode[],
+  state: TuiState,
+  candidatePresets: ReadonlyMap<string, string> = new Map(),
+): ScanViewModel {
   const rows = [...trees]
     .sort(compareTreeNodes)
-    .flatMap((tree) => flattenTree(tree, state.expandedScanPaths))
+    .flatMap((tree) => flattenTree(tree, state.expandedScanPaths, candidatePresets))
   const totalSize = trees.reduce((total, tree) => total + tree.size, 0)
   const nodeCount = trees.reduce((total, tree) => total + countTreeNodes(tree), 0)
   const cursor = clampCursor(state.scanCursor, rows.length)
@@ -150,6 +169,8 @@ export function applyTuiAction(state: TuiState, action: TuiAction): void {
     case 'switch-mode':
       state.mode = state.mode === 'scan' ? 'clean' : 'scan'
       state.confirmExecute = false
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = false
       return
     case 'move':
       if (state.mode === 'scan') {
@@ -158,6 +179,18 @@ export function applyTuiAction(state: TuiState, action: TuiAction): void {
         state.cleanCursor = moveCursor(state.cleanCursor, action.delta, action.rowCount)
       }
       state.confirmExecute = false
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = false
+      return
+    case 'focus-row':
+      if (state.mode === 'scan') {
+        state.scanCursor = clampCursor(action.index, action.rowCount)
+      } else {
+        state.cleanCursor = clampCursor(action.index, action.rowCount)
+      }
+      state.confirmExecute = false
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = false
       return
     case 'toggle-expanded':
       if (state.expandedScanPaths.has(action.path)) {
@@ -166,6 +199,8 @@ export function applyTuiAction(state: TuiState, action: TuiAction): void {
         state.expandedScanPaths.add(action.path)
       }
       state.confirmExecute = false
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = false
       return
     case 'toggle-selected':
       if (state.selectedPaths.has(action.path)) {
@@ -174,6 +209,8 @@ export function applyTuiAction(state: TuiState, action: TuiAction): void {
         state.selectedPaths.add(action.path)
       }
       state.confirmExecute = false
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = false
       return
     case 'toggle-all':
       if (action.paths.length === 0) {
@@ -189,12 +226,30 @@ export function applyTuiAction(state: TuiState, action: TuiAction): void {
         }
       }
       state.confirmExecute = false
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = false
       return
     case 'request-execute':
       state.confirmExecute = true
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = false
+      return
+    case 'request-delete':
+      state.confirmExecute = false
+      state.confirmDelete = action.target
+      state.confirmDeleteAll = false
+      return
+    case 'request-delete-all':
+      state.confirmExecute = false
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = true
       return
     case 'cancel-execute':
       state.confirmExecute = false
+      return
+    case 'cancel-delete':
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = false
       return
     case 'set-status':
       state.status = action.status
@@ -202,6 +257,8 @@ export function applyTuiAction(state: TuiState, action: TuiAction): void {
     case 'clear-selection':
       state.selectedPaths.clear()
       state.confirmExecute = false
+      state.confirmDelete = undefined
+      state.confirmDeleteAll = false
       return
   }
 }
@@ -242,6 +299,7 @@ function compareEntries(sort: SortMode) {
 function flattenTree(
   node: DirectoryNode,
   expandedPaths: ReadonlySet<string>,
+  candidatePresets: ReadonlyMap<string, string>,
   depth = 0,
 ): Omit<TreeRow, 'index' | 'active'>[] {
   const hasChildren = node.children.length > 0
@@ -262,9 +320,13 @@ function flattenTree(
       collapsed: node.collapsed,
       expandable,
       expanded,
+      directory: hasChildren || node.collapsed,
+      preset: candidatePresets.get(node.path),
     },
     ...(expanded
-      ? [...node.children].sort(compareTreeNodes).flatMap((child) => flattenTree(child, expandedPaths, depth + 1))
+      ? [...node.children]
+          .sort(compareTreeNodes)
+          .flatMap((child) => flattenTree(child, expandedPaths, candidatePresets, depth + 1))
       : []),
   ]
 }

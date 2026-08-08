@@ -14,6 +14,8 @@ export interface CleanupCandidateOptions {
   ignoreHidden?: boolean
 }
 
+export declare function deletePath(path: string): void
+
 export interface DirectoryNode {
   name: string
   path: string

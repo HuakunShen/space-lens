@@ -42,7 +42,7 @@ export function runCli(argv: readonly string[] = process.argv): void {
 
 const runTuiProgram = Effect.fn('runTuiProgram')((options: CliOptions) =>
   Effect.gen(function* () {
-    const [{ executeCleanupEntries, loadSpaceLensData }] = yield* Effect.tryPromise({
+    const [{ deleteScanPath, executeCleanupEntries, loadSpaceLensData }] = yield* Effect.tryPromise({
       try: () => Promise.all([import('./scanner.js')]),
       catch: toError,
     })
@@ -54,6 +54,7 @@ const runTuiProgram = Effect.fn('runTuiProgram')((options: CliOptions) =>
           sort: options.sort,
           refreshData: () => loadSpaceLensData(options),
           executeEntries: executeCleanupEntries,
+          deletePath: deleteScanPath,
         }),
       catch: toError,
     })

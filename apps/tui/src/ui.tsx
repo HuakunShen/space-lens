@@ -16,16 +16,18 @@ import {
   createScanViewModel,
   formatBytes,
   getSelectedEntries,
+  type DeleteTarget,
   type PlanEntry,
   type SortMode,
 } from './model.js'
-import type { CleanupOutcome, SpaceLensData } from './scanner.js'
+import type { CleanupOutcome, DeletePathOutcome, SpaceLensData } from './scanner.js'
 
 export interface TuiOptions {
   initialData: SpaceLensData
   sort: SortMode
   refreshData: () => SpaceLensData
   executeEntries: (entries: PlanEntry[]) => CleanupOutcome
+  deletePath: (target: DeleteTarget) => DeletePathOutcome
 }
 
 interface SpaceLensAppProps {
@@ -117,7 +119,11 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
   onCleanup(() => props.registerTabHandler?.(undefined))
   const scan = createMemo(() => {
     revision()
-    return createScanViewModel(data().scanTrees, state)
+    return createScanViewModel(
+      data().scanTrees,
+      state,
+      new Map(data().plan.entries.map((entry) => [entry.path, entry.preset])),
+    )
   })
   const clean = createMemo(() => {
     revision()
@@ -141,6 +147,14 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
     revision()
     return state.confirmExecute
   }
+  const confirmDelete = () => {
+    revision()
+    return state.confirmDelete
+  }
+  const confirmDeleteAll = () => {
+    revision()
+    return state.confirmDeleteAll
+  }
 
   const move = (delta: number) => {
     act({ type: 'move', delta, rowCount: activeRows().length })
@@ -157,6 +171,27 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
     if (activeMode() !== 'scan') return
     const row = scan().rows[scan().cursor]
     if (row?.expandable) toggleScanPath(row.path)
+  }
+  const focusScanRow = (index: number) => {
+    act({ type: 'focus-row', index, rowCount: scan().rows.length })
+  }
+  const requestDeleteCurrent = () => {
+    if (activeMode() !== 'scan') return
+    const row = scan().rows[scan().cursor]
+    if (!row) return
+    if (row.depth === 0) {
+      return act({ type: 'set-status', status: 'Cannot delete the scan root.' })
+    }
+    act({
+      type: 'request-delete',
+      target: { path: row.path, size: row.size, directory: row.directory },
+    })
+  }
+  const requestDeleteAll = () => {
+    if (data().plan.entries.length === 0) {
+      return act({ type: 'set-status', status: 'No preset candidates found.' })
+    }
+    act({ type: 'request-delete-all' })
   }
   const executeSelected = () => {
     const entries = selected()
@@ -178,16 +213,60 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
       setExecuting(false)
     }
   }
+  const executeDeletePath = () => {
+    const target = confirmDelete()
+    if (!target) return
+
+    setExecuting(true)
+    act({ type: 'set-status', status: 'Removing ' + target.path + '...' })
+    try {
+      const outcome = props.options.deletePath(target)
+      setData(props.options.refreshData())
+      act({ type: 'cancel-delete' })
+      act({ type: 'set-status', status: 'Removed ' + outcome.path + ', ' + formatBytes(outcome.bytesRemoved) + '.' })
+    } catch (error) {
+      act({ type: 'set-status', status: 'Delete failed: ' + (error instanceof Error ? error.message : String(error)) })
+    } finally {
+      setExecuting(false)
+    }
+  }
+  const executeAllPresetCandidates = () => {
+    const entries = data().plan.entries
+    if (entries.length === 0) {
+      return act({ type: 'set-status', status: 'No preset candidates found.' })
+    }
+
+    setExecuting(true)
+    act({ type: 'set-status', status: 'Removing ' + entries.length + ' preset candidates...' })
+    try {
+      const outcome = props.options.executeEntries(entries)
+      setData(props.options.refreshData())
+      act({ type: 'clear-selection' })
+      act({ type: 'set-status', status: removalStatus(outcome) })
+    } catch (error) {
+      act({ type: 'set-status', status: 'Delete failed: ' + (error instanceof Error ? error.message : String(error)) })
+    } finally {
+      setExecuting(false)
+    }
+  }
+  const cancelConfirmations = () => {
+    act({ type: 'cancel-execute' })
+    act({ type: 'cancel-delete' })
+  }
 
   useInput((input, key) => {
     if (executing()) return
     if (key.ctrl) return props.onQuit()
     if (key.tab) return act({ type: 'switch-mode' })
     if (key.return) {
-      if (activeMode() === 'scan') return toggleScanCurrent()
+      if (activeMode() === 'scan') {
+        if (confirmDelete()) return executeDeletePath()
+        if (confirmDeleteAll()) return executeAllPresetCandidates()
+        return toggleScanCurrent()
+      }
       return confirmExecute() ? executeSelected() : undefined
     }
-    if (key.escape) return act({ type: 'cancel-execute' })
+    if (key.escape) return cancelConfirmations()
     if (input === 'q') return props.onQuit()
     if (input === 'j' || key.downArrow) return move(1)
     if (input === 'k' || key.upArrow) return move(-1)
@@ -196,6 +275,8 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
     if (input === ' ') return toggleCurrent()
     if (input === 'a' && activeMode() === 'clean')
       return act({ type: 'toggle-all', paths: clean().rows.map((row) => row.path) })
+    if (input === 'd' && activeMode() === 'scan') return requestDeleteCurrent()
+    if (input === 'A' && activeMode() === 'scan') return requestDeleteAll()
     if (input === 'x' && activeMode() === 'clean') return act({ type: 'request-execute' })
   })
 
@@ -203,14 +284,14 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
     <Box flexDirection="column" gap={1} padding={1} width="100%" height="100%">
       <Text color="cyan">
         Space Lens | {activeMode() === 'scan' ? 'SCAN' : 'CLEAN'} | tab switch | j/k move |{' '}
-        {activeMode() === 'scan' ? 'enter expand' : 'space select'} | q quit
+        {activeMode() === 'scan' ? 'enter expand | d delete | A all presets' : 'space select'} | q quit
       </Text>
       <Text color="white">
         {activeMode() === 'scan'
           ? `${scan().summary} | tree view`
           : `${clean().summary} | space select | a all | x delete`}
       </Text>
-      <Text color={confirmExecute() ? 'red' : 'gray'}>
+      <Text color={confirmExecute() || confirmDelete() || confirmDeleteAll() ? 'red' : 'gray'}>
         {statusLine(selected(), confirmExecute(), executing(), status())}
       </Text>
       <Show
@@ -237,11 +318,12 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
           cursor={scan().cursor}
           height={viewportHeight()}
           empty="No scan results."
-          renderRow={(row) => (
+          renderRow={(row, index) => (
             <Text
-              color={row.active ? 'cyan' : row.ignored ? 'yellow' : 'white'}
+              color={row.active ? 'cyan' : row.preset ? 'red' : row.ignored ? 'yellow' : 'white'}
               selectable={false}
               onClick={() => {
+                focusScanRow(index)
                 if (row.expandable) toggleScanPath(row.path)
               }}
             >
@@ -249,6 +331,27 @@ export function SpaceLensApp(props: SpaceLensAppProps): JSX.Element {
             </Text>
           )}
         />
+      </Show>
+      <Show when={activeMode() === 'scan' && confirmDelete()}>
+        <Panel title="Confirm delete" borderColor="red">
+          <Text color="red">
+            {'Delete ' +
+              (confirmDelete()?.directory ? 'directory ' : 'file ') +
+              confirmDelete()?.path +
+              ' (' +
+              formatBytes(confirmDelete()?.size ?? 0) +
+              ')'}
+          </Text>
+          <Text color="red">Enter confirm | Esc cancel</Text>
+        </Panel>
+      </Show>
+      <Show when={activeMode() === 'scan' && confirmDeleteAll()}>
+        <Panel title="Delete all preset candidates" borderColor="red">
+          <Text color="red">
+            {data().plan.entries.length + ' paths (' + formatBytes(data().plan.totalSize) + ') will be deleted.'}
+          </Text>
+          <Text color="red">Enter confirm | Esc cancel</Text>
+        </Panel>
       </Show>
       <For each={clean().errors}>{(error) => <Text color="yellow">Warnings: {error}</Text>}</For>
     </Box>

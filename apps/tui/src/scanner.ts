@@ -1,6 +1,6 @@
-import { executeCleanup, planCleanup, scanDirectory } from 'space-lens'
+import { deletePath as deleteNativePath, executeCleanup, planCleanup, scanDirectory } from 'space-lens'
 
-import type { CliOptions, DirectoryNode, PlanEntry, PlanLike } from './model.js'
+import type { CliOptions, DeleteTarget, DirectoryNode, PlanEntry, PlanLike } from './model.js'
 
 export interface SpaceLensData {
   scanTrees: DirectoryNode[]
@@ -11,6 +11,11 @@ export interface CleanupOutcome {
   removed: PlanEntry[]
   bytesRemoved: number
   errors: string[]
+}
+
+export interface DeletePathOutcome {
+  path: string
+  bytesRemoved: number
 }
 
 export function loadSpaceLensData(options: Pick<CliOptions, 'paths' | 'presets' | 'ignoreHidden'>): SpaceLensData {
@@ -38,4 +43,12 @@ export function executeCleanupEntries(entries: PlanEntry[]): CleanupOutcome {
     totalSize,
     errors: [],
   })
+}
+
+export function deleteScanPath(target: DeleteTarget): DeletePathOutcome {
+  deleteNativePath(target.path)
+  return {
+    path: target.path,
+    bytesRemoved: target.size,
+  }
 }

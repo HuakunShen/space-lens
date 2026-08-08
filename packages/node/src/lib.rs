@@ -181,6 +181,12 @@ pub fn execute_cleanup(plan: RemovalPlan) -> Result<RemovalOutcome> {
   Ok(RemovalOutcome::from(execute_core_removal_plan(&plan)))
 }
 
+#[napi(js_name = "deletePath")]
+pub fn delete_path(path: String) -> Result<()> {
+  space_lens::delete_path(&PathBuf::from(path))
+    .map_err(|error| Error::from_reason(error.to_string()))
+}
+
 fn candidate_options(options: CleanupCandidateOptions) -> Result<CandidateOptions> {
   let presets = options
     .presets
