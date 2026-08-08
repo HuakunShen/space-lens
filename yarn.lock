@@ -4961,6 +4961,8 @@ __metadata:
     prettier: "npm:^3.6.2"
     tinybench: "npm:^6.0.0"
     typescript: "npm:^6.0.0"
+  bin:
+    space-lens: bin/cli.mjs
   languageName: unknown
   linkType: soft
 

@@ -38,8 +38,10 @@ jobs:
           package-manager-cache: false
       - name: Enable Corepack
         run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - name: Install dependencies
-        run: yarn install --immutable
+        run: yarn install
       - name: Test
         run: yarn workspace @space-lens/cli test
       - name: Typecheck

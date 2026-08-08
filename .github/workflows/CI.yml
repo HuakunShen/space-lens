@@ -32,6 +32,8 @@ jobs:
           node-version: 24
       - name: Enable Corepack
         run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -93,6 +95,8 @@ jobs:
           node-version: 24
       - name: Enable Corepack
         run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -170,6 +174,8 @@ jobs:
           architecture: ${{ matrix.settings.architecture }}
       - name: Enable Corepack
         run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - name: Install dependencies
         run: yarn install
       - name: Download artifacts
@@ -209,6 +215,8 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Enable Corepack
         run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - name: Output docker params
         id: docker
         run: |
@@ -273,8 +281,12 @@ jobs:
           node-version: 24
       - name: Enable Corepack
         run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - name: Install dependencies
         run: yarn install
+      - name: Restore package metadata
+        run: node scripts/prepare-ci-install.mjs restore
       - name: Build TUI bundle for space-lens bin
         run: yarn workspace @space-lens/cli build
       - name: Prepare space-lens bin
