@@ -80,6 +80,21 @@ cargo run -p space-lens-cli -- clean ~/Dev --preset node
 
 `clean` defaults to dry-run. Add `--execute` only when you want to remove the planned paths.
 
+### iCloud local-copy MVP
+
+The Rust core and CLI also include a macOS-only iCloud inspection/eviction flow. It is separate from the existing deletion cleanup code:
+
+```bash
+cargo run --release -p space-lens-cli -- icloud --help
+cargo run --release -p space-lens-cli -- icloud inspect <absolute-path>
+cargo run --release -p space-lens-cli -- icloud plan <disposable-iCloud-test-folder>
+cargo run --release -p space-lens-cli -- icloud evict <disposable-iCloud-test-folder>
+```
+
+`evict` is dry-run by default. Real execution requires `--execute` and the interactive confirmation phrase. The implementation never falls back to deleting files. Do not use a real Lightroom or Photos folder as the first test target.
+
+The NAPI package exposes the same native boundary through `ICloudSession`, with opaque one-shot plan IDs and decimal-string byte counts. The current `main` TUI does not yet expose these iCloud actions; it still provides the existing scan/cleanup UI.
+
 The published `space-lens` package supports both the native library and the TUI executable:
 
 ```ts
@@ -143,3 +158,20 @@ Useful local commands:
 - `yarn test`: run Rust workspace tests and AVA tests.
 - `yarn typecheck`: type-check the TypeScript workspaces.
 - `yarn bench`: run the benchmark CLI from the `space-lens` npm workspace.
+
+## iCloud Free macOS app
+
+The SwiftUI app lives in `apps/icloud-free`. From the repository root, the convenience recipes are:
+
+```bash
+just icloud-build       # release build and signed local .app bundle
+just icloud-open        # open the existing bundle
+just icloud-build-open  # build, then open
+just icloud-test        # run Swift tests
+```
+
+Use `CONFIGURATION=debug just icloud-build` for a debug bundle. The app bundle is written to `apps/icloud-free/.build/ICloudFree.app` and is not installed into `/Applications` automatically.
+
+## Web UI status
+
+The current `main` checkout has no `apps/web` workspace and no web start script. The Svelte Web UI and its standalone/Kunkun hosts live on the separate `kunkun-ext` branch. Do not switch the current dirty worktree just to run it; use a separate worktree and follow that branch's README instructions.

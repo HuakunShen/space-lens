@@ -1,9 +1,14 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use space_lens::cloud::{
+  build_eviction_plan, execute_eviction_plan, inspect_item, EvictionOutcome, EvictionPlan,
+  NativeICloudBackend, ScanOptions as CloudScanOptions,
+};
 use space_lens::{
   build_removal_plan, execute_removal_plan, find_candidates, scan_directory, CandidateOptions,
   CleanupPreset, IgnoredMode, RemovalPlan, ScanNode, ScanOptions,
 };
+use std::io::{self, BufRead};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -22,6 +27,47 @@ enum Command {
   Scan(ScanArgs),
   Candidates(CandidateArgs),
   Clean(CleanArgs),
+  #[command(name = "icloud")]
+  ICloud(ICloudArgs),
+}
+
+#[derive(Debug, Args)]
+struct ICloudArgs {
+  #[command(subcommand)]
+  command: ICloudCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum ICloudCommand {
+  Inspect(ICloudInspectArgs),
+  Plan(ICloudPlanArgs),
+  Evict(ICloudEvictArgs),
+}
+
+#[derive(Debug, Args)]
+struct ICloudInspectArgs {
+  #[arg(value_name = "PATH")]
+  path: PathBuf,
+  #[arg(long)]
+  json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ICloudPlanArgs {
+  #[arg(value_name = "PATH")]
+  path: PathBuf,
+  #[arg(long)]
+  json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ICloudEvictArgs {
+  #[arg(value_name = "PATH")]
+  path: PathBuf,
+  #[arg(long)]
+  execute: bool,
+  #[arg(long)]
+  json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -86,7 +132,117 @@ fn main() -> Result<()> {
     Command::Scan(args) => run_scan(args),
     Command::Candidates(args) => run_candidates(args),
     Command::Clean(args) => run_clean(args),
+    Command::ICloud(args) => run_icloud(args),
   }
+}
+
+fn run_icloud(args: ICloudArgs) -> Result<()> {
+  let backend = NativeICloudBackend;
+
+  match args.command {
+    ICloudCommand::Inspect(args) => {
+      let info = inspect_item(&backend, &args.path)?;
+      if args.json {
+        print_json(&info)?;
+      } else {
+        println!("path\t{}", args.path.display());
+        println!("kind\t{:?}", info.kind());
+        println!("iCloud\t{}", info.is_icloud);
+        println!("download state\t{:?}", info.download_state);
+        println!(
+          "logical bytes\t{}",
+          format_bytes(info.fingerprint.logical_bytes)
+        );
+        println!(
+          "local allocation\t{}",
+          info
+            .allocated_bytes
+            .map(|bytes| format_bytes(bytes.0))
+            .unwrap_or_else(|| "unknown".to_string())
+        );
+      }
+    }
+    ICloudCommand::Plan(args) => {
+      let plan = build_eviction_plan(&backend, &args.path, CloudScanOptions::default())?;
+      print_icloud_plan(&plan, args.json)?;
+    }
+    ICloudCommand::Evict(args) => {
+      let plan = build_eviction_plan(&backend, &args.path, CloudScanOptions::default())?;
+      if !args.execute {
+        print_icloud_plan(&plan, args.json)?;
+        return Ok(());
+      }
+
+      if args.json {
+        eprintln!(
+          "iCloud plan: {} candidates, {} local allocation estimate",
+          plan.candidates.len(),
+          format_bytes(plan.total_allocated_bytes())
+        );
+      } else {
+        print_icloud_plan(&plan, false)?;
+      }
+      confirm_icloud_eviction()?;
+      let outcome = execute_eviction_plan(&backend, &plan)?;
+      if args.json {
+        print_json(&outcome)?;
+      } else {
+        print_icloud_outcome(&outcome);
+      }
+    }
+  }
+
+  Ok(())
+}
+
+fn print_icloud_plan(plan: &EvictionPlan, json: bool) -> Result<()> {
+  if json {
+    print_json(plan)?;
+    return Ok(());
+  }
+
+  println!(
+    "iCloud plan: {} candidates, {} local allocation estimate",
+    plan.candidates.len(),
+    format_bytes(plan.total_allocated_bytes())
+  );
+  println!(
+    "logical bytes in candidates\t{}",
+    format_bytes(plan.total_logical_bytes())
+  );
+  println!("cloud-only files\t{}", plan.cloud_only.len());
+  println!("skipped items\t{}", plan.skipped.len());
+  println!("coverage complete\t{}", plan.coverage_complete);
+
+  for candidate in &plan.candidates {
+    println!(
+      "candidate\t{}\t{}",
+      format_bytes(candidate.allocated_bytes.0),
+      candidate.path.display()
+    );
+  }
+
+  Ok(())
+}
+
+fn print_icloud_outcome(outcome: &EvictionOutcome) {
+  for result in &outcome.results {
+    match &result.error {
+      Some(error) => println!("{:?}\t{}\t{}", result.status, result.path.display(), error),
+      None => println!("{:?}\t{}", result.status, result.path.display()),
+    }
+  }
+}
+
+fn confirm_icloud_eviction() -> Result<()> {
+  eprintln!("This requests removal of local iCloud copies; it does not delete cloud files.");
+  eprintln!("Type EVICT-LOCAL-COPIES to continue:");
+  let mut input = String::new();
+  io::stdin().lock().read_line(&mut input)?;
+  if input.trim() != "EVICT-LOCAL-COPIES" {
+    anyhow::bail!("eviction cancelled: confirmation phrase did not match");
+  }
+  Ok(())
 }
 
 fn run_scan(args: ScanArgs) -> Result<()> {
@@ -242,7 +398,9 @@ impl From<PresetArg> for CleanupPreset {
 
 #[cfg(test)]
 mod tests {
-  use super::format_bytes;
+  use super::{format_bytes, Cli, Command, ICloudCommand};
+  use clap::Parser;
+  use std::path::Path;
 
   #[test]
   fn formats_bytes_as_human_readable_values() {
@@ -250,5 +408,29 @@ mod tests {
     assert_eq!(format_bytes(512), "512 B");
     assert_eq!(format_bytes(1024), "1.0 KiB (1024 bytes)");
     assert_eq!(format_bytes(1_572_864), "1.5 MiB (1572864 bytes)");
+  }
+
+  #[test]
+  fn parses_icloud_plan_as_a_read_only_command() {
+    let cli = Cli::try_parse_from(["space-lens", "icloud", "plan", "/tmp/test"]).unwrap();
+
+    assert!(matches!(
+      cli.command,
+      Command::ICloud(super::ICloudArgs {
+        command: ICloudCommand::Plan(args),
+      }) if args.path == Path::new("/tmp/test")
+    ));
+  }
+
+  #[test]
+  fn evict_is_dry_run_without_execute_flag() {
+    let cli = Cli::try_parse_from(["space-lens", "icloud", "evict", "/tmp/test"]).unwrap();
+
+    assert!(matches!(
+      cli.command,
+      Command::ICloud(super::ICloudArgs {
+        command: ICloudCommand::Evict(args),
+      }) if !args.execute
+    ));
   }
 }

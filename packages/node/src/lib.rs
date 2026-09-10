@@ -4,6 +4,8 @@ use napi::{Error, Result, Status};
 use napi_derive::napi;
 use std::path::PathBuf;
 
+mod cloud;
+
 use space_lens::{
   build_removal_plan as build_core_removal_plan, execute_removal_plan as execute_core_removal_plan,
   find_candidates as find_core_candidates, scan_directory as scan_core_directory, CandidateOptions,

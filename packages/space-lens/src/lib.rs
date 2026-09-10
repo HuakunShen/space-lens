@@ -1,6 +1,7 @@
 #![deny(clippy::all)]
 
 pub mod clean;
+pub mod cloud;
 pub mod scanner;
 
 pub use clean::{

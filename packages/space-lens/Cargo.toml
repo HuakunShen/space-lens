@@ -15,3 +15,18 @@ windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Storage_FileSystem",
 ] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.4"
+objc2-foundation = { version = "=0.3.2", default-features = false, features = [
+  "std",
+  "NSArray",
+  "NSDictionary",
+  "NSError",
+  "NSFileManager",
+  "NSObjCRuntime",
+  "NSObject",
+  "NSString",
+  "NSURL",
+  "NSValue",
+] }

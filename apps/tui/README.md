@@ -2,6 +2,8 @@
 
 The published `@space-lens/cli` package uses Solid and the public `@uniview/tui-solid` binding.
 
+This is the current `main` branch TUI. It runs on Node.js 20+, and currently covers the existing scan/cleanup workflow; the new Rust iCloud eviction API is exposed through NAPI but is not wired into this TUI yet.
+
 ```bash
 yarn tui . --preset node
 # or, from this package directory

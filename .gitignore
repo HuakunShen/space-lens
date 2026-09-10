@@ -132,3 +132,8 @@ Cargo.lock
 /packages/node/npm
 /packages/node/bin
 .DS_Store
+
+# Swift Package Manager build products
+/apps/icloud-free/.build/
+
+docs

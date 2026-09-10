@@ -557,6 +557,7 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.ICloudSession = nativeBinding.ICloudSession
 module.exports.deletePath = nativeBinding.deletePath
 module.exports.executeCleanup = nativeBinding.executeCleanup
 module.exports.findCleanupCandidates = nativeBinding.findCleanupCandidates
