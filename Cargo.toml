@@ -1,20 +1,5 @@
 [workspace]
-members  = [
-  "packages/space-lens",
-  "packages/node",
-  "apps/cli",
-  # KFS file-search stack, merged from HuakunShen/file-search (plan 0063,
-  # docs/kfs/MIGRATION.md). Seven of these opt into the workspace lints
-  # below; packages/kfs-napi deliberately does not.
-  "packages/kfs-core",
-  "packages/kfs-crawler",
-  "packages/kfs-index-sqlite",
-  "packages/kfs-daemon",
-  "packages/kfs-watcher",
-  "packages/kfs-provider-spotlight",
-  "packages/kfs-napi",
-  "packages/kfs-cli",
-]
+members  = ["packages/space-lens", "packages/node", "apps/cli"]
 resolver = "2"
 
   [workspace.package]
@@ -23,9 +8,6 @@ resolver = "2"
   license    = "MIT"
   repository = "https://github.com/HuakunShen/space-lens"
   version    = "0.2.8"
-
-[workspace.lints.rust]
-unsafe_code = "forbid"
 
 [profile.release]
 lto   = true
