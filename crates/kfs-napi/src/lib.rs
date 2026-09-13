@@ -234,7 +234,9 @@ impl Task for SearchTask {
         let index = open_index(&self.db_path)?;
         let config = config_from_roots(&self.request.roots);
         let query = query_from_request(&self.request);
-        let outcome = index.search_with_metrics(&config, &query).map_err(napi_error)?;
+        let outcome = index
+            .search_with_metrics(&config, &query)
+            .map_err(napi_error)?;
         Ok(outcome.into())
     }
 
