@@ -1,0 +1,55 @@
+name: KFS (file search)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  kfs-rust:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatting (kfs crates)
+        run: cargo fmt --all -- --check
+      - name: Clippy (kfs crates)
+        run: cargo clippy -p kfs-core -p kfs-crawler -p kfs-index-sqlite -p kfs-daemon -p kfs-watcher -p kfs-provider-spotlight -p kfs-napi -p kfs-cli --all-targets -- -D warnings
+      - name: Workspace tests (space-lens + kfs)
+        if: runner.os != 'Windows'
+        run: cargo test --workspace
+      # Known issue: kfs-core's policy/engine suites hardcode POSIX fixture
+      # paths (/Users/alice/Dev), whose canonicalization on Windows resolves
+      # against the current drive and breaks the root-prefix match. Windows
+      # gets fmt + clippy + the NAPI build until a dedicated Windows pass
+      # makes the suite green for real (plan 0062 defers Windows).
+      - name: Windows compiles the test targets
+        if: runner.os == 'Windows'
+        run: cargo test --workspace --no-run
+      - name: Spotlight argument/parser tests
+        if: runner.os == 'macOS'
+        run: cargo test -p kfs-provider-spotlight
+      - name: Spotlight refuses unsupported platforms instead of falling back
+        if: runner.os != 'macOS'
+        run: cargo test -p kfs-provider-spotlight search_candidates_returns_unsupported_off_macos
+      - name: KFS NAPI build, smoke tests and declarations
+        working-directory: packages/kfs-napi
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm test
+      - name: KFS NAPI generated bindings are reproducible
+        working-directory: packages/kfs-napi
+        run: |
+          pnpm exec napi build --platform --release
+          git diff --exit-code -- index.js index.d.ts
