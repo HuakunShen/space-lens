@@ -9,6 +9,18 @@ Consumed by [Kunkun](https://github.com/kunkunsh/kunkun) (at
 `crates/file-search`) and Xross (at `vendors/file-search`) as an exactly
 pinned git submodule. Consumers pin a commit SHA, never a floating branch.
 
+## Consumer compatibility
+
+| Shared revision | Schema | Kunkun pin | Xross pin |
+|---|---|---|---|
+| `0cfe7c27e25eea3b841f481bdf671575f35f5d0c` (`v0.1.1`) | 1 | `da9225e3c` (branch `file-search-submodule`) | `176c8385` (branch `file-search-vendor`) |
+
+`v0.1.0` (`e21a1de8`) is a historical snapshot superseded before any
+consumer pinned it: its NAPI generated artifacts were baselined with
+`@napi-rs/cli` 3.9.1 while Kunkun's lockfile resolves 3.6.2, so a
+consumer-side build rewrote them. See `CONTRIBUTING.md` for the update
+protocol and rollback.
+
 ## Crates
 
 - `kfs-core`: shared search types, path policy, explanation, and ranking.
