@@ -189,6 +189,12 @@ into this workspace — see `docs/kfs/MIGRATION.md` for the source commit
 range and provenance, and `docs/kfs/CONTRIBUTING.md` for the update
 protocol and rollback.
 
+Known issue: `kfs-core`'s policy/engine test suites use POSIX fixture
+paths and do not yet pass on Windows; Windows CI therefore enforces
+fmt, clippy, test compilation and the NAPI build while the full suite
+runs on macOS and Linux. A dedicated Windows pass is owed before Xross
+ships Windows search (plan 0062 defers it).
+
 Search roots are explicit; sensitive paths (`.ssh`, `.aws`, `.gcloud`,
 `.kube`, `.docker`, `.env`, private keys, credentials, secrets) are denied
 by default. The NAPI package keeps its own pnpm lockfile and is
