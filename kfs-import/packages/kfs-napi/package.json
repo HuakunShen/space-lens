@@ -1,0 +1,29 @@
+{
+  "name": "@kunkunsh/file-search-native",
+  "version": "0.1.0",
+  "description": "Local NAPI binding for Kunkun file search",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "type": "commonjs",
+  "private": true,
+  "scripts": {
+    "build": "napi build --platform --release",
+    "build:debug": "napi build --platform",
+    "test": "pnpm run build && node --test test/*.test.cjs && pnpm run typecheck",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
+  },
+  "napi": {
+    "binaryName": "kfs-native",
+    "targets": [
+      "x86_64-apple-darwin",
+      "aarch64-apple-darwin",
+      "x86_64-pc-windows-msvc",
+      "x86_64-unknown-linux-gnu"
+    ]
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.2.0",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@10.28.2"
+}
