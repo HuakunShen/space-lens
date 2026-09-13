@@ -232,4 +232,19 @@ mod tests {
             ]
         );
     }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn search_candidates_returns_unsupported_off_macos() {
+        let provider = SpotlightProvider::default();
+        let config = SearchConfig {
+            roots: vec![SearchRoot::new("/tmp/anything")],
+        };
+
+        let error = provider
+            .search_candidates(&config, &SearchQuery::new("package"))
+            .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+    }
 }

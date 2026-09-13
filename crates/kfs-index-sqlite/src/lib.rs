@@ -22,6 +22,11 @@ pub type RefreshStats = IndexRefreshStats;
 pub type RepairStats = IndexRepairStats;
 pub type RootStatus = IndexRootStatus;
 
+/// Monotonic schema version of the index database, stored in `PRAGMA
+/// user_version`. Version 0 covers every database created before versioning
+/// existed, with or without the legacy `entries.path_lower` column.
+pub const SCHEMA_VERSION: i64 = 1;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexedSearchOutcome {
     pub candidate_count: usize,
@@ -344,6 +349,10 @@ impl SqliteIndex {
     }
 
     fn migrate(&self) -> rusqlite::Result<()> {
+        let current = schema_version(&self.conn)?;
+        if current > SCHEMA_VERSION {
+            return Err(unsupported_schema_version(current));
+        }
         self.conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS roots (
@@ -408,6 +417,9 @@ impl SqliteIndex {
             "CREATE INDEX IF NOT EXISTS idx_entries_root_deleted_path_lower ON entries(root_id, deleted, path_lower)",
             [],
         )?;
+        if current < SCHEMA_VERSION {
+            set_schema_version(&self.conn, SCHEMA_VERSION)?;
+        }
         Ok(())
     }
 }
@@ -760,6 +772,26 @@ fn ascii_prefix_upper_bound(prefix: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn schema_version(conn: &Connection) -> rusqlite::Result<i64> {
+    conn.query_row("PRAGMA user_version", [], |row| row.get(0))
+}
+
+fn set_schema_version(conn: &Connection, version: i64) -> rusqlite::Result<()> {
+    conn.execute_batch(&format!("PRAGMA user_version = {version};"))
+}
+
+/// A database written by a newer schema must never be modified in place.
+/// Callers recover by recreating the index file and rebuilding from source
+/// directories, which never touches user data.
+fn unsupported_schema_version(found: i64) -> rusqlite::Error {
+    rusqlite::Error::SqliteFailure(
+        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_NOTADB),
+        Some(format!(
+            "file-search index schema version {found} is newer than supported version {SCHEMA_VERSION}; recreate the index file and rebuild"
+        )),
+    )
 }
 
 fn ensure_entries_path_lower_column(conn: &Connection) -> rusqlite::Result<()> {
@@ -1161,5 +1193,103 @@ mod tests {
 
         let has_path_lower = column_exists(&index.conn, "entries", "path_lower").unwrap();
         assert!(has_path_lower);
+    }
+
+    #[test]
+    fn migrate_upgrades_legacy_database_and_stamps_schema_version() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE roots (
+              id INTEGER PRIMARY KEY,
+              path TEXT NOT NULL UNIQUE,
+              enabled INTEGER NOT NULL,
+              priority INTEGER NOT NULL DEFAULT 0,
+              include_hidden INTEGER NOT NULL DEFAULT 0,
+              include_ignored INTEGER NOT NULL DEFAULT 0,
+              updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE entries (
+              id INTEGER PRIMARY KEY,
+              root_id INTEGER NOT NULL REFERENCES roots(id) ON DELETE CASCADE,
+              path TEXT NOT NULL,
+              name TEXT NOT NULL,
+              name_lower TEXT NOT NULL,
+              extension TEXT,
+              kind INTEGER NOT NULL,
+              size INTEGER,
+              mtime INTEGER,
+              hidden INTEGER NOT NULL DEFAULT 0,
+              ignored INTEGER NOT NULL DEFAULT 0,
+              sensitive INTEGER NOT NULL DEFAULT 0,
+              deleted INTEGER NOT NULL DEFAULT 0,
+              indexed_at INTEGER NOT NULL,
+              UNIQUE(root_id, path)
+            );
+            CREATE TABLE terms (
+              term TEXT NOT NULL,
+              entry_id INTEGER NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+              field INTEGER NOT NULL,
+              weight INTEGER NOT NULL,
+              PRIMARY KEY(term, entry_id, field)
+            );
+            CREATE TABLE root_state (
+              root_id INTEGER PRIMARY KEY REFERENCES roots(id) ON DELETE CASCADE,
+              generation INTEGER NOT NULL,
+              last_full_scan_at INTEGER,
+              last_incremental_at INTEGER,
+              dirty INTEGER NOT NULL DEFAULT 0,
+              entry_count INTEGER NOT NULL DEFAULT 0
+            );
+            INSERT INTO roots (id, path, enabled, priority, updated_at)
+              VALUES (1, '/tmp/legacy', 1, 0, 0);
+            INSERT INTO entries (id, root_id, path, name, name_lower, kind, indexed_at)
+              VALUES (1, 1, '/tmp/legacy/Report.PDF', 'Report.PDF', 'report.pdf', 0, 0);
+            ",
+        )
+        .unwrap();
+        let index = SqliteIndex { conn };
+
+        index.migrate().unwrap();
+
+        assert_eq!(schema_version(&index.conn).unwrap(), SCHEMA_VERSION);
+        let lowered: String = index
+            .conn
+            .query_row("SELECT path_lower FROM entries WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(lowered, "/tmp/legacy/report.pdf");
+        let original: String = index
+            .conn
+            .query_row("SELECT path FROM entries WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(original, "/tmp/legacy/Report.PDF");
+    }
+
+    #[test]
+    fn open_memory_stamps_current_schema_version() {
+        let index = SqliteIndex::open_memory().unwrap();
+        assert_eq!(schema_version(&index.conn).unwrap(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migrate_refuses_newer_schema_without_touching_the_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        set_schema_version(&conn, SCHEMA_VERSION + 1).unwrap();
+        let index = SqliteIndex { conn };
+
+        let error = index.migrate().unwrap_err();
+
+        match error {
+            rusqlite::Error::SqliteFailure(code, message) => {
+                assert_eq!(code.code, rusqlite::ffi::ErrorCode::NotADatabase);
+                assert!(message.unwrap().contains("newer than supported"));
+            }
+            other => panic!("expected schema version failure, got {other}"),
+        }
+        assert_eq!(schema_version(&index.conn).unwrap(), SCHEMA_VERSION + 1);
     }
 }
