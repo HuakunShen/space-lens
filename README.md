@@ -1,21 +1,28 @@
-# Kunkun File Search
+# file-search (KFS)
 
-Rust-only file search prototype for Kunkun. This workspace is intentionally independent from Electron, Tauri, Node, and the desktop app database.
+Rust-only local file search workspace. This repository is intentionally
+independent from Electron, Tauri, Node runtimes, and any desktop app database
+— the Node surface is one optional NAPI package. Extracted from Kunkun's
+`crates/file-search` with full history; see `MIGRATION.md`.
+
+Consumed by [Kunkun](https://github.com/kunkunsh/kunkun) (at
+`crates/file-search`) and Xross (at `vendors/file-search`) as an exactly
+pinned git submodule. Consumers pin a commit SHA, never a floating branch.
 
 ## Crates
 
 - `kfs-core`: shared search types, path policy, explanation, and ranking.
 - `kfs-crawler`: explicit-root filesystem crawler that applies `kfs-core` policy.
-- `kfs-index-sqlite`: persistent metadata index, incremental refresh, repair, and search over crawled entries.
+- `kfs-index-sqlite`: persistent metadata index, incremental refresh, repair, and search over crawled entries. The schema carries a monotonic version (`PRAGMA user_version`, `kfs_index_sqlite::SCHEMA_VERSION`); databases written by a newer release are refused with a distinct error so callers can recreate and rebuild instead of blocking.
 - `kfs-daemon`: framework-free HTTP JSON service adapter.
 - `kfs-watcher`: platform-neutral watcher event model with bounded polling maintenance.
-- `kfs-provider-spotlight`: macOS Spotlight provider backed by `mdfind`.
+- `kfs-provider-spotlight`: macOS Spotlight provider backed by `mdfind`; other platforms return `Unsupported` rather than falling back.
 - `kfs-napi`: local Node-API package for consuming the SQLite index from TypeScript/Node/Electron.
 - `kfs-cli`: local CLI adapter for search, explain, index, watch, and benchmark commands.
 
 ## Safety
 
-Search roots are explicit. Do not run broad full-disk searches while developing this prototype. Manual smoke tests should stay within:
+Search roots are explicit. Do not run broad full-disk searches while developing this workspace. Manual smoke tests should stay within:
 
 - `~/Desktop`
 - `~/Downloads`
@@ -41,11 +48,12 @@ cargo run -p kfs-cli -- search "Cargo toml" --root . --provider sqlite --db /tmp
 Build the local NAPI package before consuming it from Node or Electron:
 
 ```bash
-pnpm --filter @kunkunsh/file-search-native build
-pnpm --filter @kunkunsh/file-search-native test
+pnpm --dir crates/kfs-napi install --frozen-lockfile
+pnpm --dir crates/kfs-napi build
+pnpm --dir crates/kfs-napi test
 ```
 
-The build produces `crates/file-search/crates/kfs-napi/index.js`, `index.d.ts`, and a platform-specific `kfs-native.<platform>-<arch>.node` file. Rebuild on each packaging target; the native binary is not cross-platform.
+The build produces `crates/kfs-napi/index.js`, `index.d.ts`, and a platform-specific `kfs-native.<platform>-<arch>.node` file. Rebuild on each packaging target; the native binary is not cross-platform and is never committed. `index.js` and `index.d.ts` are generated too: they stay tracked because the package resolves through them before a consumer build, and CI regenerates both and fails on any diff.
 
 Example usage from a Node/Electron main-process runtime:
 
