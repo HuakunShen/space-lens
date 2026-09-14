@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi        = "3.0.0"
 napi-derive = "3.0.0"
-space-lens  = { path = "../space-lens" }
+space-lens = { package = "kuntu-scan", path = "../../vendors/kuntu/crates/kuntu-scan" }
 
 [build-dependencies]
 napi-build = "2"

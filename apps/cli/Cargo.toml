@@ -11,9 +11,13 @@ version.workspace    = true
 name = "space-lens"
 path = "src/main.rs"
 
+[features]
+default = []
+mcp = []
+
 [dependencies]
 anyhow     = "1"
 clap       = { version = "4", features = ["derive"] }
 serde      = "1"
 serde_json = "1"
-space-lens = { path = "../../packages/space-lens" }
+space-lens = { package = "kuntu-scan", path = "../../vendors/kuntu/crates/kuntu-scan" }
