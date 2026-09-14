@@ -1,5 +1,8 @@
 [workspace]
-members  = ["packages/space-lens", "packages/node", "apps/cli"]
+# The engine (scan/snapshot/clean/cloud eviction) lives in the vendored Kuntu
+# repo; this workspace builds only the product shells around it.
+# packages/space-lens-ffi rejoins this list when its in-flight work lands.
+members  = ["packages/node", "apps/cli"]
 resolver = "2"
 
   [workspace.package]

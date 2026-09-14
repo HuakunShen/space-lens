@@ -1,0 +1,3 @@
+[submodule "vendors/kuntu"]
+	path = vendors/kuntu
+	url = https://github.com/HuakunShen/kuntu.git

@@ -135,5 +135,8 @@ Cargo.lock
 
 # Swift Package Manager build products
 /apps/icloud-free/.build/
+/apps/space-lens-mac/.build/
+# SwiftPM plugin caches capture the build environment (including env vars) - never commit
+.build/plugins/
 
 docs
