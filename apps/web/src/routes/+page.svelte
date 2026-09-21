@@ -63,6 +63,21 @@
     pollTimer = null
   }
 
+  async function connectDesktop(): Promise<void> {
+    workbench.phase = 'connecting'
+    try {
+      const [{ createTauriService }] = await Promise.all([import('../lib/tauri-service')])
+      const service = createTauriService()
+      workbench.capabilities = await service.capabilities()
+      workbench.targets = (await service.roots()).roots
+      workbench.service = service
+      workbench.phase = 'ready'
+    } catch (error) {
+      workbench.phase = 'failed'
+      workbench.connectMessage = `desktop IPC failed: ${describeError(error)}`
+    }
+  }
+
   async function connect(): Promise<void> {
     workbench.phase = 'connecting'
     workbench.connectMessage = null
@@ -138,6 +153,11 @@
       workbench.slice = null
       workbench.items = []
       workbench.collector = []
+      // the desktop engine scans synchronously: the session answers ready
+      if (__SPACLENS_DESKTOP__ && workbench.service !== null) {
+        workbench.status = await workbench.service.scanStatus(session.scanId)
+        await loadRoot()
+      }
     } catch (error) {
       workbench.error = describeError(error)
     }
@@ -209,9 +229,23 @@
   }
 
   onMount(() => {
+    if (__SPACLENS_DESKTOP__) {
+      void connectDesktop()
+      return () => stopStreams()
+    }
     const resolved = resolveBaseUrl(null)
     workbench.resolvedUrl = resolved.url
     workbench.sameOrigin = resolved.sameOrigin
+    // A ticket in the URL pairs automatically — the terminal-printed pairing
+    // URL is meant to land the user on a working session in one step.
+    const initialTicket = ticketFromLocation()
+    const autoscan = new URLSearchParams(window.location.search).get('autoscan')
+    if (initialTicket !== null) {
+      void connect().then(() => {
+        if (autoscan === null || workbench.phase !== 'ready') return
+        return startScan(workbench.targets.map((target) => target.path))
+      })
+    }
     return () => stopStreams()
   })
 </script>

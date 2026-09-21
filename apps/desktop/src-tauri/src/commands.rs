@@ -83,7 +83,7 @@ fn require_owner(_window: &Window, state: &AppState, session_id: &str) -> Result
 // --------------------------------------------------------------- closed union
 
 #[derive(Deserialize)]
-#[serde(tag = "method", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(tag = "method", rename_all = "camelCase", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum ReadRequest {
     Health,
     Capabilities,
@@ -106,7 +106,7 @@ pub enum ReadRequest {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum SubmitRequest {
     ScanStart {
         #[serde(flatten)]
@@ -123,7 +123,7 @@ pub enum SubmitRequest {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum HostRequest {
     PickDirectory { title: Option<String> },
 }

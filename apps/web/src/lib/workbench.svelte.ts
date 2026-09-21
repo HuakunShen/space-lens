@@ -1,6 +1,7 @@
 import type { CollectorEntry, ScanStatus, ScanTarget, TreeNodeSummary, TreeSlice } from '@space-lens/contract'
 import type { HttpService } from '@space-lens/client'
 import { connectEventStream } from '@space-lens/client'
+import type { WorkbenchService } from './tauri-service'
 
 export const BASE_URL_KEY = 'spacelens.baseUrl'
 export const TOKEN_KEY = 'spacelens.session.token'
@@ -84,7 +85,7 @@ export interface WorkbenchState {
   connectMessage: string | null
   resolvedUrl: string | null
   sameOrigin: boolean
-  service: HttpService | null
+  service: WorkbenchService | null
   capabilities: Awaited<ReturnType<HttpService['capabilities']>> | null
   targets: ScanTarget[]
   status: ScanStatus | null

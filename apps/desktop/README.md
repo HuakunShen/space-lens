@@ -31,6 +31,15 @@ Or run both with the orchestrator:
 node scripts/build-desktop.ts
 ```
 
+## Known issue (open)
+
+The Tauri IPC response for the *third and later* `sl_read` invocations never
+resolves on the JS side, although the Rust command completes (`completed: true`
+probe). Reproduced with both `__TAURI_INTERNALS__.invoke` and
+`@tauri-apps/api/core`, with serialized (queued) invokes, and on latest
+tauri/wry patches. Suspected upstream WKWebView response-delivery race (see
+tauri-apps/wry#1537). Evidence and probes are preserved in the session log.
+
 Rules that hold for the native shell:
 
 - No JS runtime ships in the product: the Svelte bundle is compiled in, and

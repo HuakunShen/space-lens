@@ -7,6 +7,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>Space Lens</title>
+    <script>
+      // Diagnostic title probe: surface boot phase and uncaught failures where
+      // the system window list can read them (no devtools needed).
+      document.title = 'BOOT internals=' + ('__TAURI_INTERNALS__' in window ? 'yes' : 'no')
+      window.addEventListener('error', function (e) {
+        document.title = 'ERR ' + (e.message || 'unknown')
+      })
+      window.addEventListener('unhandledrejection', function (e) {
+        var reason = e.reason
+        document.title = 'REJ ' + (reason && reason.message ? reason.message : String(reason))
+      })
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover" class="bg-background text-foreground">

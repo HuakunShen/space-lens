@@ -1,8 +1,9 @@
-import { readFile, realpath } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 
-const CSP =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
+const CSP_TEMPLATE =
+  "default-src 'self'; script-src 'self'{HASHES}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
   "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -34,6 +35,32 @@ export interface AssetHandler {
 
 function notFound(message: string): Response {
   return new Response(message, { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } })
+}
+
+/**
+ * SvelteKit's client boot script is INLINE in the served document, so a CSP of
+ * `script-src 'self'` would block the app from ever mounting. Hash the inline
+ * scripts of the actual bytes (cached by mtime+size) and pin them into the CSP
+ * — per-document hashes instead of `unsafe-inline`.
+ */
+const hashCache = new Map<string, string>()
+
+async function documentCspFor(htmlPath: string, html: string): Promise<string> {
+  const stats = await stat(htmlPath).catch(() => null)
+  const cacheKey = `${htmlPath}|${stats?.mtimeMs ?? 0}|${stats?.size ?? 0}`
+  const cached = hashCache.get(cacheKey)
+  if (cached !== undefined) return cached
+  const hashes: string[] = []
+  const pattern = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(html)) !== null) {
+    const digest = createHash('sha256').update(match[1]).digest('base64')
+    hashes.push(`'sha256-${digest}'`)
+  }
+  const header = CSP_TEMPLATE.replace('{HASHES}', hashes.map((hash) => ` ${hash}`).join(''))
+  if (hashCache.size > 64) hashCache.clear()
+  hashCache.set(cacheKey, header)
+  return header
 }
 
 /**
@@ -77,7 +104,7 @@ export function createAssetHandler(webRoot: string | null): AssetHandler {
     }
     if (isDocument) {
       headers['cache-control'] = 'no-store'
-      headers['content-security-policy'] = CSP
+      headers['content-security-policy'] = await documentCspFor(real, body.toString('utf8'))
       headers['referrer-policy'] = 'no-referrer'
     } else {
       headers['cache-control'] = 'public, max-age=300'
