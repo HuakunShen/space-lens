@@ -22,7 +22,7 @@ public key committed in `tauri.conf.json`; the private key lives only in the
 yarn workspace @space-lens/web build:desktop
 
 # 2. shell: compile + bundle (own Cargo workspace under apps/desktop/src-tauri)
-npx -y @tauri-apps/cli@2 build
+yarn workspace @space-lens/desktop build
 ```
 
 Or run both with the orchestrator:

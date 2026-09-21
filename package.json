@@ -10,6 +10,7 @@
     "packages/web-ui",
     "apps/tui",
     "apps/vscode",
+    "apps/desktop",
     "apps/web"
   ],
   "scripts": {
@@ -40,7 +41,8 @@
     "typecheck:client": "yarn workspace @space-lens/client typecheck",
     "typecheck:web-ui": "yarn workspace @space-lens/web-ui typecheck",
     "typecheck:web": "yarn workspace @space-lens/web check",
-    "typecheck:vscode": "yarn workspace space-lens-vscode typecheck"
+    "typecheck:vscode": "yarn workspace space-lens-vscode typecheck",
+    "desktop": "node scripts/build-desktop.ts"
   },
   "devDependencies": {
     "@taplo/cli": "^0.7.0",

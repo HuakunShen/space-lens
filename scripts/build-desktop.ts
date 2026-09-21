@@ -14,4 +14,4 @@ if (!existsSync(`${outDir}/index.html`)) {
   process.exit(1)
 }
 execSync('cargo build --release', { cwd: `${webDir}/../desktop/src-tauri`, stdio: 'inherit' })
-console.log('desktop binary compiled; bundle with `npx -y @tauri-apps/cli@2 build` when packaging')
+console.log('desktop binary compiled; bundle with `yarn workspace @space-lens/desktop tauri build` when packaging')

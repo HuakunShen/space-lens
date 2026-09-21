@@ -1,0 +1,15 @@
+{
+  "name": "@space-lens/desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Space Lens desktop shell (Tauri 2). The frontend is apps/web's build-desktop flavor, embedded at compile time by src-tauri.",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:web": "yarn --cwd ../web build:desktop"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
