@@ -66,8 +66,11 @@
   async function connectDesktop(): Promise<void> {
     workbench.phase = 'connecting'
     try {
-      const [{ createTauriService }] = await Promise.all([import('../lib/tauri-service')])
-      const service = createTauriService()
+      const [{ createTauriService }, { loadTauriPorts }] = await Promise.all([
+        import('@space-lens/client'),
+        import('../lib/tauri-ports'),
+      ])
+      const service = createTauriService(await loadTauriPorts())
       workbench.capabilities = await service.capabilities()
       workbench.targets = (await service.roots()).roots
       workbench.service = service

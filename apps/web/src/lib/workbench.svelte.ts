@@ -1,7 +1,7 @@
 import type { CollectorEntry, ScanStatus, ScanTarget, TreeNodeSummary, TreeSlice } from '@space-lens/contract'
 import type { HttpService } from '@space-lens/client'
 import { connectEventStream } from '@space-lens/client'
-import type { WorkbenchService } from './tauri-service'
+import type { WorkbenchService } from '@space-lens/client'
 
 export const BASE_URL_KEY = 'spacelens.baseUrl'
 export const TOKEN_KEY = 'spacelens.session.token'

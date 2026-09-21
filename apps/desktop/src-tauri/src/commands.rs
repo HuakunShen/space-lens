@@ -8,6 +8,7 @@ use std::sync::Mutex;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 
 use crate::engine::{
@@ -136,12 +137,14 @@ pub async fn sl_read(
     window: Window,
     session_id: String,
     request: ReadRequest,
-) -> Result<Value, Value> {
-    // Sync commands run on the main thread; on macOS that collides with the
-    // WKWebView custom-protocol response delivery (invokes hang). Offload the
-    // whole dispatch like sl_submit.
+    reply: Channel<Value>,
+) -> Result<(), Value> {
+    // The reply rides a Channel (event delivery). The custom-protocol fetch
+    // response body is NOT used: on macOS later fetch responses are lost
+    // between the WKURLSchemeHandler and the page (see README known issue).
     let handle = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
+        let outcome: Result<Value, Value> = (|| {
         require_owner(&window, &state, &session_id)?;
         let sessions = state.sessions.lock().unwrap();
         let bundle = sessions
@@ -182,6 +185,12 @@ pub async fn sl_read(
         drop(engine);
         drop(sessions);
         result
+        })();
+        let _ = reply.send(match outcome {
+            Ok(value) => json!({ "ok": true, "result": value }),
+            Err(problem) => json!({ "ok": false, "problem": problem }),
+        });
+        Ok(())
     });
     handle.await.map_err(|error| problem_value("InternalError", error))?
 }
