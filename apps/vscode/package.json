@@ -1,0 +1,65 @@
+{
+  "name": "space-lens-vscode",
+  "displayName": "Space Lens",
+  "description": "Scan and visualize the workspace's disk usage with Space Lens, right inside VS Code.",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "publisher": "HuakunShen",
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "spacelens.openWorkbench",
+        "title": "Open Workbench",
+        "category": "Space Lens"
+      },
+      {
+        "command": "spacelens.chooseDirectory",
+        "title": "Scan a Different Directory…",
+        "category": "Space Lens"
+      },
+      {
+        "command": "spacelens.shutdown",
+        "title": "Shutdown Service",
+        "category": "Space Lens"
+      }
+    ],
+    "configuration": {
+      "title": "Space Lens",
+      "properties": {
+        "spacelens.cliPath": {
+          "type": "string",
+          "default": "spacelens",
+          "description": "Path to the spacelens CLI (or a name on PATH). The extension spawns it as the local service."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.mjs && vite build --config webview/vite.config.ts",
+    "typecheck": "tsc --noEmit",
+    "package": "yarn compile && npx -y @vscode/vsce package --no-dependencies -o space-lens-$npm_package_version.vsix"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
+    "@types/node": "^25.9.3",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.28.1",
+    "svelte": "^5.56.1",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.16"
+  },
+  "dependencies": {
+    "@space-lens/client": "workspace:*",
+    "@space-lens/contract": "workspace:*",
+    "@space-lens/web-ui": "workspace:*"
+  }
+}

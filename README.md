@@ -16,6 +16,19 @@ Fast directory scanning and cleanup candidate utilities, powered by Rust and nap
 npm install space-lens
 ```
 
+## Serve the web workbench
+
+`spacelens serve` starts an authenticated HTTP host that serves the web UI and
+speaks a closed JSON contract (`@space-lens/contract`): single-use pairing
+tickets, bearer sessions, REST reads, and SSE scan events. Cleanup over the
+web is trash-only; permanent deletion stays a CLI/TUI concern.
+
+```bash
+npx spacelens serve                    # loopback, read-only, current directory
+npx spacelens serve --host 0.0.0.0 --allow-cidr 192.168.1.0/24
+npx spacelens serve --allow-cleanup    # grant trash-based cleanup
+```
+
 ## API Usage
 
 ```ts

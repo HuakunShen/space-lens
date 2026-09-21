@@ -1,0 +1,14 @@
+/*
+ * Single style entry for every Space Lens web host. Apps import this once:
+ *   import '@space-lens/web-ui/styles.css'
+ * and add `@source` for this package's Svelte sources so Tailwind can see the
+ * classes used inside components (Tailwind ignores node_modules by default).
+ */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn-svelte/tailwind.css';
+@import '@fontsource-variable/inter';
+
+@custom-variant dark (&:is(.dark *));
+
+@import './styles/theme.css';

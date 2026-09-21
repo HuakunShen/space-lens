@@ -3,8 +3,14 @@
   "version": "0.2.0",
   "private": true,
   "workspaces": [
+    "packages/contract",
+    "packages/client",
+    "packages/host",
     "packages/node",
-    "apps/tui"
+    "packages/web-ui",
+    "apps/tui",
+    "apps/vscode",
+    "apps/web"
   ],
   "scripts": {
     "artifacts": "yarn workspace space-lens artifacts",
@@ -17,14 +23,24 @@
     "format:prettier": "prettier . -w",
     "format:toml": "taplo format",
     "format:rs": "cargo fmt --all",
-    "lint": "run-p lint:node lint:tui",
+    "lint": "run-p lint:node lint:tui lint:contract lint:host lint:client lint:web-ui",
     "lint:node": "yarn workspace space-lens lint",
     "lint:tui": "yarn workspace @space-lens/cli lint",
-    "test": "cargo test --workspace && yarn workspace space-lens test && yarn workspace @space-lens/cli test",
+    "lint:contract": "yarn workspace @space-lens/contract lint",
+    "lint:host": "yarn workspace @space-lens/host lint",
+    "lint:client": "yarn workspace @space-lens/client lint",
+    "lint:web-ui": "yarn workspace @space-lens/web-ui lint",
+    "test": "cargo test --workspace && yarn workspace space-lens test && yarn workspace @space-lens/cli test && yarn workspace @space-lens/contract test && yarn workspace @space-lens/host test && yarn workspace @space-lens/client test",
     "tui": "yarn workspace @space-lens/cli dev",
-    "typecheck": "run-p typecheck:node typecheck:tui",
+    "typecheck": "run-p typecheck:node typecheck:tui typecheck:contract typecheck:host typecheck:client typecheck:web-ui typecheck:web typecheck:vscode",
     "typecheck:node": "yarn workspace space-lens typecheck",
-    "typecheck:tui": "yarn workspace @space-lens/cli typecheck"
+    "typecheck:tui": "yarn workspace @space-lens/cli typecheck",
+    "typecheck:contract": "yarn workspace @space-lens/contract typecheck",
+    "typecheck:host": "yarn workspace @space-lens/host typecheck",
+    "typecheck:client": "yarn workspace @space-lens/client typecheck",
+    "typecheck:web-ui": "yarn workspace @space-lens/web-ui typecheck",
+    "typecheck:web": "yarn workspace @space-lens/web check",
+    "typecheck:vscode": "yarn workspace space-lens-vscode typecheck"
   },
   "devDependencies": {
     "@taplo/cli": "^0.7.0",
