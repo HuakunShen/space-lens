@@ -3,5 +3,5 @@
   "identifier": "main-capability",
   "description": "Least-privilege surface for the Space Lens workbench: event listen/unlisten only. Folder picking is answered host-side through the dialog plugin, never granted to the WebView.",
   "windows": ["main"],
-  "permissions": ["core:event:default", "core:app:default"]
+  "permissions": ["core:event:default", "core:app:default", "updater:default", "process:allow-restart"]
 }
