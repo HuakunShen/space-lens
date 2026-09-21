@@ -131,13 +131,23 @@ pub enum HostRequest {
 // -------------------------------------------------------------------- reads
 
 #[tauri::command]
-pub fn sl_read(window: Window, session_id: String, request: ReadRequest, state: State<'_, AppState>) -> Result<Value, Value> {
-    require_owner(&window, &state, &session_id)?;
-    let sessions = state.sessions.lock().unwrap();
-    let bundle = sessions
-        .get(&session_id)
-        .ok_or_else(|| json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}))?;
-    let mut engine = bundle.engine.lock().unwrap();
+pub async fn sl_read(
+    app: AppHandle,
+    window: Window,
+    session_id: String,
+    request: ReadRequest,
+) -> Result<Value, Value> {
+    // Sync commands run on the main thread; on macOS that collides with the
+    // WKWebView custom-protocol response delivery (invokes hang). Offload the
+    // whole dispatch like sl_submit.
+    let handle = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        require_owner(&window, &state, &session_id)?;
+        let sessions = state.sessions.lock().unwrap();
+        let bundle = sessions
+            .get(&session_id)
+            .ok_or_else(|| json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}))?;
+        let mut engine = bundle.engine.lock().unwrap();
     let result: Result<Value, Value> = match request {
         ReadRequest::Health => Ok(json!({
             "status": "ok",
@@ -169,9 +179,11 @@ pub fn sl_read(window: Window, session_id: String, request: ReadRequest, state: 
             serde_json::to_value(engine.children(&request).map_err(problem_to_value)?).map_err(|error| problem_value("InternalError", error))
         }
     };
-    drop(engine);
-    drop(sessions);
-    result
+        drop(engine);
+        drop(sessions);
+        result
+    });
+    handle.await.map_err(|error| problem_value("InternalError", error))?
 }
 
 // ----------------------------------------------------------------- mutations

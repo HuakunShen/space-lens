@@ -33,12 +33,19 @@ node scripts/build-desktop.ts
 
 ## Known issue (open)
 
-The Tauri IPC response for the *third and later* `sl_read` invocations never
-resolves on the JS side, although the Rust command completes (`completed: true`
-probe). Reproduced with both `__TAURI_INTERNALS__.invoke` and
-`@tauri-apps/api/core`, with serialized (queued) invokes, and on latest
-tauri/wry patches. Suspected upstream WKWebView response-delivery race (see
-tauri-apps/wry#1537). Evidence and probes are preserved in the session log.
+`sl_read` responses from the third invoke onward never resolve on the JS
+side, although the Rust command completes (`completed: true` probe at every
+return path). Reproduced with `__TAURI_INTERNALS__.invoke`, with
+`@tauri-apps/api/core`, with a serialized invoke queue, with sync and async
+commands, on latest tauri/wry. macOS delivers `invoke` over a custom-protocol
+fetch (`http://ipc.localhost`); the response for later fetches is lost between
+the WKURLSchemeHandler and the page — suspected upstream WKWebView race
+(tauri-apps/wry#1537).
+
+Planned fix: switch `sl_read`/`sl_submit` responses to a Tauri **`Channel`**
+(passed as a command argument — delivery rides the event system, not the fetch
+response), or pin a wry version without the race. Traces: invoke #1/#2
+resolve, #3 pends; probes at entry+exit both fire.
 
 Rules that hold for the native shell:
 
