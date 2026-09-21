@@ -1,0 +1,158 @@
+# Gates and releases for the multi-runtime work added on top of the npm/TUI
+# line (which CI.yml still owns):
+#   - packages/contract · client · host   (closed JSON contract + HTTP/SSE host)
+#   - apps/web                            (one SPA, two build flavors)
+#   - apps/desktop                        (Tauri shell, own Cargo workspace)
+#   - apps/vscode                         (extension: supervisor + webview)
+#
+# Releases ride the same tag: `app-v1.2.3` builds the desktop bundles and the
+# vsix together. The npm line keeps its own `v*` tags in CI.yml.
+name: Workbench
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'app-v*'
+  pull_request:
+
+concurrency:
+  group: workbench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  js:
+    name: JS — typecheck, tests, builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: yarn install --immutable
+      - name: Contract artifacts are byte-fresh
+        run: yarn workspace @space-lens/contract test
+      - name: Unit tests (contract, client, host)
+        run: |
+          yarn workspace @space-lens/client test
+          yarn workspace @space-lens/host test
+      - name: Typecheck every JS workspace
+        run: yarn typecheck
+      - name: Web build (browser flavor)
+        run: yarn workspace @space-lens/web build
+      - name: Web build (desktop flavor)
+        run: yarn workspace @space-lens/web build:desktop
+      - name: Wrangler deploy dry-run (no auth needed)
+        run: yarn workspace @space-lens/web exec wrangler deploy --dry-run
+      - name: VS Code extension compile
+        run: yarn workspace space-lens-vscode compile
+
+  desktop-test:
+    name: Desktop — cargo test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-22.04, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Linux Tauri prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: cargo test (own workspace; shells that link WebKit stay out of the root crate graph)
+        working-directory: apps/desktop/src-tauri
+        run: cargo test --workspace
+
+  # The engine tests that also exercise the real trash backend need a desktop
+  # session; on CI they assert the typed-failure path (see tests/engine.rs).
+
+  desktop-release:
+    name: Desktop — bundle (${{ matrix.os }})
+    if: startsWith(github.ref, 'refs/tags/app-v')
+    needs: [js, desktop-test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            args: --target aarch64-apple-darwin
+          - os: macos-latest
+            args: --target x86_64-apple-darwin
+          - os: ubuntu-22.04
+            args: ''
+          - os: windows-latest
+            args: ''
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Linux Tauri prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: yarn install --immutable
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ contains(matrix.args, 'aarch64-apple-darwin') && 'aarch64-apple-darwin' || '' }}
+      - name: Build the web desktop flavor first (the shell embeds it at compile time)
+        run: yarn workspace @space-lens/web build:desktop
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional — only needed when tauri.conf enables the updater plugin.
+          # Create the minisign keypair once: `npx @tauri-apps/cli signer generate -w ~/.tauri/app.key`
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop/src-tauri
+          args: ${{ matrix.args }}
+          tagName: app-v__VERSION__
+          releaseName: 'Space Lens desktop app-v__VERSION__'
+          releaseBody: 'Desktop bundles (dmg / deb / AppImage / NSIS) built from the embedded web workbench.'
+          releaseDraft: false
+          prerelease: false
+
+  vsix:
+    name: VS Code extension — vsix
+    if: startsWith(github.ref, 'refs/tags/app-v')
+    needs: [js]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: yarn install --immutable
+      - name: Stamp the tag version into the manifest
+        working-directory: apps/vscode
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          node -e "const fs=require('node:fs');const j=JSON.parse(fs.readFileSync('package.json'));j.version=process.env.VERSION;fs.writeFileSync('package.json',JSON.stringify(j,null,2)+'\n')"
+      - name: Package vsix
+        run: yarn workspace space-lens-vscode package
+      - name: Attach vsix to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" apps/vscode/space-lens-*.vsix --clobber
