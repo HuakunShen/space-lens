@@ -167,7 +167,8 @@ pub async fn sl_read(
             "icloud": "unavailable",
         })),
         ReadRequest::Roots => {
-            serde_json::to_value(engine.roots()).map_err(|error| problem_value("InternalError", error))
+            // wrapped to match the HTTP host shape: { roots: ScanTarget[] }
+            serde_json::to_value(json!({ "roots": engine.roots() })).map_err(|error| problem_value("InternalError", error))
         }
         ReadRequest::ScanStatus { scan_id } => {
             serde_json::to_value(engine.status(&scan_id).map_err(problem_to_value)?).map_err(|error| problem_value("InternalError", error))

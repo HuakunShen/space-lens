@@ -55,6 +55,10 @@ function invokeWithReply<T>(ports: TauriPorts, cmd: string, payload: Record<stri
     const channel = ports.createChannel((message) => {
       clearTimeout(timer)
       const reply = message as Reply<T>
+      if (reply.ok === true && reply.result === undefined) {
+        reject(new Error(`reply.result missing: ${JSON.stringify(message).slice(0, 300)}`))
+        return
+      }
       if (reply.ok === true) resolve(reply.result as T)
       else if (reply.problem !== undefined) reject(new TauriProblemError(reply.problem))
       else reject(new Error('malformed reply'))

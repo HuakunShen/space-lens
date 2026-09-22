@@ -42,7 +42,9 @@
   const collectedIds = $derived(new Set(workbench.collector.map((entry) => entry.nodeId)))
   const collectorTotal = $derived(workbench.collector.reduce((total, entry) => total + entry.size, 0))
   const targets = $derived.by<ScanTarget[]>(() => {
-    const recent = loadRecentTargets().map((entry, index) => ({
+    const current = workbench.targets ?? []
+    const recentList = loadRecentTargets() ?? []
+    const recent = recentList.map((entry, index) => ({
       id: `recent_${index}`,
       label: entry.label,
       path: entry.path,
@@ -53,7 +55,7 @@
       removable: false,
       lastScannedAt: entry.lastScannedAt,
     }))
-    return [...workbench.targets, ...recent]
+    return [...current, ...recent]
   })
 
   function stopStreams(): void {
@@ -72,7 +74,8 @@
       ])
       const service = createTauriService(await loadTauriPorts())
       workbench.capabilities = await service.capabilities()
-      workbench.targets = (await service.roots()).roots
+      const rootsResponse = await service.roots()
+      workbench.targets = Array.isArray(rootsResponse?.roots) ? rootsResponse.roots : []
       workbench.service = service
       workbench.phase = 'ready'
     } catch (error) {
@@ -101,7 +104,8 @@
       }
       workbench.service = service
       workbench.capabilities = await service.capabilities()
-      workbench.targets = (await service.roots()).roots
+      const rootsResponse = await service.roots()
+      workbench.targets = Array.isArray(rootsResponse?.roots) ? rootsResponse.roots : []
       workbench.phase = 'ready'
       stream = startEventStream() ?? null
       startPolling()
@@ -232,6 +236,15 @@
   }
 
   onMount(() => {
+    window.addEventListener('error', (event) => {
+      const el = document.getElementById('err-trace')
+      if (el) el.textContent = String(event.error?.stack ?? event.message ?? 'unknown').slice(0, 3000)
+    })
+    window.addEventListener('unhandledrejection', (event) => {
+      const el = document.getElementById('err-trace')
+      const reason = event.reason as { stack?: string; message?: string }
+      if (el) el.textContent = String(reason?.stack ?? reason?.message ?? 'unhandled rejection').slice(0, 3000)
+    })
     if (__SPACLENS_DESKTOP__) {
       void connectDesktop()
       return () => stopStreams()
@@ -253,6 +266,7 @@
   })
 </script>
 
+<pre id="err-trace" class="fixed bottom-0 left-0 z-50 max-h-40 overflow-auto bg-black/80 p-2 font-mono text-[10px] text-red-300"></pre>
 {#if workbench.phase !== 'ready'}
   <ConnectionPanel
     phase={workbench.phase === 'failed' ? 'failed' : workbench.phase === 'connecting' ? 'connecting' : 'idle'}
