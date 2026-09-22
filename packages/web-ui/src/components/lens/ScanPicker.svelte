@@ -277,7 +277,7 @@
 
             <Card.Footer class="justify-between gap-3 border-t bg-muted/20">
               <p class="text-sm text-muted-foreground">
-                The browser loads only visible tree slices.
+                Only visible tree slices are loaded, on demand.
               </p>
               <Button type="button" onclick={scanSelected} disabled={!canScan}>
                 {busy ? "Scanning" : "Scan"}

@@ -284,7 +284,7 @@
     onConnect={() => void connect()}
   />
 {:else}
-  <div class="flex min-h-screen flex-col gap-3 p-4">
+  <div class="flex min-h-screen flex-col">
     {#if workbench.status === null || workbench.status.state === 'idle'}
       <ScanPicker
         {targets}
@@ -310,9 +310,9 @@
       <StateBanner state="loading" title="Scanning {workbench.status.label ?? '…'}" detail="The engine reports no progress; this finishes when the tree is complete." />
     {:else if workbench.status.state === 'ready'}
       <header
-        data-tauri-drag-region
-        class="flex h-12 shrink-0 items-center justify-between border-b px-4"
-      >
+      data-tauri-drag-region
+      class="flex h-12 shrink-0 items-center justify-between border-b px-4"
+    >
         <div class="flex items-center gap-2.5">
           <div class="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
             <Search size={15} />
