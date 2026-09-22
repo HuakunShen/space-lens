@@ -311,7 +311,10 @@
     {:else if workbench.status.state === 'ready'}
       <header
       data-tauri-drag-region
-      class="flex h-12 shrink-0 items-center justify-between border-b px-4"
+      class={[
+        "flex h-12 shrink-0 items-center justify-between border-b",
+        __SPACLENS_DESKTOP__ ? "pl-[140px] pr-4" : "px-4",
+      ]}
     >
         <div class="flex items-center gap-2.5">
           <div class="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">

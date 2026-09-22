@@ -90,8 +90,8 @@
     <header
       data-tauri-drag-region
       class={[
-        "flex min-h-12 items-center justify-between gap-4 border-b px-4 py-2",
-        isKunkunMode ? "pl-24" : "pl-20",
+        "flex min-h-12 items-center justify-between gap-4 border-b py-2",
+        isKunkunMode ? "pl-24" : mode === "desktop" ? "pl-[140px] pr-4" : "px-4",
       ]}
     >
       <div class="flex min-w-0 items-center gap-2.5">
