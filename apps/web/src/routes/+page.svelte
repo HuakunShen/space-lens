@@ -10,6 +10,7 @@
     StatusBar,
     SunburstChart,
   } from '@space-lens/web-ui'
+  import { Search } from '@lucide/svelte'
   import type { CollectorEntry, ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
   import { ServiceError } from '@space-lens/client'
   import {
@@ -268,6 +269,7 @@
 
 <pre id="err-trace" class="fixed bottom-0 left-0 z-50 max-h-40 overflow-auto bg-black/80 p-2 font-mono text-[10px] text-red-300"></pre>
 {#if workbench.phase !== 'ready'}
+  <div data-tauri-drag-region class="fixed top-0 right-0 left-0 z-40 h-10" />
   <ConnectionPanel
     phase={workbench.phase === 'failed' ? 'failed' : workbench.phase === 'connecting' ? 'connecting' : 'idle'}
     resolvedUrl={workbench.resolvedUrl}
@@ -305,13 +307,25 @@
       />
       <StateBanner state="loading" title="Scanning {workbench.status.label ?? '…'}" detail="The engine reports no progress; this finishes when the tree is complete." />
     {:else if workbench.status.state === 'ready'}
+      <header
+        data-tauri-drag-region
+        class="flex h-12 shrink-0 items-center justify-between border-b px-4"
+      >
+        <div class="flex items-center gap-2.5">
+          <div class="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
+            <Search size={15} />
+          </div>
+          <span class="font-semibold">Space Lens</span>
+        </div>
+        <span class="rounded-full border px-2 py-0.5 text-xs">{__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}</span>
+      </header>
       {#if workbench.error}
         <StateBanner state="error" title="Something failed" detail={workbench.error} />
       {/if}
       {#if workbench.slice?.truncated}
         <StateBanner state="truncated" title="Part of this view is collapsed" detail="{workbench.slice.omittedCount} children were summarized; open a folder to go deeper." />
       {/if}
-      {#if workbench.streamState !== 'live'}
+      {#if !__SPACLENS_DESKTOP__ && workbench.streamState !== 'live'}
         <StateBanner state="disconnected" title="no live updates ({workbench.streamState})" detail="Data still loads on demand." />
       {/if}
       <div class="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
