@@ -18,6 +18,7 @@
   interface Props {
     targets: ScanTarget[];
     mode: string;
+    logo?: string;
     busy: boolean;
     error: string | null;
     status: ScanStatus | null;
@@ -29,6 +30,7 @@
   let {
     targets,
     mode,
+    logo,
     busy,
     error,
     status,
@@ -93,11 +95,15 @@
       ]}
     >
       <div class="flex min-w-0 items-center gap-2.5">
-        <div
-          class="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground"
-        >
-          <Search size={15} />
-        </div>
+        {#if logo}
+          <img src={logo} alt="" class="size-8 shrink-0 rounded-lg" />
+        {:else}
+          <div
+            class="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground"
+          >
+            <Search size={15} />
+          </div>
+        {/if}
         <div class="min-w-0">
           <h1 class="truncate text-base font-semibold leading-tight">
             Space Lens

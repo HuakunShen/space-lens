@@ -269,7 +269,7 @@
 
 <pre id="err-trace" class="fixed bottom-0 left-0 z-50 max-h-40 overflow-auto bg-black/80 p-2 font-mono text-[10px] text-red-300"></pre>
 {#if workbench.phase !== 'ready'}
-  <div data-tauri-drag-region class="fixed top-0 right-0 left-0 z-40 h-10" />
+  <div data-tauri-drag-region class="fixed top-0 right-0 left-0 z-40 h-10"></div>
   <ConnectionPanel
     phase={workbench.phase === 'failed' ? 'failed' : workbench.phase === 'connecting' ? 'connecting' : 'idle'}
     resolvedUrl={workbench.resolvedUrl}
@@ -289,6 +289,7 @@
       <ScanPicker
         {targets}
         mode={__SPACLENS_DESKTOP__ ? "desktop" : "browser"}
+        logo="/logo-mark.png"
         busy={false}
         error={workbench.error}
         status={null}
@@ -299,6 +300,7 @@
       <ScanPicker
         {targets}
         mode={__SPACLENS_DESKTOP__ ? "desktop" : "browser"}
+        logo="/logo-mark.png"
         busy={true}
         error={workbench.error}
         status={workbench.status}
