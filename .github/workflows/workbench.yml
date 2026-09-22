@@ -89,12 +89,16 @@ jobs:
         include:
           - os: macos-latest
             args: --target aarch64-apple-darwin
+            targets: aarch64-apple-darwin
           - os: macos-latest
             args: --target x86_64-apple-darwin
+            targets: x86_64-apple-darwin
           - os: ubuntu-22.04
             args: ''
+            targets: ''
           - os: windows-latest
             args: ''
+            targets: ''
     steps:
       - uses: actions/checkout@v6
         with:
@@ -111,7 +115,7 @@ jobs:
       - run: yarn install --immutable
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ contains(matrix.args, 'aarch64-apple-darwin') && 'aarch64-apple-darwin' || '' }}
+          targets: ${{ matrix.targets }}
       - name: Build the web desktop flavor first (the shell embeds it at compile time)
         run: yarn workspace @space-lens/web build:desktop
       - uses: tauri-apps/tauri-action@v0
@@ -156,3 +160,36 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" apps/vscode/space-lens-*.vsix --clobber
+
+  brew-tap:
+    name: Homebrew — publish cask to the tap
+    if: startsWith(github.ref, 'refs/tags/app-v')
+    needs: [desktop-release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download dmg artifacts from the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/dmg
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern '*.dmg' --dir /tmp/dmg
+          ls -la /tmp/dmg
+      - name: Render the cask with the real versions and sha256
+        env:
+          VERSION_REF: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: python3 scripts/render-cask.py
+      - name: Push the cask to HuakunShen/homebrew-tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:$HOMEBREW_TAP_TOKEN@github.com/HuakunShen/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          cp /tmp/space-lens.rb tap/Casks/space-lens.rb
+          cd tap
+          git config user.name "space-lens-release-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add Casks/space-lens.rb
+          git diff --cached --quiet || git commit -m "space-lens ${GITHUB_REF_NAME#app-v}"
+          git push
