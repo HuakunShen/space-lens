@@ -82,13 +82,14 @@
 </script>
 
 <main
-  class="grid h-dvh min-h-0 bg-background/70 text-foreground backdrop-blur-2xl"
+  class="grid h-dvh min-h-0 bg-background text-foreground"
 >
   <section class="flex h-full min-h-0 w-full flex-col">
     <header
+      data-tauri-drag-region
       class={[
-        "flex min-h-12 items-center justify-between gap-4 border-b px-4 py-2 [-webkit-app-region:drag]",
-        isKunkunMode ? "pl-24" : "",
+        "flex min-h-12 items-center justify-between gap-4 border-b px-4 py-2",
+        isKunkunMode ? "pl-24" : "pl-20",
       ]}
     >
       <div class="flex min-w-0 items-center gap-2.5">

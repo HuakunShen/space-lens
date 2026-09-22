@@ -286,7 +286,7 @@
     {#if workbench.status === null || workbench.status.state === 'idle'}
       <ScanPicker
         {targets}
-        mode="browser"
+        mode={__SPACLENS_DESKTOP__ ? "desktop" : "browser"}
         busy={false}
         error={workbench.error}
         status={null}
@@ -296,7 +296,7 @@
     {:else if workbench.status.state === 'scanning'}
       <ScanPicker
         {targets}
-        mode="browser"
+        mode={__SPACLENS_DESKTOP__ ? "desktop" : "browser"}
         busy={true}
         error={workbench.error}
         status={workbench.status}

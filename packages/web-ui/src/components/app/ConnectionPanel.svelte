@@ -32,7 +32,7 @@
   }: Props = $props()
 </script>
 
-<div class="mx-auto flex min-h-screen w-full max-w-xl flex-col items-center justify-center gap-6 p-6">
+<div class="mx-auto flex min-h-screen w-full max-w-xl flex-col items-center justify-center gap-6 p-6 pt-14">
   <div class="flex flex-col items-center gap-2 text-center">
     <h1 class="text-2xl font-semibold tracking-tight">Space Lens</h1>
     <p class="text-muted-foreground text-sm">Pair with a running <code class="font-mono">spacelens serve</code> to see your disk.</p>
