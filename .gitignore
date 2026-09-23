@@ -118,6 +118,8 @@ dist
 
 /target
 Cargo.lock
+# Track the root application workspace lockfile; nested workspace lockfiles stay ignored.
+!/Cargo.lock
 
 *.node
 .pnp.*
