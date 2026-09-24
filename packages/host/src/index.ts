@@ -1,5 +1,5 @@
 export { AuthService, hashHostedPassword, type SessionRecord } from './auth.ts'
-export { createAssetHandler } from './assets.ts'
+export { createAssetHandler, type FrameAncestors } from './assets.ts'
 export { buildApp, type HostDeps, type HonoApp } from './app.ts'
 export { createClientAllowlist, normalizeRemoteAddress, validateCidrs } from './cidr.ts'
 export {

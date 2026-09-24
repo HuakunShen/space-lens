@@ -48,4 +48,14 @@ describe('asset handler', () => {
     const response = await createAssetHandler(null)('/')
     expect(response.status).toBe(404)
   })
+
+  it("frames nobody by default and 'self' only when an embedder asks for it", async () => {
+    const byDefault = await createAssetHandler(webRoot)('/')
+    expect(byDefault.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
+
+    // The DSH panel mounts this host behind its own same-origin route and frames it.
+    const embedded = await createAssetHandler(webRoot, ["'self'"])('/')
+    expect(embedded.headers.get('content-security-policy')).toContain("frame-ancestors 'self'")
+    expect(embedded.headers.get('content-security-policy')).not.toContain("frame-ancestors 'none'")
+  })
 })

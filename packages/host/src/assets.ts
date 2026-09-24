@@ -4,7 +4,10 @@ import { extname, join, normalize, resolve, sep } from 'node:path'
 
 const CSP_TEMPLATE =
   "default-src 'self'; script-src 'self'{HASHES}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
-  "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors {FRAME_ANCESTORS}"
+
+/** The `frame-ancestors` sources a served document allows. Defaults to nobody. */
+export type FrameAncestors = readonly string[]
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -45,9 +48,11 @@ function notFound(message: string): Response {
  */
 const hashCache = new Map<string, string>()
 
-async function documentCspFor(htmlPath: string, html: string): Promise<string> {
+async function documentCspFor(htmlPath: string, html: string, frameAncestors: FrameAncestors): Promise<string> {
   const stats = await stat(htmlPath).catch(() => null)
-  const cacheKey = `${htmlPath}|${stats?.mtimeMs ?? 0}|${stats?.size ?? 0}`
+  // The frame-ancestors sources are part of the cached value, not just the document's bytes:
+  // two handlers over the same build may serve different policies (an embedder passes 'self').
+  const cacheKey = `${htmlPath}|${stats?.mtimeMs ?? 0}|${stats?.size ?? 0}|${frameAncestors.join(' ')}`
   const cached = hashCache.get(cacheKey)
   if (cached !== undefined) return cached
   const hashes: string[] = []
@@ -57,7 +62,10 @@ async function documentCspFor(htmlPath: string, html: string): Promise<string> {
     const digest = createHash('sha256').update(match[1]).digest('base64')
     hashes.push(`'sha256-${digest}'`)
   }
-  const header = CSP_TEMPLATE.replace('{HASHES}', hashes.map((hash) => ` ${hash}`).join(''))
+  const header = CSP_TEMPLATE.replace('{HASHES}', hashes.map((hash) => ` ${hash}`).join('')).replace(
+    '{FRAME_ANCESTORS}',
+    frameAncestors.join(' '),
+  )
   if (hashCache.size > 64) hashCache.clear()
   hashCache.set(cacheKey, header)
   return header
@@ -69,7 +77,7 @@ async function documentCspFor(htmlPath: string, html: string): Promise<string> {
  * fallback document; asset-shaped paths also 404 instead of falling back, so
  * neither a typo'd asset nor a traversal attempt is ever answered with HTML.
  */
-export function createAssetHandler(webRoot: string | null): AssetHandler {
+export function createAssetHandler(webRoot: string | null, frameAncestors: FrameAncestors = ["'none'"]): AssetHandler {
   if (webRoot === null) {
     return async () =>
       notFound('no web UI is embedded in this host (start without a web root, or build apps/web first)')
@@ -104,7 +112,7 @@ export function createAssetHandler(webRoot: string | null): AssetHandler {
     }
     if (isDocument) {
       headers['cache-control'] = 'no-store'
-      headers['content-security-policy'] = await documentCspFor(real, body.toString('utf8'))
+      headers['content-security-policy'] = await documentCspFor(real, body.toString('utf8'), frameAncestors)
       headers['referrer-policy'] = 'no-referrer'
     } else {
       headers['cache-control'] = 'public, max-age=300'

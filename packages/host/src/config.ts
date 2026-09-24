@@ -39,6 +39,12 @@ export interface ServeOptions {
   maxTotalScans?: number
   /** Trash backend override (embedders and tests); defaults to the OS trash. */
   trash?: TrashPort
+  /**
+   * `frame-ancestors` sources for served documents. Defaults to `['none']` —
+   * the UI frames nobody. An embedder that mounts this host behind its own
+   * route passes `['self']` so its same-origin page may frame the workbench.
+   */
+  frameAncestors?: readonly string[]
 }
 
 export interface ResolvedHost {
@@ -67,6 +73,7 @@ export interface ResolvedServeConfig {
   trustProxy: boolean
   maxConcurrentScans: number
   maxTotalScans: number
+  frameAncestors: string[]
 }
 
 export function resolveBindHost(input: string | undefined): ResolvedHost {
@@ -190,5 +197,6 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
     trustProxy: options.trustProxy ?? false,
     maxConcurrentScans: options.maxConcurrentScans ?? 4,
     maxTotalScans: options.maxTotalScans ?? 8,
+    frameAncestors: [...(options.frameAncestors ?? ["'none'"])],
   }
 }

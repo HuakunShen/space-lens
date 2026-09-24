@@ -92,7 +92,7 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
     auth,
     scans,
     events,
-    assets: createAssetHandler(config.webRoot),
+    assets: createAssetHandler(config.webRoot, config.frameAncestors),
     health: healthPayload(serviceInstanceId),
     capabilities,
     allowlist: createClientAllowlist(config.allowCidr),

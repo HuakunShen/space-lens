@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { base } from '$app/paths'
   import {
     BreadcrumbBar,
     ChildList,
@@ -289,7 +290,7 @@
       <ScanPicker
         {targets}
         mode={__SPACLENS_DESKTOP__ ? "desktop" : "browser"}
-        logo="/logo-mark.png"
+        logo={`${base}/logo-mark.png`}
         busy={false}
         error={workbench.error}
         status={null}
@@ -300,7 +301,7 @@
       <ScanPicker
         {targets}
         mode={__SPACLENS_DESKTOP__ ? "desktop" : "browser"}
-        logo="/logo-mark.png"
+        logo={`${base}/logo-mark.png`}
         busy={true}
         error={workbench.error}
         status={workbench.status}

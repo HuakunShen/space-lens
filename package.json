@@ -17,6 +17,7 @@
     "artifacts": "yarn workspace space-lens artifacts",
     "bench": "yarn workspace space-lens bench",
     "build": "run-p build:node build:tui",
+    "build:dsh": "node scripts/build-dsh-plugin.mjs",
     "build:debug": "yarn workspace space-lens build:debug",
     "build:node": "yarn workspace space-lens build",
     "build:tui": "yarn workspace @space-lens/cli build",

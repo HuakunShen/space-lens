@@ -1,0 +1,36 @@
+{
+  "name": "dsh-plugin-spacelens",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Space Lens workbench as a DeepSeek Harness panel: the directory the current session is working in, scanned and explored by Space Lens itself.",
+  "license": "MIT",
+  "icon": "./icon.svg",
+  "meta": {
+    "title": "Space Lens",
+    "description": "A disk workbench for the directory this session is working in."
+  },
+  "exports": {
+    ".": "./dist/host.js",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "dist",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  }
+}
