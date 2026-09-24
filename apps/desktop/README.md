@@ -6,16 +6,18 @@ flavor is embedded into the Tauri shell at compile time.
 ## Install (after the first `app-v*` release exists)
 
 ```bash
-# Homebrew (cask source of truth: packaging/homebrew/Casks/space-lens.rb,
-# pushed to HuakunShen/homebrew-tap per release with real version + sha256)
+# Homebrew (cask source of truth: packaging/homebrew/Casks/space-lens.rb;
+# each app-v* release attaches the rendered cask with real version + sha256
+# to the GitHub release, and the owner copies it into HuakunShen/homebrew-tap)
 brew install --cask HuakunShen/homebrew-tap/space-lens
 
 # or grab the dmg/NSIS/deb/AppImage from the GitHub release the tag built
 ```
 
 The bundled updater checks `releases/latest/download/latest.json` (minisign
-public key committed in `tauri.conf.json`; the private key lives only in the
-`TAURI_SIGNING_PRIVATE_KEY*` GitHub secrets).
+public key committed in `tauri.conf.json`; the passwordless private key lives
+only in the `TAURI_SIGNING_PRIVATE_KEY` GitHub secret — no password secret
+exists, the empty default is correct).
 
 ```bash
 # 1. web: build the desktop flavor (build-desktop/, index.html fallback)

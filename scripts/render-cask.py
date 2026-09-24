@@ -2,8 +2,9 @@
 """Render the Homebrew cask from the real app-v* release artifacts.
 
 Runs in CI (workbench.yml brew-tap job). Reads the downloaded dmg files,
-computes sha256, and writes the final cask to /tmp/space-lens.rb, ready to be
-copied into HuakunShen/homebrew-tap.
+computes sha256, and writes the final cask to /tmp/space-lens.rb, which the
+job attaches to the release; copying it into HuakunShen/homebrew-tap is the
+owner's manual step (same flow as refyard).
 """
 import glob
 import hashlib
