@@ -3,9 +3,10 @@
 # `plugin-v1.2.3` builds the bundle and publishes `dsh-plugin-spacelens`
 # with the tag's version.
 #
-# Requires the repo secret NPM_TOKEN (an automation-type granular token with
-# publish rights for dsh-plugin-spacelens). No 2FA prompt is possible in CI,
-# which is exactly why automation tokens exist.
+# Auth is npm trusted publishing (OIDC), not a token: the package's
+# Trusted Publisher settings on npmjs.com must point at this repo and this
+# workflow file, with the same `npm` environment declared below. The OIDC
+# claim is also what produces the public `--provenance` attestation.
 name: DSH Plugin
 
 on:
@@ -29,6 +30,9 @@ jobs:
     name: Build and publish to npm
     runs-on: ubuntu-latest
     environment: npm
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -54,6 +58,7 @@ jobs:
 
       - name: Publish
         working-directory: apps/dsh
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: |
+          # Trusted publishing (OIDC, no NPM_TOKEN) needs npm >= 11.5.1
+          npm install -g npm@latest
+          npm publish --access public --provenance
