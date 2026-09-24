@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
-const pluginRoot = join(repositoryRoot, 'integrations', 'dsh')
+const pluginRoot = join(repositoryRoot, 'apps', 'dsh')
 const distRoot = join(pluginRoot, 'dist')
 const webApp = join(repositoryRoot, 'apps', 'web')
 const webSource = join(webApp, 'build-embed')

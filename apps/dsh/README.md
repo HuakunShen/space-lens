@@ -61,7 +61,7 @@ package, where the host bundle's own resolution finds it:
 
 ```
 yarn build:dsh            # from the repository root
-plugin_manager install_bundle /absolute/path/to/integrations/dsh
+plugin_manager install_bundle /absolute/path/to/apps/dsh
 ```
 
 Then check the bundle list and enable it explicitly if it is missing:
@@ -79,7 +79,7 @@ git tag plugin-v0.1.0 && git push origin plugin-v0.1.0
 ```
 
 `.github/workflows/dsh-plugin.yml` builds the bundle and runs
-`npm publish --access public` in `integrations/dsh` with the `NPM_TOKEN`
+`npm publish --access public` in `apps/dsh` with the `NPM_TOKEN`
 secret; the tag's version must match `package.json`'s. Never commit the
 staged engine: it lives in the package's root `node_modules`, which npm
 excludes from tarballs unconditionally — the published package depends on

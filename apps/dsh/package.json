@@ -8,7 +8,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/HuakunShen/space-lens.git",
-    "directory": "integrations/dsh"
+    "directory": "apps/dsh"
   },
   "keywords": [
     "deepseek-harness",

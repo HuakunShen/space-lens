@@ -14,7 +14,7 @@ on:
       - 'plugin-v*'
   pull_request:
     paths:
-      - 'integrations/dsh/**'
+      - 'apps/dsh/**'
       - 'scripts/build-dsh-plugin.mjs'
       - 'packages/host/**'
       - 'apps/web/**'
@@ -43,7 +43,7 @@ jobs:
       - name: The tag names the version package.json carries
         run: |
           VERSION="${GITHUB_REF_NAME#plugin-v}"
-          DECLARED=$(node -p "require('./integrations/dsh/package.json').version")
+          DECLARED=$(node -p "require('./apps/dsh/package.json').version")
           if [ "$VERSION" != "$DECLARED" ]; then
             echo "tag plugin-v$VERSION but package.json says $DECLARED" >&2
             exit 1
@@ -53,7 +53,7 @@ jobs:
         run: yarn build:dsh
 
       - name: Publish
-        working-directory: integrations/dsh
+        working-directory: apps/dsh
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
