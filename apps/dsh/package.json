@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-spacelens",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "The Space Lens workbench as a DeepSeek Harness panel: the directory the current session is working in, scanned and explored by Space Lens itself.",
   "license": "MIT",
