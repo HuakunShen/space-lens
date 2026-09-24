@@ -41,7 +41,7 @@ jobs:
       - name: Prepare workspace install
         run: node scripts/prepare-ci-install.mjs strip
       - name: Install dependencies
-        run: yarn install
+        run: yarn install --no-immutable
       - name: Test
         run: yarn workspace @space-lens/cli test
       - name: Typecheck

@@ -82,9 +82,12 @@ fn scan_slice_children_round_trip() {
 #[test]
 fn refuses_paths_outside_roots() {
     let (_dir, mut store) = fixture();
+    // The temp dir is the fixture root's parent, so it exists on every
+    // platform and is always outside the served roots — unlike a hardcoded
+    // FHS path such as /usr, which means nothing on Windows.
     let error = store
         .start_scan(ScanStartRequest {
-            paths: vec!["/usr".into()],
+            paths: vec![std::env::temp_dir().to_string_lossy().to_string()],
             ignore_hidden: false,
             respect_gitignore: true,
             ignored_mode: Default::default(),
