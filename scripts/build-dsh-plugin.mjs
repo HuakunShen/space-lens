@@ -81,12 +81,19 @@ async function emit(options, outfile) {
 /**
  * Stage the napi engine beside the host bundle. `ScanManager` resolves
  * `space-lens` with `createRequire(import.meta.url)` from inside the bundle, so
- * a `node_modules` directory under `dist/` is exactly where Node looks.
+ * Node walks up from `dist/` and finds it in the plugin root's `node_modules`.
+ *
+ * The plugin root (not `dist/node_modules`) is deliberate: npm excludes a
+ * package's own root `node_modules` from tarballs unconditionally, while a
+ * nested `dist/node_modules` would slip past both `files` and `.npmignore`.
+ * The published package instead declares `space-lens` as a dependency, so npm
+ * installs resolve it from the profile's own tree — every platform gets its
+ * own binary, never this build machine's.
  */
 async function stageEngine() {
   const require = createRequire(join(repositoryRoot, 'package.json'))
   const engineRoot = dirname(require.resolve('space-lens/package.json'))
-  const target = join(distRoot, 'node_modules', 'space-lens')
+  const target = join(pluginRoot, 'node_modules', 'space-lens')
   await rm(target, { recursive: true, force: true })
   await mkdir(target, { recursive: true })
   const wanted = (await stat(join(engineRoot, 'index.js'))).isFile()

@@ -1,0 +1,4 @@
+# The staged napi engine serves local/profile installs (resolved from
+# dist/host.js upward). The npm package instead declares `space-lens` as a
+# dependency, so every platform pulls its own binary — never ship this one.
+dist/node_modules

@@ -46,21 +46,22 @@ The server is started **read-only**: no cleanup scopes, so the embedded workbenc
 can look but never trash. Deleting from a panel a session opened implicitly should
 never be the easy path.
 
-## Building
+## Installing
+
+From npm (the normal way — the package depends on the published `space-lens`
+engine, so every platform pulls its own binary):
+
+```
+plugin_manager install_bundle dsh-plugin-spacelens
+```
+
+From this repository (development): build first, then install the directory —
+the build stages this machine's engine at `node_modules/space-lens` inside the
+package, where the host bundle's own resolution finds it:
 
 ```
 yarn build:dsh            # from the repository root
-```
-
-That produces, in order: the embedded SPA (`apps/web/build-embed`, built for the
-`/space-lens` base without a service worker), the host bundle (`dist/host.js`,
-with the napi engine staged at `dist/node_modules/space-lens` so the scan worker
-can resolve it from inside the bundle), and the client bundle (`dist/client.js`).
-
-Install it into the current Harness profile:
-
-```
-plugin_manager install_bundle  /absolute/path/to/integrations/dsh
+plugin_manager install_bundle /absolute/path/to/integrations/dsh
 ```
 
 Then check the bundle list and enable it explicitly if it is missing:
@@ -68,6 +69,22 @@ Then check the bundle list and enable it explicitly if it is missing:
 ```
 plugin_manager set_bundle  enabled=true  target=dsh-plugin-spacelens
 ```
+
+## Releasing
+
+One tag publishes, same shape as the desktop line:
+
+```
+git tag plugin-v0.1.0 && git push origin plugin-v0.1.0
+```
+
+`.github/workflows/dsh-plugin.yml` builds the bundle and runs
+`npm publish --access public` in `integrations/dsh` with the `NPM_TOKEN`
+secret; the tag's version must match `package.json`'s. Never commit the
+staged engine: it lives in the package's root `node_modules`, which npm
+excludes from tarballs unconditionally — the published package depends on
+the `space-lens` npm package instead, so each platform installs its own
+binary.
 
 ## Reloading it while developing
 
@@ -89,5 +106,6 @@ locale/{en,zh}.json  display title and description
 src/host.ts        host half: route, per-directory servers, pairing redirect, proxy
 src/client.ts      client half: sidebar entry, main panel, right-column tab, header button
 src/harness.d.ts   ambient types for the Harness plugin surface
-dist/              generated: host.js, client.js, web/ (the embedded SPA), node_modules/ (the engine)
+dist/              generated: host.js, client.js, web/ (the embedded SPA)
+node_modules/      generated: the staged engine for local installs (never packed)
 ```
