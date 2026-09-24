@@ -71,6 +71,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
+      - name: Stub the Tauri frontendDist (generate_context! checks the path exists; the release job builds it for real)
+        working-directory: apps/desktop/src-tauri
+        run: mkdir -p ../../web/build-desktop
+        shell: bash
       - name: cargo test (own workspace; shells that link WebKit stay out of the root crate graph)
         working-directory: apps/desktop/src-tauri
         run: cargo test --workspace
