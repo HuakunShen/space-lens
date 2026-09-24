@@ -1,0 +1,15 @@
+[package]
+name = "space-lens-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Stable C ABI facade for native Space Lens shells."
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+space-lens = { package = "kuntu-scan", path = "../../vendors/kuntu/crates/kuntu-scan" }
+serde = "1"
+serde_json = "1"

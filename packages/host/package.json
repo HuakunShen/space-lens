@@ -1,0 +1,28 @@
+{
+  "name": "@space-lens/host",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HTTP host for Space Lens: authenticated REST + SSE over the closed contract, static SPA serving, worker-thread scan sessions.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.0",
+    "@space-lens/contract": "workspace:*",
+    "hono": "^4.9.0",
+    "space-lens": "^0.2.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.0.18"
+  }
+}

@@ -48,6 +48,7 @@ export declare function findCleanupCandidates(options: CleanupCandidateOptions):
 
 export interface ICloudEvictionOutcome {
   results: Array<ICloudEvictionResult>
+  cancelled: boolean
 }
 
 export interface ICloudEvictionResult {

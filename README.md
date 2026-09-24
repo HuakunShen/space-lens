@@ -2,10 +2,31 @@
 
 Fast directory scanning and cleanup candidate utilities, powered by Rust and napi-rs.
 
+> **Where the engine went (2026-09-14):** the Rust engine that lived in
+> `packages/space-lens` — scanner, snapshot, cleanup, iCloud eviction — moved to
+> [Kuntu](https://github.com/HuakunShen/kuntu) as `kuntu-scan` (tag `v0.3.0`,
+> pinned here at `vendors/kuntu`). This repo is the product shells: the
+> SwiftUI apps (via `space-lens-ffi`), the npm package, the CLI/TUI, and the
+> standalone iCloud app. The `space_lens::` Rust API is unchanged — the
+> dependency is aliased.
+
 ## Installation
 
 ```bash
 npm install space-lens
+```
+
+## Serve the web workbench
+
+`spacelens serve` starts an authenticated HTTP host that serves the web UI and
+speaks a closed JSON contract (`@space-lens/contract`): single-use pairing
+tickets, bearer sessions, REST reads, and SSE scan events. Cleanup over the
+web is trash-only; permanent deletion stays a CLI/TUI concern.
+
+```bash
+npx spacelens serve                    # loopback, read-only, current directory
+npx spacelens serve --host 0.0.0.0 --allow-cidr 192.168.1.0/24
+npx spacelens serve --allow-cleanup    # grant trash-based cleanup
 ```
 
 ## API Usage
@@ -93,6 +114,10 @@ cargo run --release -p space-lens-cli -- icloud evict <disposable-iCloud-test-fo
 
 `evict` is dry-run by default. Real execution requires `--execute` and the interactive confirmation phrase. The implementation never falls back to deleting files. Do not use a real Lightroom or Photos folder as the first test target.
 
+Rust eviction uses a bounded worker pool (8 concurrent items by default, capped
+at 32), so a large plan does not create one task per file or process entries
+serially. The same bounded execution path is used by the Rust CLI service.
+
 The NAPI package exposes the same native boundary through `ICloudSession`, with opaque one-shot plan IDs and decimal-string byte counts. The current `main` TUI does not yet expose these iCloud actions; it still provides the existing scan/cleanup UI.
 
 The published `space-lens` package supports both the native library and the TUI executable:
@@ -171,6 +196,47 @@ just icloud-test        # run Swift tests
 ```
 
 Use `CONFIGURATION=debug just icloud-build` for a debug bundle. The app bundle is written to `apps/icloud-free/.build/ICloudFree.app` and is not installed into `/Applications` automatically.
+
+## Space Lens native macOS prototype
+
+The native Space Lens macOS app lives in `apps/space-lens-mac`. It keeps a
+synthetic demo map for safe UI/performance checks and now supports a read-only
+real-folder scan through the separate Rust FFI facade. The scan can be
+exported as the portable JSON snapshot. Normal filesystem cleanup uses an
+explicit review flow that moves selected real nodes to the macOS Trash, so
+they remain recoverable through Finder; it does not permanently delete files.
+The optional MCP adapter is read-only. The macOS app also exposes the Apple-only iCloud Local Copies
+capability and its bounded concurrent eviction flow; it never requests
+downloads for cloud-only files.
+
+```bash
+just space-lens-mac-test
+just space-lens-mac-build
+just space-lens-mac-open
+```
+
+The portable snapshot contract is in `packages/space-lens/src/snapshot.rs`; the
+separate C ABI facade and header are in `packages/space-lens-ffi`. The FFI
+facade exposes read-only filesystem snapshots plus an opaque macOS-only iCloud
+plan session. The native app can execute that session only after its explicit
+confirmation flow; MCP remains read-only and does not expose the execution API.
+
+### Optional Rust MCP adapter
+
+The CLI has an opt-in, read-only MCP stdio adapter. The default Rust build does
+not compile or expose it; enable the `mcp` feature explicitly:
+
+```bash
+cargo run --release -p space-lens-cli --features mcp -- mcp
+# or
+just space-lens-mcp
+```
+
+It implements the MCP initialize lifecycle and `tools/list`/`tools/call` for
+filesystem snapshot export, cleanup-candidate inspection, platform
+capabilities, and read-only iCloud plans. It exposes no delete, Trash, cloud
+eviction, or download tool. MCP messages use newline-delimited JSON-RPC on
+stdin/stdout; diagnostics must not be written to stdout.
 
 ## Web UI status
 

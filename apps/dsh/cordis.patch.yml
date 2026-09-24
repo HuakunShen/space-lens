@@ -1,0 +1,7 @@
+# The host half of the Space Lens panel. The client half is reached through the
+# package's `./client` export, which `dsh.client` in package.json points the Web shell at;
+# both come from the same package because they are one feature and must be installed and
+# removed together.
+- insert:
+    - id: spacelens
+      name: 'dsh-plugin-spacelens'

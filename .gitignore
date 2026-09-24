@@ -135,5 +135,18 @@ Cargo.lock
 
 # Swift Package Manager build products
 /apps/icloud-free/.build/
+/apps/space-lens-mac/.build/
+# SwiftPM plugin caches capture the build environment (including env vars) - never commit
+.build/plugins/
 
 docs
+
+# Multi-runtime build outputs (serve web / SvelteKit / Tauri / VS Code)
+.svelte-kit
+.svelte-kit-desktop
+/apps/web/build
+/apps/web/build-desktop
+/apps/web/build-embed
+/apps/desktop/src-tauri/target
+/apps/desktop/src-tauri/gen
+*.vsix

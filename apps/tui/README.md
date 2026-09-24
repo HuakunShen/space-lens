@@ -10,6 +10,30 @@ yarn tui . --preset node
 vite-node src/cli.ts . --preset node
 ```
 
+## Serve (web workbench over HTTP)
+
+`spacelens serve` starts an authenticated HTTP host (built on
+`@space-lens/host`) that serves the web UI and speaks the closed JSON contract
+(`@space-lens/contract`): pairing tickets, bearer sessions, REST reads, and SSE
+scan events.
+
+```bash
+spacelens serve                       # loopback only, read-only, current dir
+spacelens serve --allow-cleanup       # also grant trash-based cleanup
+spacelens serve --host 0.0.0.0 --allow-cidr 192.168.1.0/24
+spacelens serve --host en0 --allow-lan
+spacelens serve --ui-origin https://<your>.workers.dev   # needs SPACLENS_HOSTED_PASSWORD
+spacelens serve --machine             # supervisor mode: readiness JSON on stdout, ticket on stderr
+```
+
+Rules that hold in every mode:
+
+- Pairing tickets are 256-bit, single-use, 60 seconds, and minted only on the
+  serving terminal — never over HTTP.
+- Cleanup through the web is trash-only. Permanent deletion stays a CLI/TUI
+  `--execute` concern.
+- Scans may only target `--root` directories (default: the working directory).
+
 ## Publish
 
 Build and publish the public CLI from this directory:

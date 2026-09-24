@@ -11,6 +11,9 @@ use space_lens::{
 use std::io::{self, BufRead};
 use std::path::PathBuf;
 
+#[cfg(feature = "mcp")]
+mod mcp;
+
 #[derive(Debug, Parser)]
 #[command(
   name = "space-lens",
@@ -29,6 +32,8 @@ enum Command {
   Clean(CleanArgs),
   #[command(name = "icloud")]
   ICloud(ICloudArgs),
+  #[cfg(feature = "mcp")]
+  Mcp,
 }
 
 #[derive(Debug, Args)]
@@ -133,6 +138,8 @@ fn main() -> Result<()> {
     Command::Candidates(args) => run_candidates(args),
     Command::Clean(args) => run_clean(args),
     Command::ICloud(args) => run_icloud(args),
+    #[cfg(feature = "mcp")]
+    Command::Mcp => mcp::run(),
   }
 }
 

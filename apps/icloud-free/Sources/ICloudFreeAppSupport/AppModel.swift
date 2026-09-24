@@ -123,7 +123,7 @@ public final class AppModel: ObservableObject {
         do {
             evictionReport = try await Task.detached(priority: .userInitiated) {
                 defer { progressStream.continuation.finish() }
-                return try service.execute(
+                return try await service.execute(
                     plan,
                     dryRun: false,
                     evictor: evictor,

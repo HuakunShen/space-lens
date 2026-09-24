@@ -1,0 +1,24 @@
+{
+  "name": "@space-lens/client",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Transport clients for the Space Lens contract: authenticated REST + fetch-based SSE. Shared by the web app, the Tauri desktop adapter, and the VS Code webview bridge.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@space-lens/contract": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.0.18"
+  }
+}

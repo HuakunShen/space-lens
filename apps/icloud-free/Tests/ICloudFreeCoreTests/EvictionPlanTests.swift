@@ -15,18 +15,18 @@ final class EvictionPlanTests: XCTestCase {
         XCTAssertEqual(plan.totalBytes, 100)
     }
 
-    func testDryRunDoesNotCallEvictor() throws {
+    func testDryRunDoesNotCallEvictor() async throws {
         let item = item(name: "local.dng", logical: 100, allocated: 100)
         let plan = EvictionPlan(entries: [EvictionEntry(item: item)])
         let evictor = RecordingEvictor()
 
-        let report = try EvictionService().execute(plan, dryRun: true, evictor: evictor)
+        let report = try await EvictionService().execute(plan, dryRun: true, evictor: evictor)
 
         XCTAssertEqual(report.wouldEvictCount, 1)
         XCTAssertTrue(evictor.urls.isEmpty)
     }
 
-    func testExecutionReportsProgressForEachEntry() throws {
+    func testExecutionReportsProgressForEachEntry() async throws {
         let first = item(name: "first.dng", logical: 100, allocated: 100)
         let second = item(name: "second.dng", logical: 200, allocated: 200)
         let plan = EvictionPlan(entries: [EvictionEntry(item: first), EvictionEntry(item: second)])
@@ -34,7 +34,7 @@ final class EvictionPlanTests: XCTestCase {
         let controller = CloudOperationControl()
         let progress = ProgressRecorder()
 
-        let report = try EvictionService().execute(
+        let report = try await EvictionService().execute(
             plan,
             dryRun: false,
             evictor: evictor,
@@ -45,6 +45,22 @@ final class EvictionPlanTests: XCTestCase {
         XCTAssertEqual(progress.values.map(\.processedEntries), [1, 2])
         XCTAssertEqual(progress.values.last?.totalEntries, 2)
         XCTAssertEqual(report.evictedCount, 2)
+    }
+
+    func testExecutionUsesBoundedConcurrency() async throws {
+        let entries = (0..<24).map { index in
+            EvictionEntry(item: item(name: "file-\(index).dng", logical: 100, allocated: 100))
+        }
+        let evictor = ConcurrentRecordingEvictor(delayNanoseconds: 15_000_000)
+        let report = try await EvictionService(maxConcurrency: 4).execute(
+            EvictionPlan(entries: entries),
+            dryRun: false,
+            evictor: evictor
+        )
+
+        XCTAssertEqual(report.evictedCount, entries.count)
+        XCTAssertGreaterThan(evictor.maximumActive, 1)
+        XCTAssertLessThanOrEqual(evictor.maximumActive, 4)
     }
 
     func testOperationControlPausesAndResumesWorker() {
@@ -108,6 +124,30 @@ private final class ProgressRecorder: @unchecked Sendable {
     func append(_ value: EvictionProgress) {
         lock.lock()
         storage.append(value)
+        lock.unlock()
+    }
+}
+
+private final class ConcurrentRecordingEvictor: CloudEvicting, @unchecked Sendable {
+    private let lock = NSLock()
+    private let delayNanoseconds: UInt64
+    private var active = 0
+    private(set) var maximumActive = 0
+
+    init(delayNanoseconds: UInt64) {
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    func evict(_ url: URL) throws {
+        lock.lock()
+        active += 1
+        maximumActive = max(maximumActive, active)
+        lock.unlock()
+
+        Thread.sleep(forTimeInterval: Double(delayNanoseconds) / 1_000_000_000)
+
+        lock.lock()
+        active -= 1
         lock.unlock()
     }
 }

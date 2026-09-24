@@ -1,0 +1,73 @@
+{
+  "version": "2026-09-23",
+  "last_commit": "5d74b290801bdf0345d596e63063d046c2e37e24",
+  "wiki_items": [
+    {
+      "id": "system-overview",
+      "title": "System Overview",
+      "path": "content/System Overview.md"
+    },
+    {
+      "id": "core-engine",
+      "title": "Core Engine",
+      "path": "content/Core/Core Engine.md"
+    },
+    {
+      "id": "technology-stack",
+      "title": "Technology Stack",
+      "path": "content/Technology/Technology Stack.md"
+    },
+    {
+      "id": "cli-and-tui",
+      "title": "CLI and TUI",
+      "path": "content/CLI/CLI and TUI.md"
+    },
+    {
+      "id": "npm-package",
+      "title": "NPM Package",
+      "path": "content/NAPI/NPM Package.md"
+    },
+    {
+      "id": "ci-and-release",
+      "title": "CI and Release",
+      "path": "content/CI/CI and Release.md"
+    }
+  ],
+  "knowledge_relations": [
+    {
+      "from": "system-overview",
+      "to": "core-engine",
+      "type": "PARENT_CHILD"
+    },
+    {
+      "from": "system-overview",
+      "to": "technology-stack",
+      "type": "PARENT_CHILD"
+    },
+    {
+      "from": "system-overview",
+      "to": "cli-and-tui",
+      "type": "PARENT_CHILD"
+    },
+    {
+      "from": "system-overview",
+      "to": "npm-package",
+      "type": "PARENT_CHILD"
+    },
+    {
+      "from": "system-overview",
+      "to": "ci-and-release",
+      "type": "PARENT_CHILD"
+    },
+    {
+      "from": "npm-package",
+      "to": "cli-and-tui",
+      "type": "REFERENCE"
+    },
+    {
+      "from": "technology-stack",
+      "to": "core-engine",
+      "type": "REFERENCE"
+    }
+  ]
+}

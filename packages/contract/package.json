@@ -1,0 +1,25 @@
+{
+  "name": "@space-lens/contract",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Closed JSON contract shared by Space Lens hosts (serve CLI, Tauri desktop) and frontends (web, VS Code webview).",
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "generate": "node scripts/generate-artifacts.ts"
+  },
+  "dependencies": {
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.0.18"
+  }
+}

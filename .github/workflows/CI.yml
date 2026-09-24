@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Setup node
         uses: actions/setup-node@v6
         with:
@@ -91,6 +93,8 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Setup node
         uses: actions/setup-node@v6
         with:
@@ -169,6 +173,8 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Setup node
         uses: actions/setup-node@v6
         with:
@@ -213,6 +219,8 @@ jobs:
     runs-on: ${{ contains(matrix.target, 'aarch64') && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Setup node
         uses: actions/setup-node@v6
         with:
@@ -281,6 +289,8 @@ jobs:
       - test-linux-binding
     steps:
       - uses: actions/checkout@v6
+        with:
+          submodules: recursive
       - name: Setup node
         uses: actions/setup-node@v6
         with:

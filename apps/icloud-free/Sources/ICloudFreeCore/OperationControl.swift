@@ -83,6 +83,7 @@ public struct EvictionProgress: Equatable, Sendable {
     public let evictedEntries: Int
     public let failedEntries: Int
     public let freedBytes: Int64
+    public let activeEntries: Int
     public let currentURL: URL?
 
     public init(
@@ -91,6 +92,7 @@ public struct EvictionProgress: Equatable, Sendable {
         evictedEntries: Int = 0,
         failedEntries: Int = 0,
         freedBytes: Int64 = 0,
+        activeEntries: Int = 0,
         currentURL: URL? = nil
     ) {
         self.processedEntries = processedEntries
@@ -98,6 +100,7 @@ public struct EvictionProgress: Equatable, Sendable {
         self.evictedEntries = evictedEntries
         self.failedEntries = failedEntries
         self.freedBytes = freedBytes
+        self.activeEntries = activeEntries
         self.currentURL = currentURL
     }
 

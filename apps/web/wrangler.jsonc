@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "space-lens-web",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-01-01",
+  "assets": {
+    "directory": "./build",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "single-page-application"
+  },
+  "vars": {
+    "PUBLIC_API_ORIGINS": ""
+  },
+  "observability": {
+    "enabled": true
+  }
+}

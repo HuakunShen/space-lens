@@ -14,5 +14,14 @@ rmSync(targetRoot, { recursive: true, force: true })
 mkdirSync(targetRoot, { recursive: true })
 cpSync(sourceCli, resolve(targetRoot, 'cli.mjs'))
 cpSync(resolve(sourceRoot, 'assets'), resolve(targetRoot, 'assets'), { recursive: true })
+// The web workbench travels with the published bin so `npx spacelens serve`
+// can host it without a checkout. A missing build is a warning, not an error:
+// serve stays usable as an API-only host.
+const webSource = resolve(packageRoot, '../../apps/web/build')
+if (existsSync(resolve(webSource, '200.html'))) {
+  cpSync(webSource, resolve(targetRoot, 'web'), { recursive: true })
+} else {
+  console.warn('prepare-cli: apps/web/build is missing; publishing an API-only serve')
+}
 writeFileSync(resolve(targetRoot, 'package.json'), '{\n  "type": "module"\n}\n')
 chmodSync(resolve(targetRoot, 'cli.mjs'), 0o755)

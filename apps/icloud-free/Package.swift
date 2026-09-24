@@ -7,6 +7,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "ICloudFreeCore", targets: ["ICloudFreeCore"]),
+        .library(name: "ICloudFreeAppSupport", targets: ["ICloudFreeAppSupport"]),
         .executable(name: "icloud-free", targets: ["icloud-free"]),
         .executable(name: "ICloudFreeApp", targets: ["ICloudFreeApp"]),
     ],

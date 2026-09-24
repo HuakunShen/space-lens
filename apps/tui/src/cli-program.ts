@@ -37,6 +37,21 @@ const command = Command.make(
 const cli = Command.run(command, { name: 'Space Lens TUI', version: APP_VERSION })
 
 export function runCli(argv: readonly string[] = process.argv): void {
+  // `spacelens serve` bypasses the TUI command table on purpose: the TUI owns
+  // interactive scanning, while serve is a plain long-running server whose
+  // flags and lifecycle are specified by @space-lens/host.
+  if (argv[2] === 'serve') {
+    void (async () => {
+      try {
+        const serve = await import('./serve-entry.js')
+        await serve.runServe(argv.slice(3))
+      } catch (error) {
+        const { reportServeError } = await import('./serve-entry.js')
+        reportServeError(error)
+      }
+    })()
+    return
+  }
   NodeRuntime.runMain(cli(argv).pipe(Effect.provide(NodeContext.layer)))
 }
 

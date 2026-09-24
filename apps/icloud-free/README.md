@@ -28,6 +28,8 @@ Drop an iCloud Drive file or folder onto the window, or choose one with the fold
 
 While scanning or freeing local copies, the window shows the current item and progress. Use `Pause`/`Resume` to gate the worker between items, or `Stop` to cancel pending work. Click the `File`, `Status`, `Local`, or `Logical` table headers to sort the result list.
 
+Eviction uses a bounded concurrent worker pool: eight items by default, capped at 32. It does not create one task per file. Each item keeps its own safety/error boundary; pause prevents workers from claiming more items, cancellation prevents new work, and progress reports active workers.
+
 ## Build a double-clickable app
 
 ```bash

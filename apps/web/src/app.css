@@ -1,0 +1,5 @@
+@import '@space-lens/web-ui/styles.css';
+
+/* Tailwind ignores node_modules sources by default; name the component
+   library explicitly so classes used inside web-ui are generated. */
+@source '../../../packages/web-ui/src';

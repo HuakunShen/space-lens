@@ -71,6 +71,7 @@ pub struct ICloudEvictionResult {
 #[napi(object)]
 pub struct ICloudEvictionOutcome {
   pub results: Vec<ICloudEvictionResult>,
+  pub cancelled: bool,
 }
 
 #[napi]
@@ -181,6 +182,7 @@ fn outcome_dto(outcome: EvictionOutcome) -> ICloudEvictionOutcome {
           .map(|error| format!("{:?}: {}", error.kind, error.message)),
       })
       .collect(),
+    cancelled: outcome.cancelled,
   }
 }
 
