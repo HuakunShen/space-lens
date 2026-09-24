@@ -11,7 +11,6 @@
     StatusBar,
     SunburstChart,
   } from '@space-lens/web-ui'
-  import { Search } from '@lucide/svelte'
   import type { CollectorEntry, ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
   import { ServiceError } from '@space-lens/client'
   import {
@@ -34,12 +33,26 @@
   let passwordInput = $state('')
   let explicitUrlInput = $state('')
   let collectorOpen = $state(false)
+  let navigating = $state(false)
+  let navigationRequest = 0
   let stream: { close: () => void } | null = null
   let pollTimer: ReturnType<typeof setInterval> | null = null
 
-  const hosted = $derived(
-    workbench.resolvedUrl !== null && !workbench.sameOrigin && workbench.phase !== 'ready',
-  )
+  /**
+   * Where the window chrome sits, so the header clears it on the right side.
+   *
+   * macOS draws the traffic lights top-left (about 78px wide); Windows puts the
+   * caption buttons top-right (three at roughly 46px each). In the browser
+   * neither exists. Read from the user agent rather than a Tauri OS plugin, so
+   * the desktop flavor needs no extra plugin for one padding decision.
+   */
+  const onWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+  function headerInset(): string {
+    if (!__SPACLENS_DESKTOP__) return 'px-4'
+    return onWindows ? 'pr-[152px] pl-4' : 'pl-[88px] pr-4'
+  }
+
+  const hosted = $derived(workbench.resolvedUrl !== null && !workbench.sameOrigin && workbench.phase !== 'ready')
   const ancestors = $derived(workbench.slice === null ? [] : [...workbench.slice.ancestors, workbench.slice.focusNode])
   const collectedIds = $derived(new Set(workbench.collector.map((entry) => entry.nodeId)))
   const collectorTotal = $derived(workbench.collector.reduce((total, entry) => total + entry.size, 0))
@@ -96,7 +109,11 @@
     const service = createHttpService({ baseUrl: resolved.url, getToken: loadToken })
     try {
       const health = await service.health()
-      if (health.apiMajor !== 1) throw new ServiceError({ code: 'UnsupportedOperation', message: `incompatible contract major ${health.apiMajor}`, retryable: false }, 400)
+      if (health.apiMajor !== 1)
+        throw new ServiceError(
+          { code: 'UnsupportedOperation', message: `incompatible contract major ${health.apiMajor}`, retryable: false },
+          400,
+        )
       const ticket = ticketInput === '' ? ticketFromLocation() : ticketInput
       const session = await service.exchange(ticket ?? '', hosted && passwordInput !== '' ? passwordInput : undefined)
       saveToken(session.token)
@@ -181,13 +198,28 @@
   async function focus(node: TreeNodeSummary): Promise<void> {
     const { service, status } = workbench
     if (service === null || status === null || status.state !== 'ready') return
+    const request = ++navigationRequest
+    navigating = true
+    workbench.error = null
     try {
-      workbench.slice = await service.treeSlice({ scanId: status.scanId, nodeId: node.id, depth: 3, maxChildrenPerNode: 50 })
-      const page = await service.children({ scanId: status.scanId, nodeId: node.id, offset: 0, limit: 200, sort: 'size' })
+      const [slice, page] = await Promise.all([
+        service.treeSlice({ scanId: status.scanId, nodeId: node.id, depth: 3, maxChildrenPerNode: 50 }),
+        service.children({ scanId: status.scanId, nodeId: node.id, offset: 0, limit: 200, sort: 'size' }),
+      ])
+      if (request !== navigationRequest) return
+      workbench.hoveredId = null
+      workbench.slice = slice
       workbench.items = page.items
     } catch (error) {
-      workbench.error = describeError(error)
+      if (request === navigationRequest) workbench.error = describeError(error)
+    } finally {
+      if (request === navigationRequest) navigating = false
     }
+  }
+
+  function goUp(): void {
+    const parent = workbench.slice?.ancestors.at(-1)
+    if (parent) void focus(parent)
   }
 
   function collect(node: TreeNodeSummary): void {
@@ -195,9 +227,7 @@
     if (status === null) return
     if (workbench.collector.some((entry) => entry.nodeId === node.id)) return
     // an ancestor supersedes its staged descendants
-    workbench.collector = workbench.collector.filter(
-      (entry) => !entry.path.startsWith(`${node.path}/`),
-    )
+    workbench.collector = workbench.collector.filter((entry) => !entry.path.startsWith(`${node.path}/`))
     const entry: CollectorEntry = {
       id: `col_${crypto.randomUUID().slice(0, 8)}`,
       scanId: status.scanId,
@@ -238,15 +268,6 @@
   }
 
   onMount(() => {
-    window.addEventListener('error', (event) => {
-      const el = document.getElementById('err-trace')
-      if (el) el.textContent = String(event.error?.stack ?? event.message ?? 'unknown').slice(0, 3000)
-    })
-    window.addEventListener('unhandledrejection', (event) => {
-      const el = document.getElementById('err-trace')
-      const reason = event.reason as { stack?: string; message?: string }
-      if (el) el.textContent = String(reason?.stack ?? reason?.message ?? 'unhandled rejection').slice(0, 3000)
-    })
     if (__SPACLENS_DESKTOP__) {
       void connectDesktop()
       return () => stopStreams()
@@ -268,14 +289,13 @@
   })
 </script>
 
-<pre id="err-trace" class="fixed bottom-0 left-0 z-50 max-h-40 overflow-auto bg-black/80 p-2 font-mono text-[10px] text-red-300"></pre>
 {#if workbench.phase !== 'ready'}
   <div data-tauri-drag-region class="fixed top-0 right-0 left-0 z-40 h-10"></div>
   <ConnectionPanel
     phase={workbench.phase === 'failed' ? 'failed' : workbench.phase === 'connecting' ? 'connecting' : 'idle'}
     resolvedUrl={workbench.resolvedUrl}
     sameOrigin={workbench.sameOrigin}
-    hosted={hosted}
+    {hosted}
     ticket={ticketInput}
     password={passwordInput}
     message={workbench.connectMessage}
@@ -285,11 +305,11 @@
     onConnect={() => void connect()}
   />
 {:else}
-  <div class="flex min-h-screen flex-col">
+  <div class="workbench-shell flex min-h-screen flex-col">
     {#if workbench.status === null || workbench.status.state === 'idle'}
       <ScanPicker
         {targets}
-        mode={__SPACLENS_DESKTOP__ ? "desktop" : "browser"}
+        mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
         logo={`${base}/logo-mark.png`}
         busy={false}
         error={workbench.error}
@@ -300,7 +320,7 @@
     {:else if workbench.status.state === 'scanning'}
       <ScanPicker
         {targets}
-        mode={__SPACLENS_DESKTOP__ ? "desktop" : "browser"}
+        mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
         logo={`${base}/logo-mark.png`}
         busy={true}
         error={workbench.error}
@@ -308,19 +328,21 @@
         onScan={() => {}}
         onCancel={() => void cancelScan()}
       />
-      <StateBanner state="loading" title="Scanning {workbench.status.label ?? '…'}" detail="The engine reports no progress; this finishes when the tree is complete." />
+      <StateBanner
+        state="loading"
+        title="Scanning {workbench.status.label ?? '…'}"
+        detail="The engine reports no progress; this finishes when the tree is complete."
+      />
     {:else if workbench.status.state === 'ready'}
       <header
-      data-tauri-drag-region
-      class={[
-        "flex h-12 shrink-0 items-center justify-between border-b",
-        __SPACLENS_DESKTOP__ ? "pl-[140px] pr-4" : "px-4",
-      ]}
-    >
+        data-tauri-drag-region
+        class={[
+          'flex h-12 shrink-0 items-center justify-between border-b',
+          headerInset(),
+        ]}
+      >
         <div class="flex items-center gap-2.5">
-          <div class="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Search size={15} />
-          </div>
+          <img src={`${base}/logo-mark.png`} alt="" class="size-8 shrink-0 rounded-lg" />
           <span class="font-semibold">Space Lens</span>
         </div>
         <span class="rounded-full border px-2 py-0.5 text-xs">{__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}</span>
@@ -328,38 +350,68 @@
       {#if workbench.error}
         <StateBanner state="error" title="Something failed" detail={workbench.error} />
       {/if}
-      {#if workbench.slice?.truncated}
-        <StateBanner state="truncated" title="Part of this view is collapsed" detail="{workbench.slice.omittedCount} children were summarized; open a folder to go deeper." />
-      {/if}
+
       {#if !__SPACLENS_DESKTOP__ && workbench.streamState !== 'live'}
-        <StateBanner state="disconnected" title="no live updates ({workbench.streamState})" detail="Data still loads on demand." />
+        <StateBanner
+          state="disconnected"
+          title="no live updates ({workbench.streamState})"
+          detail="Data still loads on demand."
+        />
       {/if}
-      <div class="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div class="flex min-w-0 flex-col items-center gap-3">
+      <div class="explorer-pathbar">
+        <BreadcrumbBar
+          items={ancestors}
+          onSelect={(node) => void focus(node)}
+          onBack={goUp}
+          canGoBack={ancestors.length > 1}
+        />
+        <span role="status" class="text-xs text-muted-foreground"
+          >{navigating ? 'Opening folder…' : 'Click a folder to explore'}</span
+        >
+      </div>
+      <main class="explorer-layout" aria-busy={navigating}>
+        <div class="explorer-chart">
           <SunburstChart
             tree={workbench.slice?.tree ?? null}
             focusNode={workbench.slice?.focusNode ?? null}
+            hoveredNode={workbench.items.find((item) => item.id === workbench.hoveredId) ?? null}
+            onBack={goUp}
+            canGoBack={ancestors.length > 1}
             hoveredId={workbench.hoveredId}
-            collectedIds={collectedIds}
+            {collectedIds}
             onHover={(id) => (workbench.hoveredId = id)}
             onOpen={(node) => void focus(node)}
             onContext={(node, x, y) => collect(node)}
           />
-          <BreadcrumbBar items={ancestors} onSelect={(node) => void focus(node)} />
+          {#if workbench.slice?.truncated}
+            <p class="chart-summary">
+              {workbench.slice.omittedCount.toLocaleString()} smaller items grouped · open a folder for more detail
+            </p>
+          {/if}
         </div>
-        <ChildList
-          items={workbench.items}
-          hoveredId={workbench.hoveredId}
-          collectedIds={collectedIds}
-          onHover={(id) => (workbench.hoveredId = id)}
-          onOpen={(node) => void focus(node)}
-          onCollect={(node) => collect(node)}
-          onContext={(node) => collect(node)}
-        />
-      </div>
+        <aside class="explorer-sidebar" aria-label="Folder contents">
+          <div class="contents-heading">
+            <div>
+              <h2>Folder contents</h2>
+              <p>{workbench.items.length.toLocaleString()} shown · largest first</p>
+            </div>
+            <span>SIZE</span>
+          </div>
+          <ChildList
+            totalSize={workbench.slice?.focusNode.size ?? 0}
+            items={workbench.items}
+            hoveredId={workbench.hoveredId}
+            {collectedIds}
+            onHover={(id) => (workbench.hoveredId = id)}
+            onOpen={(node) => void focus(node)}
+            onCollect={(node) => collect(node)}
+            onContext={(node) => collect(node)}
+          />
+        </aside>
+      </main>
       <StatusBar
         status={workbench.status}
-        collectorTotal={collectorTotal}
+        {collectorTotal}
         collectorCount={workbench.collector.length}
         onOpenCollector={() => (collectorOpen = true)}
         onCancel={() => void cancelScan()}
@@ -374,9 +426,18 @@
         onDelete={() => void deleteCollected()}
       />
     {:else if workbench.status.state === 'failed'}
-      <StateBanner state="error" title="Scan failed" detail={workbench.status.message} action={{ label: 'Start over', onClick: () => (workbench.status = null) }} />
+      <StateBanner
+        state="error"
+        title="Scan failed"
+        detail={workbench.status.message}
+        action={{ label: 'Start over', onClick: () => (workbench.status = null) }}
+      />
     {:else if workbench.status.state === 'cancelled'}
-      <StateBanner state="info" title="Scan cancelled" action={{ label: 'Start over', onClick: () => (workbench.status = null) }} />
+      <StateBanner
+        state="info"
+        title="Scan cancelled"
+        action={{ label: 'Start over', onClick: () => (workbench.status = null) }}
+      />
     {/if}
   </div>
 {/if}
