@@ -11,6 +11,7 @@
     "apps/tui",
     "apps/vscode",
     "apps/desktop",
+    "apps/dsh",
     "apps/web"
   ],
   "scripts": {
