@@ -159,8 +159,7 @@ jobs:
       - name: Stamp the tag version into the manifest
         working-directory: apps/vscode
         run: |
-          VERSION="${GITHUB_REF_NAME#app-v}"
-          node -e "const fs=require('node:fs');const j=JSON.parse(fs.readFileSync('package.json'));j.version=process.env.VERSION;fs.writeFileSync('package.json',JSON.stringify(j,null,2)+'\n')"
+          VERSION="${GITHUB_REF_NAME#app-v}" node -e "const fs=require('node:fs');const j=JSON.parse(fs.readFileSync('package.json'));j.version=process.env.VERSION;fs.writeFileSync('package.json',JSON.stringify(j,null,2)+'\n')"
       - name: Package vsix
         run: yarn workspace space-lens-vscode package
       - name: Attach vsix to the release

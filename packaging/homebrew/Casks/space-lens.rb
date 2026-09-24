@@ -23,7 +23,7 @@ cask "space-lens" do
   sha256 arm:   "REPLACE_WITH_DMG_SHA256",
          intel: "REPLACE_WITH_DMG_SHA256"
 
-  url "https://github.com/HuakunShen/space-lens/releases/download/app-v#{version}/Space_Lens_#{version}_#{arch}.dmg"
+  url "https://github.com/HuakunShen/space-lens/releases/download/app-v#{version}/Space.Lens_#{version}_#{arch}.dmg"
   name "Space Lens"
   desc "Local-first disk map: scan any folder and stage cleanup candidates"
   homepage "https://github.com/HuakunShen/space-lens"
