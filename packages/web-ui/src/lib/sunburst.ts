@@ -18,6 +18,7 @@ export interface SunburstSegment {
   labelY: number
   labelRotation: number
   labelVisible: boolean
+  isAggregate: boolean
   node: TreeSliceNode
 }
 
@@ -38,7 +39,7 @@ export function buildSunburstSegments(tree: TreeSliceNode, radius: number): Sunb
   return laidOut
     .descendants()
     .filter((node) => node.depth > 0)
-    .map((node, index) => {
+    .map((node) => {
       const middleAngle = (node.x0 + node.x1) / 2
       const middleRadius = (node.y0 + node.y1) / 2
       const degrees = (middleAngle * 180) / Math.PI - 90
@@ -50,12 +51,13 @@ export function buildSunburstSegments(tree: TreeSliceNode, radius: number): Sunb
         depth: node.data.depth,
         childCount: node.data.childCount,
         hasChildren: node.data.hasChildren,
-        color: node.data.ignored ? nodeMutedColor(node.depth) : nodeColor(node.data.id, node.depth, index),
+        color: node.data.ignored ? nodeMutedColor(node.data.depth) : nodeColor(node.data.id, node.data.depth),
         pathData: makeArc(node) ?? '',
         labelX: Math.cos(middleAngle - Math.PI / 2) * middleRadius,
         labelY: Math.sin(middleAngle - Math.PI / 2) * middleRadius,
         labelRotation: degrees > 90 ? degrees + 180 : degrees,
         labelVisible: node.x1 - node.x0 > 0.16 && node.y1 - node.y0 > 24,
+        isAggregate: node.data.id === `${node.parent?.data.id}:omitted`,
         node: node.data,
       }
     })
@@ -63,17 +65,27 @@ export function buildSunburstSegments(tree: TreeSliceNode, radius: number): Sunb
 
 function withOmittedBuckets(node: TreeSliceNode): TreeSliceNode {
   const children = node.children.map(withOmittedBuckets)
-  if (node.omittedBytes > 0) {
+  // Both hosts report subtree-wide omission totals. Descendant omissions already
+  // belong to their own rings; adding them here again inflates every ancestor.
+  const omittedBytes = Math.max(
+    0,
+    node.omittedBytes - node.children.reduce((sum, child) => sum + child.omittedBytes, 0),
+  )
+  const omittedCount = Math.max(
+    0,
+    node.omittedCount - node.children.reduce((sum, child) => sum + child.omittedCount, 0),
+  )
+  if (omittedBytes > 0 || omittedCount > 0) {
     children.push({
       id: `${node.id}:omitted`,
       name: 'Other',
       path: node.path,
-      size: node.omittedBytes,
+      size: omittedBytes,
       depth: node.depth + 1,
       ignored: false,
       collapsed: false,
       hasChildren: false,
-      childCount: node.omittedCount,
+      childCount: omittedCount,
       children: [],
       omittedBytes: 0,
       omittedCount: 0,

@@ -1,7 +1,7 @@
 const PALETTE = ['#f8d66d', '#d8f96a', '#a7f06b', '#6ee7a8', '#5eead4', '#67e8f9', '#93c5fd', '#c4b5fd', '#f0abfc']
 
-export function nodeColor(id: string, depth: number, index = 0): string {
-  const seed = hash(id) + depth * 17 + index * 7
+export function nodeColor(id: string, depth: number): string {
+  const seed = hash(id) + depth * 17
   return PALETTE[Math.abs(seed) % PALETTE.length] ?? PALETTE[0]
 }
 

@@ -18,3 +18,20 @@ icloud-cli *args:
 
 rust-cli *args:
     cargo run --release -p space-lens-cli -- {{args}}
+
+space-lens-mcp:
+    cargo run --release -p space-lens-cli --features mcp -- mcp
+
+space-lens-mac-test:
+    cargo build -p space-lens-ffi
+    cd apps/space-lens-mac && SPACE_LENS_FFI_LIB_DIR="$PWD/../../target/debug" swift test
+
+space-lens-mac-build:
+    ./apps/space-lens-mac/scripts/build-app.sh
+
+space-lens-mac-open:
+    open "./apps/space-lens-mac/.build/Space Lens.app"
+
+space-lens-mac-build-open:
+    ./apps/space-lens-mac/scripts/build-app.sh
+    open "./apps/space-lens-mac/.build/Space Lens.app"

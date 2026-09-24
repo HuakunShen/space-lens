@@ -206,7 +206,7 @@ struct ContentView: View {
                     if let progress = model.evictionProgress {
                         ProgressView(value: progress.fraction)
                             .progressViewStyle(.linear)
-                        Text("\(progress.processedEntries) of \(progress.totalEntries) files · \(bytes(progress.freedBytes)) freed")
+                        Text("\(progress.processedEntries) of \(progress.totalEntries) files · \(progress.activeEntries) active · \(bytes(progress.freedBytes)) freed")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     } else {

@@ -37,7 +37,7 @@ public struct StatusCommand: ParsableCommand {
 
     public init() {}
 
-    public func run() throws {
+    public func run() async throws {
         let url = try CloudPathResolver.resolveExisting(path)
         let result = try CloudScanner().scan(root: url, recursive: recursive)
 
@@ -82,7 +82,7 @@ public struct EvictCommand: ParsableCommand {
         }
     }
 
-    public func run() throws {
+    public func run() async throws {
         guard let path else {
             throw ValidationError("Please provide a file or folder path.")
         }
@@ -97,7 +97,7 @@ public struct EvictCommand: ParsableCommand {
         let service = EvictionService()
         let plan = service.plan(for: result)
         let shouldDryRun = !execute
-        let report = try service.execute(plan, dryRun: shouldDryRun)
+        let report = try await service.execute(plan, dryRun: shouldDryRun)
 
         if json {
             try CLIOutput.printJSON(report)
