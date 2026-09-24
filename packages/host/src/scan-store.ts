@@ -1,4 +1,5 @@
 import { statSync, realpathSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename } from 'node:path'
 import { createHash, randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -345,6 +346,13 @@ export class ScanManager {
   }
 
   private containRoot(path: string): string {
+    // A leading `~` is this process's home, not a literal directory name. The
+    // expansion lives here rather than in any one client because every
+    // frontend (browser, embed, DSH panel) types paths against the same
+    // local machine this server runs on.
+    if (path === '~' || path.startsWith('~/') || path.startsWith('~\\')) {
+      path = `${homedir()}${path.slice(1)}`
+    }
     let resolved: string
     try {
       resolved = realpathSync(path)

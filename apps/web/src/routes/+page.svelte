@@ -73,6 +73,20 @@
     return [...current, ...recent]
   })
 
+  /**
+   * `~` means the user's home. On the desktop the home is known here; in the
+   * browser it is not, so the path goes up unchanged and the server — which
+   * runs on the same machine the paths name — expands it.
+   */
+  let desktopHome: string | null = null
+  function expandTilde(path: string): string {
+    const trimmed = path.trim()
+    if (desktopHome === null) return trimmed
+    if (trimmed === '~') return desktopHome
+    if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) return `${desktopHome}${trimmed.slice(1)}`
+    return trimmed
+  }
+
   function stopStreams(): void {
     stream?.close()
     stream = null
@@ -87,7 +101,9 @@
         import('@space-lens/client'),
         import('../lib/tauri-ports'),
       ])
-      const service = createTauriService(await loadTauriPorts())
+      const ports = await loadTauriPorts()
+      desktopHome = (await ports.homeDir?.().catch(() => null)) ?? null
+      const service = createTauriService(ports)
       workbench.capabilities = await service.capabilities()
       const rootsResponse = await service.roots()
       workbench.targets = Array.isArray(rootsResponse?.roots) ? rootsResponse.roots : []
@@ -156,7 +172,7 @@
     workbench.error = null
     try {
       const session = await service.startScan({
-        paths,
+        paths: paths.map(expandTilde),
         ignoreHidden: false,
         respectGitignore: true,
         ignoredMode: 'summarize',
@@ -240,6 +256,16 @@
     workbench.collector = [...workbench.collector, entry]
   }
 
+  function uncollect(node: TreeNodeSummary): void {
+    workbench.collector = workbench.collector.filter((entry) => entry.nodeId !== node.id)
+  }
+
+  /** Right-click on the chart toggles the node's collector membership. */
+  function toggleCollected(node: TreeNodeSummary): void {
+    if (collectedIds.has(node.id)) uncollect(node)
+    else collect(node)
+  }
+
   async function deleteCollected(): Promise<void> {
     const { service, status, collector } = workbench
     if (service === null || status === null || collector.length === 0) return
@@ -310,6 +336,9 @@
       <ScanPicker
         {targets}
         mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
+        folderPicker={workbench.capabilities?.host.folderPicker ?? false}
+        onPickFolder={() => workbench.service?.pickFolder?.() ?? Promise.resolve(null)}
+        chromeInset={headerInset()}
         logo={`${base}/logo-mark.png`}
         busy={false}
         error={workbench.error}
@@ -321,6 +350,9 @@
       <ScanPicker
         {targets}
         mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
+        folderPicker={workbench.capabilities?.host.folderPicker ?? false}
+        onPickFolder={() => workbench.service?.pickFolder?.() ?? Promise.resolve(null)}
+        chromeInset={headerInset()}
         logo={`${base}/logo-mark.png`}
         busy={true}
         error={workbench.error}
@@ -381,7 +413,7 @@
             {collectedIds}
             onHover={(id) => (workbench.hoveredId = id)}
             onOpen={(node) => void focus(node)}
-            onContext={(node, x, y) => collect(node)}
+            onContext={(node) => toggleCollected(node)}
           />
           {#if workbench.slice?.truncated}
             <p class="chart-summary">
@@ -405,7 +437,7 @@
             onHover={(id) => (workbench.hoveredId = id)}
             onOpen={(node) => void focus(node)}
             onCollect={(node) => collect(node)}
-            onContext={(node) => collect(node)}
+            onRemove={(node) => uncollect(node)}
           />
         </aside>
       </main>

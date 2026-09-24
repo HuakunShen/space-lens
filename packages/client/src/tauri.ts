@@ -24,6 +24,8 @@ import type { WorkbenchService } from './service.ts'
 export interface TauriPorts {
   invoke(cmd: string, payload?: Record<string, unknown>): Promise<unknown>
   createChannel(onmessage: (message: unknown) => void): unknown
+  /** The process home directory, for expanding `~/` in hand-entered paths. */
+  homeDir?(): Promise<string>
 }
 
 interface Reply<T> {
@@ -110,17 +112,31 @@ export function createTauriService(ports: TauriPorts): WorkbenchService {
     },
     async treeSlice(body: TreeSliceRequest) {
       const { scanId, nodeId, depth, maxChildrenPerNode } = body
-      return invokeReply<TreeSlice>('sl_read', { request: { method: 'treeSlice', scanId, nodeId, depth, maxChildrenPerNode } })
+      return invokeReply<TreeSlice>('sl_read', {
+        request: { method: 'treeSlice', scanId, nodeId, depth, maxChildrenPerNode },
+      })
     },
     async children(body: ChildrenPageRequest) {
       const { scanId, nodeId, offset, limit, sort } = body
-      return invokeReply<ChildrenPage>('sl_read', { request: { method: 'treeChildren', scanId, nodeId, offset, limit, sort } })
+      return invokeReply<ChildrenPage>('sl_read', {
+        request: { method: 'treeChildren', scanId, nodeId, offset, limit, sort },
+      })
     },
     async plan(body: { scanId: string; nodeIds: string[] }) {
-      return invokeReply<CleanupPlan>('sl_submit', { request: { kind: 'cleanupPlan', scanId: body.scanId, nodeIds: body.nodeIds } })
+      return invokeReply<CleanupPlan>('sl_submit', {
+        request: { kind: 'cleanupPlan', scanId: body.scanId, nodeIds: body.nodeIds },
+      })
     },
     async execute(body: CleanupExecuteRequest) {
-      return invokeReply<CleanupOutcome>('sl_submit', { request: { kind: 'cleanupExecute', planId: body.planId, confirm: body.confirm } })
+      return invokeReply<CleanupOutcome>('sl_submit', {
+        request: { kind: 'cleanupExecute', planId: body.planId, confirm: body.confirm },
+      })
+    },
+    async pickFolder(title?: string) {
+      const result = await invokeReply<{ picked: string | null }>('sl_host_request', {
+        request: { kind: 'pickDirectory', title: title ?? null },
+      })
+      return result.picked
     },
   }
 }

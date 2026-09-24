@@ -35,4 +35,11 @@ export interface WorkbenchService {
   children(body: ChildrenPageRequest): Promise<ChildrenPage>
   plan(body: { scanId: string; nodeIds: string[] }): Promise<{ planId: string }>
   execute(body: CleanupExecuteRequest): Promise<CleanupOutcome>
+  /**
+   * Opens the host's own folder picker and answers the one absolute path
+   * chosen, or `null` for a cancelled dialog. The affordance is gated by the
+   * capabilities' `host.folderPicker` flag — the flag, not this method's
+   * presence, decides whether the picker button exists.
+   */
+  pickFolder?(title?: string): Promise<string | null>
 }

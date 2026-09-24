@@ -204,12 +204,16 @@ pub async fn sl_submit(
     window: Window,
     session_id: String,
     request: SubmitRequest,
-) -> Result<Value, Value> {
+    reply: Channel<Value>,
+) -> Result<(), Value> {
     // State is resolved inside the blocking task via the app handle, whose
     // clone is 'static — the borrowed State itself is not.
-    let _ = window;
     let handle = tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
+        if let Err(problem) = require_owner(&window, &state, &session_id) {
+            let _ = reply.send(json!({ "ok": false, "problem": problem }));
+            return Ok(());
+        }
         let sessions = state.sessions.lock().unwrap();
         let bundle = sessions
             .get(&session_id)
@@ -229,7 +233,11 @@ pub async fn sl_submit(
                 serde_json::to_value(engine.execute(&request).map_err(problem_to_value)?).map_err(|error| problem_value("InternalError", error))
             }
         };
-        value
+        let _ = reply.send(match value {
+            Ok(v) => json!({ "ok": true, "result": v }),
+            Err(problem) => json!({ "ok": false, "problem": problem }),
+        });
+        Ok(())
     });
     handle.await.map_err(|error| problem_value("InternalError", error))?
 }
@@ -237,26 +245,38 @@ pub async fn sl_submit(
 // --------------------------------------------------------------------- host
 
 #[tauri::command]
-pub fn sl_host_request(
+pub async fn sl_host_request(
     app: AppHandle,
     window: Window,
     session_id: String,
     request: HostRequest,
-    state: State<'_, AppState>,
-) -> Result<Value, Value> {
-    require_owner(&window, &state, &session_id)?;
-    match request {
-        HostRequest::PickDirectory { title } => {
-            use tauri_plugin_dialog::DialogExt;
-            let _ = title;
-            // Blocking pick from an async command thread: the dialog is modal
-            // to this window and the WebView stays alive throughout.
-            let picked = app.dialog().file().blocking_pick_folder();
-            Ok(json!({
-                "picked": picked.map(|path| path.to_string()),
-            }))
+    reply: Channel<Value>,
+) -> Result<(), Value> {
+    // Same Channel reply as every other command: the invoke response body is
+    // unreliable on macOS, so answers always ride the channel.
+    let handle = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        if let Err(problem) = require_owner(&window, &state, &session_id) {
+            let _ = reply.send(json!({ "ok": false, "problem": problem }));
+            return Ok(());
         }
-    }
+        let value: Value = match request {
+            HostRequest::PickDirectory { title } => {
+                use tauri_plugin_dialog::DialogExt;
+                let _ = title;
+                // Blocking pick from a blocking-pool thread (never the main
+                // thread): the dialog is modal to this window and the
+                // WebView stays alive throughout.
+                let picked = app.dialog().file().blocking_pick_folder();
+                json!({
+                    "picked": picked.map(|path| path.to_string()),
+                })
+            }
+        };
+        let _ = reply.send(json!({ "ok": true, "result": value }));
+        Ok(())
+    });
+    handle.await.map_err(|error| problem_value("InternalError", error))?
 }
 
 // ------------------------------------------------------------------- events

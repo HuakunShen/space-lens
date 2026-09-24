@@ -25,6 +25,15 @@
     onScan: (paths: string[]) => void;
     onCancel: () => void;
     onForget?: (path: string) => Promise<void> | void;
+    /**
+     * Whether the host offers a native folder picker (desktop: the Tauri
+     * dialog). The button exists only when this is true — in the browser an
+     * absolute path cannot come from a picker, so manual entry stays the way.
+     */
+    folderPicker?: boolean;
+    onPickFolder?: () => Promise<string | null>;
+    /** Where the window chrome sits; defaults follow the mode. */
+    chromeInset?: string;
   }
 
   let {
@@ -37,11 +46,15 @@
     onScan,
     onCancel,
     onForget,
+    folderPicker = false,
+    onPickFolder = undefined,
+    chromeInset = undefined,
   }: Props = $props();
   let selectedId = $state("");
   let customPath = $state("");
   let secondPath = $state("");
   let forgettingPath = $state<string | null>(null);
+  let pickingFolder = $state(false);
   let recentTargets = $derived(
     targets.filter((target) => target.source === "recent"),
   );
@@ -70,6 +83,20 @@
     onScan(selectedPaths);
   }
 
+  async function pickFolder() {
+    if (!onPickFolder || pickingFolder) return;
+    pickingFolder = true;
+    try {
+      const picked = await onPickFolder();
+      if (picked) {
+        customPath = picked;
+        selectedId = "custom";
+      }
+    } finally {
+      pickingFolder = false;
+    }
+  }
+
   async function forgetTarget(event: MouseEvent, target: ScanTarget) {
     event.preventDefault();
     event.stopPropagation();
@@ -91,7 +118,9 @@
       data-tauri-drag-region
       class={[
         "flex min-h-12 items-center justify-between gap-4 border-b py-2",
-        isKunkunMode ? "pl-24" : mode === "desktop" ? "pl-[140px] pr-4" : "px-4",
+        isKunkunMode
+          ? "pl-24"
+          : chromeInset ?? (mode === "desktop" ? "pl-[88px] pr-4" : "px-4"),
       ]}
     >
       <div class="flex min-w-0 items-center gap-2.5">
@@ -243,10 +272,24 @@
                   >
                     Folder path
                   </span>
-                  <Input
-                    bind:value={customPath}
-                    placeholder="/path/to/folder"
-                  />
+                  <div class="flex gap-2">
+                    <Input
+                      bind:value={customPath}
+                      placeholder="/path/to/folder"
+                      class="flex-1"
+                    />
+                    {#if folderPicker && onPickFolder}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onclick={pickFolder}
+                        disabled={pickingFolder}
+                      >
+                        <FolderOpen size={15} />
+                        {pickingFolder ? "Opening" : "Browse"}
+                      </Button>
+                    {/if}
+                  </div>
                 </label>
                 <label class="grid gap-1.5">
                   <span

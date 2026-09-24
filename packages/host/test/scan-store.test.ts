@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { join, relative } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { ScanManager } from '../src/scan-store.ts'
@@ -147,6 +147,28 @@ describe('scan manager', () => {
     ).rejects.toMatchObject({
       problem: { code: 'Forbidden' },
     })
+  })
+
+  it('expands a leading ~ against the process home before containing it', async () => {
+    // `~/<relative path to the fixture>` must land inside the served root
+    // exactly like its absolute spelling, while a bare `~` (home itself) is
+    // still outside the roots and refused.
+    const homeRelative = relative(homedir(), root)
+    const session = await manager.start(
+      {
+        paths: [`~/${homeRelative}`],
+        ignoreHidden: false,
+        respectGitignore: true,
+        ignoredMode: 'summarize',
+      },
+      'tilde',
+    )
+    await manager.wait(session.scanId)
+    expect(manager.status(session.scanId).state).toBe('ready')
+
+    await expect(
+      manager.start({ paths: ['~'], ignoreHidden: false, respectGitignore: true, ignoredMode: 'summarize' }, undefined),
+    ).rejects.toMatchObject({ problem: { code: 'Forbidden' } })
   })
 
   it('publishes contract-valid events for the scan lifecycle', () => {

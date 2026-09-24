@@ -6,13 +6,16 @@ import type { TauriPorts } from '@space-lens/client'
  * (packages/client) which stays transport-agnostic.
  */
 export async function loadTauriPorts(): Promise<TauriPorts> {
-  const core = await import('@tauri-apps/api/core')
+  const [core, path] = await Promise.all([import('@tauri-apps/api/core'), import('@tauri-apps/api/path')])
   return {
     invoke: core.invoke,
     createChannel(onmessage) {
       const channel = new core.Channel<unknown>()
       channel.onmessage = onmessage
       return channel
+    },
+    async homeDir() {
+      return path.homeDir()
     },
   }
 }
