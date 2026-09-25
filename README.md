@@ -16,6 +16,22 @@ Fast directory scanning and cleanup candidate utilities, powered by Rust and nap
 npm install space-lens
 ```
 
+## Install the CLI
+
+The Rust CLI (`space-lens` binary: scan, candidates, clean, dirty-git, icloud)
+is the crate `space-lens-cli`. Once published to crates.io:
+
+```bash
+cargo install space-lens-cli        # or: brew install HuakunShen/homebrew-tap/space-lens-cli
+```
+
+Until then, install straight from this repository (cargo checks out the
+vendors/kuntu submodule itself):
+
+```bash
+cargo install --git https://github.com/HuakunShen/space-lens --locked space-lens-cli
+```
+
 ## Serve the web workbench
 
 `spacelens serve` starts an authenticated HTTP host that serves the web UI and

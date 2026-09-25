@@ -1,9 +1,9 @@
 [package]
 authors.workspace    = true
-edition.workspace    = true
+description          = "Scan disk usage and find cleanup candidates for development projects."
+edition.workspace     = true
 license.workspace    = true
 name                 = "space-lens-cli"
-publish              = false
 repository.workspace = true
 version.workspace    = true
 
@@ -20,4 +20,5 @@ anyhow     = "1"
 clap       = { version = "4", features = ["derive"] }
 serde      = "1"
 serde_json = "1"
-space-lens = { package = "kuntu-scan", path = "../../vendors/kuntu/crates/kuntu-scan" }
+# Published to crates.io as kuntu-scan; the path keeps local (submodule) builds.
+space-lens = { package = "kuntu-scan", version = "0.2", path = "../../vendors/kuntu/crates/kuntu-scan" }
