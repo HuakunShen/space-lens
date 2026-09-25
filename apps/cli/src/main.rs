@@ -5,8 +5,9 @@ use space_lens::cloud::{
   NativeICloudBackend, ScanOptions as CloudScanOptions,
 };
 use space_lens::{
-  build_removal_plan, execute_removal_plan, find_candidates, scan_directory, CandidateOptions,
-  CleanupPreset, IgnoredMode, RemovalPlan, ScanNode, ScanOptions,
+  build_removal_plan, execute_removal_plan, find_candidates, find_dirty_git_repos, scan_directory,
+  CandidateOptions, CleanupPreset, DirtyGitRepoOptions, IgnoredMode, RemovalPlan, ScanNode,
+  ScanOptions,
 };
 use std::io::{self, BufRead};
 use std::path::PathBuf;
@@ -30,6 +31,8 @@ enum Command {
   Scan(ScanArgs),
   Candidates(CandidateArgs),
   Clean(CleanArgs),
+  #[command(name = "dirty-git")]
+  DirtyGit(DirtyGitArgs),
   #[command(name = "icloud")]
   ICloud(ICloudArgs),
   #[cfg(feature = "mcp")]
@@ -89,6 +92,8 @@ struct ScanArgs {
   respect_gitignore: bool,
   #[arg(long, value_enum, default_value_t = IgnoredModeArg::Summarize)]
   ignored_mode: IgnoredModeArg,
+  #[arg(long, help = "Descend into symlinked directories")]
+  follow_symlinks: bool,
 }
 
 #[derive(Debug, Args)]
@@ -101,6 +106,8 @@ struct CandidateArgs {
   json: bool,
   #[arg(long)]
   ignore_hidden: bool,
+  #[arg(long, help = "Descend into symlinked directories")]
+  follow_symlinks: bool,
 }
 
 #[derive(Debug, Args)]
@@ -113,8 +120,22 @@ struct CleanArgs {
   json: bool,
   #[arg(long)]
   ignore_hidden: bool,
+  #[arg(long, help = "Descend into symlinked directories")]
+  follow_symlinks: bool,
   #[arg(long)]
   execute: bool,
+}
+
+#[derive(Debug, Args)]
+struct DirtyGitArgs {
+  #[arg(value_name = "PATH", default_value = ".")]
+  paths: Vec<PathBuf>,
+  #[arg(long)]
+  json: bool,
+  #[arg(long)]
+  ignore_hidden: bool,
+  #[arg(long, help = "Descend into symlinked directories")]
+  follow_symlinks: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -137,6 +158,7 @@ fn main() -> Result<()> {
     Command::Scan(args) => run_scan(args),
     Command::Candidates(args) => run_candidates(args),
     Command::Clean(args) => run_clean(args),
+    Command::DirtyGit(args) => run_dirty_git(args),
     Command::ICloud(args) => run_icloud(args),
     #[cfg(feature = "mcp")]
     Command::Mcp => mcp::run(),
@@ -259,6 +281,7 @@ fn run_scan(args: ScanArgs) -> Result<()> {
     full_path: args.full_path,
     respect_gitignore: args.respect_gitignore,
     ignored_mode: args.ignored_mode.into(),
+    follow_symlinks: args.follow_symlinks,
   });
 
   if args.json {
@@ -277,6 +300,7 @@ fn run_candidates(args: CandidateArgs) -> Result<()> {
     roots: args.paths,
     presets: args.preset.into_iter().map(CleanupPreset::from).collect(),
     ignore_hidden: args.ignore_hidden,
+    follow_symlinks: args.follow_symlinks,
   });
 
   if args.json {
@@ -301,6 +325,7 @@ fn run_clean(args: CleanArgs) -> Result<()> {
     roots: args.paths,
     presets: args.preset.into_iter().map(CleanupPreset::from).collect(),
     ignore_hidden: args.ignore_hidden,
+    follow_symlinks: args.follow_symlinks,
   });
   let plan = build_removal_plan(candidates);
 
@@ -322,6 +347,26 @@ fn run_clean(args: CleanArgs) -> Result<()> {
     print_json(&plan)?;
   } else {
     print_plan(&plan);
+  }
+
+  Ok(())
+}
+
+fn run_dirty_git(args: DirtyGitArgs) -> Result<()> {
+  let repos = find_dirty_git_repos(DirtyGitRepoOptions {
+    roots: args.paths,
+    ignore_hidden: args.ignore_hidden,
+    follow_symlinks: args.follow_symlinks,
+  });
+
+  if args.json {
+    print_json(&repos)?;
+  } else if repos.is_empty() {
+    println!("No dirty git repositories found.");
+  } else {
+    for repo in &repos {
+      println!("{}\t{} changed files", repo.path.display(), repo.dirty_entries);
+    }
   }
 
   Ok(())

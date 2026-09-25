@@ -20,6 +20,7 @@ export interface CleanupCandidateOptions {
   directories: Array<string>
   presets?: Array<string>
   ignoreHidden?: boolean
+  followSymlinks?: boolean
 }
 
 export declare function deletePath(path: string): void
@@ -40,11 +41,25 @@ export interface DirectoryScanOptions {
   fullPath?: boolean
   respectGitignore?: boolean
   ignoredMode?: string
+  followSymlinks?: boolean
+}
+
+export interface DirtyGitRepo {
+  path: string
+  dirtyEntries: number
+}
+
+export interface DirtyGitRepoOptions {
+  directories: Array<string>
+  ignoreHidden?: boolean
+  followSymlinks?: boolean
 }
 
 export declare function executeCleanup(plan: RemovalPlan): RemovalOutcome
 
 export declare function findCleanupCandidates(options: CleanupCandidateOptions): Array<CleanupCandidate>
+
+export declare function findDirtyGitRepos(options: DirtyGitRepoOptions): Array<DirtyGitRepo>
 
 export interface ICloudEvictionOutcome {
   results: Array<ICloudEvictionResult>

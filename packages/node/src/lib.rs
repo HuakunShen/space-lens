@@ -8,10 +8,11 @@ mod cloud;
 
 use space_lens::{
   build_removal_plan as build_core_removal_plan, execute_removal_plan as execute_core_removal_plan,
-  find_candidates as find_core_candidates, scan_directory as scan_core_directory, CandidateOptions,
+  find_candidates as find_core_candidates, find_dirty_git_repos as find_core_dirty_git_repos,
+  scan_directory as scan_core_directory, CandidateOptions,
   CleanupCandidate as CoreCleanupCandidate, CleanupPreset, IgnoredMode,
-  RemovalEntry as CoreRemovalEntry, RemovalOutcome as CoreRemovalOutcome,
-  RemovalPlan as CoreRemovalPlan, ScanNode, ScanOptions,
+  DirtyGitRepoOptions as CoreDirtyGitRepoOptions, RemovalEntry as CoreRemovalEntry,
+  RemovalOutcome as CoreRemovalOutcome, RemovalPlan as CoreRemovalPlan, ScanNode, ScanOptions,
 };
 
 #[napi(object)]
@@ -25,6 +26,8 @@ pub struct DirectoryScanOptions {
   pub respect_gitignore: Option<bool>,
   #[napi(js_name = "ignoredMode")]
   pub ignored_mode: Option<String>,
+  #[napi(js_name = "followSymlinks")]
+  pub follow_symlinks: Option<bool>,
 }
 
 #[napi(object)]
@@ -66,6 +69,7 @@ pub fn scan_directory(options: DirectoryScanOptions) -> Vec<DirectoryNode> {
     full_path: options.full_path.unwrap_or(false),
     respect_gitignore: options.respect_gitignore.unwrap_or(true),
     ignored_mode,
+    follow_symlinks: options.follow_symlinks.unwrap_or(false),
   })
   .into_iter()
   .map(DirectoryNode::from)
@@ -78,6 +82,8 @@ pub struct CleanupCandidateOptions {
   pub presets: Option<Vec<String>>,
   #[napi(js_name = "ignoreHidden")]
   pub ignore_hidden: Option<bool>,
+  #[napi(js_name = "followSymlinks")]
+  pub follow_symlinks: Option<bool>,
 }
 
 #[napi(object)]
@@ -189,6 +195,37 @@ pub fn delete_path(path: String) -> Result<()> {
     .map_err(|error| Error::from_reason(error.to_string()))
 }
 
+#[napi(object)]
+pub struct DirtyGitRepoOptions {
+  pub directories: Vec<String>,
+  #[napi(js_name = "ignoreHidden")]
+  pub ignore_hidden: Option<bool>,
+  #[napi(js_name = "followSymlinks")]
+  pub follow_symlinks: Option<bool>,
+}
+
+#[napi(object)]
+pub struct DirtyGitRepo {
+  pub path: String,
+  #[napi(js_name = "dirtyEntries")]
+  pub dirty_entries: u32,
+}
+
+#[napi(js_name = "findDirtyGitRepos")]
+pub fn find_dirty_git_repos(options: DirtyGitRepoOptions) -> Vec<DirtyGitRepo> {
+  find_core_dirty_git_repos(CoreDirtyGitRepoOptions {
+    roots: options.directories.into_iter().map(PathBuf::from).collect(),
+    ignore_hidden: options.ignore_hidden.unwrap_or(false),
+    follow_symlinks: options.follow_symlinks.unwrap_or(false),
+  })
+  .into_iter()
+  .map(|repo| DirtyGitRepo {
+    path: repo.path.to_string_lossy().to_string(),
+    dirty_entries: repo.dirty_entries,
+  })
+  .collect()
+}
+
 fn candidate_options(options: CleanupCandidateOptions) -> Result<CandidateOptions> {
   let presets = options
     .presets
@@ -201,6 +238,7 @@ fn candidate_options(options: CleanupCandidateOptions) -> Result<CandidateOption
     roots: options.directories.into_iter().map(PathBuf::from).collect(),
     presets,
     ignore_hidden: options.ignore_hidden.unwrap_or(false),
+    follow_symlinks: options.follow_symlinks.unwrap_or(false),
   })
 }
 
