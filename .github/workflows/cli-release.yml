@@ -57,7 +57,8 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#cli-v}"
           NAME="spacelens-${{ matrix.target }}-v${VERSION}"
-          install -Dm755 "target/${{ matrix.target }}/release/spacelens" "${NAME}/spacelens"
+          mkdir -p "${NAME}"
+          install -m 755 "target/${{ matrix.target }}/release/spacelens" "${NAME}/spacelens"
           tar czf "${NAME}.tar.gz" "${NAME}"
       - name: Package (zip)
         if: runner.os == 'Windows'
