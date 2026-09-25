@@ -22,7 +22,9 @@ The Rust CLI is the crate `spacelens` (scan, candidates, clean, dirty-git,
 icloud). Once published to crates.io:
 
 ```bash
-cargo install spacelens        # or: brew install HuakunShen/homebrew-tap/spacelens
+cargo install spacelens        # build from source
+cargo binstall spacelens       # or: prebuilt binary from the GitHub release
+brew install HuakunShen/homebrew-tap/spacelens
 ```
 
 Until then, install straight from this repository (cargo checks out the

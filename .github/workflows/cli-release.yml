@@ -1,0 +1,96 @@
+# Builds the `spacelens` CLI (apps/cli) on `v<version>` tags and attaches
+# prebuilt archives to the GitHub release. Archive names and internal layout
+# follow cargo-binstall's default strategy so `cargo binstall spacelens`
+# resolves them; apps/cli/Cargo.toml pins the same names under
+# [package.metadata.binstall]. These are also the artifacts the Homebrew
+# formula (packaging/homebrew/Formula/spacelens.rb) installs from.
+#
+#   spacelens-<target>-v<version>.tar.gz   (zip on Windows)
+#     └── spacelens-<target>-v<version>/<bin>
+
+name: CLI Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - name: Install musl toolchain
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        run: cargo build --release -p spacelens --target ${{ matrix.target }}
+      - name: Package (tar.gz)
+        if: runner.os != 'Windows'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME="spacelens-${{ matrix.target }}-v${VERSION}"
+          install -Dm755 "target/${{ matrix.target }}/release/spacelens" "${NAME}/spacelens"
+          tar czf "${NAME}.tar.gz" "${NAME}"
+      - name: Package (zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $name = "spacelens-${{ matrix.target }}-v$version"
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/spacelens.exe" "$name/spacelens.exe"
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.target }}
+          path: spacelens-*
+
+  release:
+    name: Attach archives to the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List archives
+        run: ls -la dist
+      - name: Create the release and attach archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "spacelens ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            dist/* \
+          || gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber

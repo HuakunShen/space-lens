@@ -22,3 +22,14 @@ serde      = "1"
 serde_json = "1"
 # Published to crates.io as kuntu-scan; the path keeps local (submodule) builds.
 space-lens = { package = "kuntu-scan", version = "0.2", path = "../../vendors/kuntu/crates/kuntu-scan" }
+
+# cargo-binstall: prebuilt archives from the `v<version>` GitHub release,
+# produced by .github/workflows/cli-release.yml. Mirrors binstall's default
+# strategy so versions published before this metadata resolves identically.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }-v{ version }.{ archive-format }"
+pkg-fmt = "tgz"
+bin-dir = "{ name }-{ target }-v{ version }/{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
