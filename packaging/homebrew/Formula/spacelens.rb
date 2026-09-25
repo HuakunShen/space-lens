@@ -52,7 +52,10 @@ class Spacelens < Formula
   def install
     arch = Hardware::CPU.intel? ? "x86_64" : "aarch64"
     os = OS.mac? ? "apple-darwin" : "unknown-linux-musl"
-    bin.install "spacelens-#{arch}-#{os}-v#{version}/spacelens"
+    # Homebrew strips the archive's single root directory when unpacking;
+    # accept both layouts so older brews keep working.
+    staged = "spacelens-#{arch}-#{os}-v#{version}/spacelens"
+    bin.install File.exist?(staged) ? staged : "spacelens"
   end
 
   test do
