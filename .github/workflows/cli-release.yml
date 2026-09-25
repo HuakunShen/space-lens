@@ -1,4 +1,4 @@
-# Builds the `spacelens` CLI (apps/cli) on `v<version>` tags and attaches
+# Builds the `spacelens` CLI (apps/cli) on `cli-v<version>` tags and attaches
 # prebuilt archives to the GitHub release. Archive names and internal layout
 # follow cargo-binstall's default strategy so `cargo binstall spacelens`
 # resolves them; apps/cli/Cargo.toml pins the same names under
@@ -13,7 +13,7 @@ name: CLI Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'cli-v*'
 
 permissions:
   contents: write
@@ -55,7 +55,7 @@ jobs:
       - name: Package (tar.gz)
         if: runner.os != 'Windows'
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${GITHUB_REF_NAME#cli-v}"
           NAME="spacelens-${{ matrix.target }}-v${VERSION}"
           install -Dm755 "target/${{ matrix.target }}/release/spacelens" "${NAME}/spacelens"
           tar czf "${NAME}.tar.gz" "${NAME}"
@@ -63,7 +63,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $version = $env:GITHUB_REF_NAME.Substring("cli-v".Length)
           $name = "spacelens-${{ matrix.target }}-v$version"
           New-Item -ItemType Directory -Path $name | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/spacelens.exe" "$name/spacelens.exe"
@@ -90,7 +90,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "spacelens ${GITHUB_REF_NAME#v}" \
+            --title "spacelens ${GITHUB_REF_NAME#cli-v}" \
             --generate-notes \
             dist/* \
           || gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
