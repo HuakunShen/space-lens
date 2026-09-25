@@ -32,20 +32,20 @@ class Spacelens < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/HuakunShen/space-lens/releases/download/cli-v#{version}/spacelens-aarch64-apple-darwin-v#{version}.tar.gz"
-      sha256 "REPLACE_WITH_ARM64_MACOS_SHA256"
+      sha256 "9b35a4c2a5f4208acb492bdaaa3555069f13ccdfe68403a46b097a23ed9390c1"
     else
       url "https://github.com/HuakunShen/space-lens/releases/download/cli-v#{version}/spacelens-x86_64-apple-darwin-v#{version}.tar.gz"
-      sha256 "REPLACE_WITH_X64_MACOS_SHA256"
+      sha256 "f049234aa7ae48be0f998157cb4141d50dc1fb32d6c108567ffcf3b16a1a2eb9"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/HuakunShen/space-lens/releases/download/cli-v#{version}/spacelens-aarch64-unknown-linux-musl-v#{version}.tar.gz"
-      sha256 "REPLACE_WITH_ARM64_LINUX_SHA256"
+      sha256 "434ad7721a68a1c9af2d871f517867094adb835a4f8abc95c989928d61e58e39"
     else
       url "https://github.com/HuakunShen/space-lens/releases/download/cli-v#{version}/spacelens-x86_64-unknown-linux-musl-v#{version}.tar.gz"
-      sha256 "REPLACE_WITH_X64_LINUX_SHA256"
+      sha256 "79bc1c400a01572e4f04d8a58b1ca53252fc447183f7de5e05cf48eb44042cfb"
     end
   end
 
