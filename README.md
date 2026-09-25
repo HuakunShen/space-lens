@@ -18,18 +18,18 @@ npm install space-lens
 
 ## Install the CLI
 
-The Rust CLI (`space-lens` binary: scan, candidates, clean, dirty-git, icloud)
-is the crate `space-lens-cli`. Once published to crates.io:
+The Rust CLI is the crate `spacelens` (scan, candidates, clean, dirty-git,
+icloud). Once published to crates.io:
 
 ```bash
-cargo install space-lens-cli        # or: brew install HuakunShen/homebrew-tap/space-lens-cli
+cargo install spacelens        # or: brew install HuakunShen/homebrew-tap/spacelens
 ```
 
 Until then, install straight from this repository (cargo checks out the
 vendors/kuntu submodule itself):
 
 ```bash
-cargo install --git https://github.com/HuakunShen/space-lens --locked space-lens-cli
+cargo install --git https://github.com/HuakunShen/space-lens --locked spacelens
 ```
 
 ## Serve the web workbench
@@ -110,9 +110,9 @@ Initial presets:
 The workspace includes a simple Rust CLI app:
 
 ```bash
-cargo run -p space-lens-cli -- scan ~/Dev --json
-cargo run -p space-lens-cli -- candidates ~/Dev --preset node
-cargo run -p space-lens-cli -- clean ~/Dev --preset node
+cargo run -p spacelens -- scan ~/Dev --json
+cargo run -p spacelens -- candidates ~/Dev --preset node
+cargo run -p spacelens -- clean ~/Dev --preset node
 ```
 
 `clean` defaults to dry-run. Add `--execute` only when you want to remove the planned paths.
@@ -122,10 +122,10 @@ cargo run -p space-lens-cli -- clean ~/Dev --preset node
 The Rust core and CLI also include a macOS-only iCloud inspection/eviction flow. It is separate from the existing deletion cleanup code:
 
 ```bash
-cargo run --release -p space-lens-cli -- icloud --help
-cargo run --release -p space-lens-cli -- icloud inspect <absolute-path>
-cargo run --release -p space-lens-cli -- icloud plan <disposable-iCloud-test-folder>
-cargo run --release -p space-lens-cli -- icloud evict <disposable-iCloud-test-folder>
+cargo run --release -p spacelens -- icloud --help
+cargo run --release -p spacelens -- icloud inspect <absolute-path>
+cargo run --release -p spacelens -- icloud plan <disposable-iCloud-test-folder>
+cargo run --release -p spacelens -- icloud evict <disposable-iCloud-test-folder>
 ```
 
 `evict` is dry-run by default. Real execution requires `--execute` and the interactive confirmation phrase. The implementation never falls back to deleting files. Do not use a real Lightroom or Photos folder as the first test target.
@@ -243,7 +243,7 @@ The CLI has an opt-in, read-only MCP stdio adapter. The default Rust build does
 not compile or expose it; enable the `mcp` feature explicitly:
 
 ```bash
-cargo run --release -p space-lens-cli --features mcp -- mcp
+cargo run --release -p spacelens --features mcp -- mcp
 # or
 just space-lens-mcp
 ```

@@ -17,7 +17,7 @@ mod mcp;
 
 #[derive(Debug, Parser)]
 #[command(
-  name = "space-lens",
+  name = "spacelens",
   version,
   about = "Scan disk usage and cleanup candidates."
 )]
@@ -464,7 +464,7 @@ mod tests {
 
   #[test]
   fn parses_icloud_plan_as_a_read_only_command() {
-    let cli = Cli::try_parse_from(["space-lens", "icloud", "plan", "/tmp/test"]).unwrap();
+    let cli = Cli::try_parse_from(["spacelens", "icloud", "plan", "/tmp/test"]).unwrap();
 
     assert!(matches!(
       cli.command,
@@ -476,7 +476,7 @@ mod tests {
 
   #[test]
   fn evict_is_dry_run_without_execute_flag() {
-    let cli = Cli::try_parse_from(["space-lens", "icloud", "evict", "/tmp/test"]).unwrap();
+    let cli = Cli::try_parse_from(["spacelens", "icloud", "evict", "/tmp/test"]).unwrap();
 
     assert!(matches!(
       cli.command,
