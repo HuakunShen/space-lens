@@ -34,6 +34,11 @@ vendors/kuntu submodule itself):
 cargo install --git https://github.com/HuakunShen/space-lens --locked spacelens
 ```
 
+## Releasing
+
+Version bumping, publishing (crates.io / npm / Homebrew), tags, and the
+packaging gotchas are documented step by step in [`docs/release.md`](docs/release.md).
+
 ## Serve the web workbench
 
 `spacelens serve` starts an authenticated HTTP host that serves the web UI and
