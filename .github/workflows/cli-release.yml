@@ -61,6 +61,7 @@ jobs:
           mkdir -p "${NAME}"
           install -m 755 "target/${{ matrix.target }}/release/spacelens" "${NAME}/spacelens"
           tar czf "${NAME}.tar.gz" "${NAME}"
+          rm -rf "${NAME}"
       - name: Package (zip)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -70,10 +71,15 @@ jobs:
           New-Item -ItemType Directory -Path $name | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/spacelens.exe" "$name/spacelens.exe"
           Compress-Archive -Path $name -DestinationPath "$name.zip"
+          Remove-Item -Recurse -Force $name
       - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.target }}
-          path: spacelens-*
+          # Only the archives — the staging directories must not leak into
+          # the release (gh release create dies uploading a directory).
+          path: |
+            spacelens-*.tar.gz
+            spacelens-*.zip
 
   release:
     name: Attach archives to the release
