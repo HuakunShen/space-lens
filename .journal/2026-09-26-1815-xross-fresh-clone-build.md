@@ -1,0 +1,7 @@
+# Make the Xross view build work from a fresh clone
+
+Plan 0083 Task 3's clean recursive Xross clone fetched Space Lens at `3f58f8d` with no inherited `node_modules` or `.svelte-kit`. `yarn install --immutable` succeeded, but `yarn --cwd apps/web build:xross-local` failed immediately because `apps/web/tsconfig.json` extends `.svelte-kit/tsconfig.json` and Yarn did not run the workspace `prepare` script. Running `yarn --cwd apps/web prepare` once made the same build pass, proving the missing generated config was the direct precondition.
+
+The Xross local and hosted build scripts now run `svelte-kit sync` themselves before Vite. This keeps the existing standalone build unchanged and makes the pack entry independent of lifecycle-script policy. The standalone Web build and both Xross local and hosted builds passed after the change; the final clean-clone repeat remains owed after this upstream commit is pushed and pinned.
+
+The same immutable Yarn install changed `packages/node/package.json` by converting its single CLI `bin` mapping to the equivalent string form and sorting optional dependencies. Leaving that drift would violate a later clean-vendor pack build. I aligned the tracked manifest with Yarn's normalized, semantically equivalent form; a second immutable install left only these intentional source changes. I did not copy generated `.svelte-kit` files or modify Xross's dirty M2 worktree.
