@@ -1,0 +1,970 @@
+{
+  "$comment": "Canonical successful read, approval and stream DTO vectors for Task 0. These are values at the view API boundary, not kkrpc frames. Byte encoding and stream framing remain transport-specific. recoveryScenarios are portable fake-facade call transcripts only; they do not prove native ledger persistence or authorization.",
+  "responses": {
+    "refyard": {
+      "context": {
+        "responseRef": "#/$defs/ViewContextV1",
+        "value": {
+          "contractMajor": 1,
+          "featureBits": ["refyard.read"],
+          "packId": "refyard",
+          "packDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "xrossVersion": "1.0.0",
+          "sourceClientIncarnation": "11111111111111111111111111111111",
+          "targetDeviceId": "xdev_1aaaaaaaaaaaaaaaaaaaaaaaaa",
+          "targetDisplayLabel": "Work Mac",
+          "targetPolicyRevision": "4",
+          "bridgeGeneration": "22222222222222222222222222222222",
+          "locale": "en"
+        }
+      },
+      "capabilities": {
+        "responseRef": "#/$defs/RefyardCapabilitiesV1",
+        "value": {
+          "apiMajor": 1,
+          "contractVersion": "1.0.0",
+          "serviceInstanceId": "srvc_refyard_01",
+          "host": { "kind": "macos", "version": "15.0" },
+          "git": {
+            "version": "2.46.0",
+            "features": {
+              "porcelainV2Status": true,
+              "worktreeListZ": true,
+              "catFileBatch": true,
+              "pushPorcelain": true,
+              "fetchPorcelain": true,
+              "objectFormats": ["sha1"]
+            }
+          },
+          "reads": [],
+          "operations": [],
+          "limits": {
+            "historyDefaultPageSize": 20,
+            "historyMaxPageSize": 100,
+            "patchMaxBytesPerFile": 65536,
+            "patchMaxLinesPerFile": 1000,
+            "objectMaxBytes": 1048576,
+            "logicalCacheMaxBytes": 10485760,
+            "previewTokenTtlSeconds": 300,
+            "readonlyDeadlineSeconds": 10,
+            "networkDeadlineSeconds": 30,
+            "hookDeadlineSeconds": 10,
+            "queuedOperationsPerActor": 8,
+            "concurrentGitProcesses": 4,
+            "concurrentReadersPerRepository": 8,
+            "eventRingMaxEvents": 256,
+            "eventRingMaxBytes": 1048576,
+            "pathSelectionMaxEntries": 256,
+            "historyTipsMax": 64,
+            "commitMessageMaxBytes": 65536,
+            "branchNameMaxLength": 255
+          },
+          "unavailable": []
+        }
+      },
+      "listWorkspaceRoots": {
+        "responseRef": "#/$defs/WorkspaceRootsPageV1",
+        "value": {
+          "items": [
+            { "workspaceRootId": "root_demo", "displayLabel": "Projects", "policyRevision": "7" }
+          ],
+          "nextCursor": "cur_page_2"
+        }
+      },
+      "getStatus": {
+        "responseRef": "#/$defs/StatusPageV1",
+        "value": {
+          "repositoryId": "repo_demo",
+          "worktreeId": "wt_main",
+          "snapshotId": "rsnapshot_00000000000000000000000000000001",
+          "readAtUnixMs": "1710000000000",
+          "head": {
+            "kind": "born",
+            "branchName": "main",
+            "oid": "0000000000000000000000000000000000000001",
+            "detached": false
+          },
+          "upstream": { "name": "refs/heads/main", "ahead": 1, "behind": 0 },
+          "operationInProgress": null,
+          "entries": [
+            {
+              "pathId": "path_src-main",
+              "displayPath": "src/main.rs",
+              "pathEncoding": "utf8",
+              "kind": "ordinary",
+              "indexStatus": " ",
+              "worktreeStatus": "M",
+              "originalPathId": null,
+              "originalDisplayPath": null,
+              "headOid": "0000000000000000000000000000000000000001",
+              "indexOid": "0000000000000000000000000000000000000001",
+              "headMode": "100644",
+              "indexMode": "100644",
+              "worktreeMode": "100644",
+              "submodule": null,
+              "unmergedStages": null
+            }
+          ],
+          "entryCount": 1,
+          "truncated": false,
+          "nextCursor": null
+        }
+      },
+      "listRepositories": {
+        "responseRef": "#/$defs/RepositoriesPageV1",
+        "value": {
+          "items": [
+            {
+              "repositoryId": "repo_engine",
+              "workspaceRootId": "root_projects",
+              "displayName": "engine",
+              "rootRelativeDisplayPath": "engine",
+              "objectFormat": "sha1",
+              "worktreeIds": ["wt_engine_main"],
+              "primaryWorktreeId": "wt_engine_main",
+              "head": { "kind": "unborn", "branchName": "main", "oid": null, "detached": false },
+              "operationInProgress": null
+            }
+          ],
+          "nextCursor": null
+        }
+      },
+      "historyPage": {
+        "responseRef": "#/$defs/HistoryPageV1",
+        "value": {
+          "repositoryId": "repo_demo",
+          "snapshotId": "rsnapshot_00000000000000000000000000000001",
+          "readAtUnixMs": "1710000000000",
+          "objectFormat": "sha1",
+          "shallow": false,
+          "topology": "continuous",
+          "commits": [
+            {
+              "oid": "0000000000000000000000000000000000000001",
+              "parents": [],
+              "subject": "Initial commit",
+              "authorName": "Ada",
+              "authorEmail": "ada@example.test",
+              "authoredAtUnixMs": "1700000000000",
+              "committedAtUnixMs": "1700000000000",
+              "refNames": ["refs/heads/main"],
+              "signed": false,
+              "boundary": false,
+              "missingParents": []
+            }
+          ],
+          "nextCursor": "cur_history_2",
+          "tipsMoved": false,
+          "truncated": false,
+          "detail": {
+            "oid": "0000000000000000000000000000000000000001",
+            "tree": "0000000000000000000000000000000000000002",
+            "parents": [],
+            "authorName": "Ada",
+            "authorEmail": "ada@example.test",
+            "authoredAtUnixMs": "1700000000000",
+            "committerName": "Ada",
+            "committerEmail": "ada@example.test",
+            "committedAtUnixMs": "1700000000000",
+            "subject": "Initial commit",
+            "body": "",
+            "encoding": null,
+            "signatureState": "unsigned"
+          }
+        }
+      },
+      "listRefs": {
+        "responseRef": "#/$defs/RefsPageV1",
+        "value": {
+          "snapshotId": "rsnapshot_00000000000000000000000000000001",
+          "repositoryId": "repo_demo",
+          "readAtUnixMs": "1710000000000",
+          "objectFormat": "sha1",
+          "head": {
+            "kind": "born",
+            "branchName": "main",
+            "oid": "0000000000000000000000000000000000000001",
+            "detached": false
+          },
+          "truncated": false,
+          "items": [
+            {
+              "kind": "localBranch",
+              "name": "main",
+              "fullName": "refs/heads/main",
+              "oid": "0000000000000000000000000000000000000001",
+              "isCurrent": true,
+              "upstream": { "fullName": "refs/remotes/origin/main", "ahead": 1, "behind": 0, "gone": false }
+            },
+            {
+              "kind": "remoteTracking",
+              "name": "origin/main",
+              "fullName": "refs/remotes/origin/main",
+              "oid": "0000000000000000000000000000000000000001",
+              "remoteName": "origin"
+            },
+            {
+              "kind": "tag",
+              "name": "v1.0.0",
+              "fullName": "refs/tags/v1.0.0",
+              "oid": "0000000000000000000000000000000000000003",
+              "annotated": false,
+              "targetOid": "0000000000000000000000000000000000000001"
+            }
+          ],
+          "nextCursor": null
+        }
+      },
+      "listWorktrees": {
+        "responseRef": "#/$defs/WorktreesSnapshotV1",
+        "value": {
+          "repositoryId": "repo_engine",
+          "snapshotId": "rsnapshot_00000000000000000000000000000002",
+          "readAtUnixMs": "1710000000000",
+          "worktrees": [
+            {
+              "worktreeId": "wt_engine_main",
+              "rootRelativeDisplayPath": ".",
+              "head": { "kind": "born", "branchName": "main", "oid": "0000000000000000000000000000000000000001", "detached": false },
+              "main": true,
+              "bare": false,
+              "detached": false,
+              "locked": false,
+              "lockReason": null,
+              "prunable": false
+            }
+          ]
+        }
+      },
+      "listStashes": {
+        "responseRef": "#/$defs/StashesPageV1",
+        "value": {
+          "repositoryId": "repo_engine",
+          "snapshotId": "rsnapshot_00000000000000000000000000000002",
+          "readAtUnixMs": "1710000000000",
+          "truncated": false,
+          "items": [{ "oid": "0000000000000000000000000000000000000004", "locator": "stash@{0}", "message": "WIP on main", "createdAtUnixMs": "1700000000000", "branchDisplay": "main" }],
+          "nextCursor": null
+        }
+      },
+      "listSubmodules": {
+        "responseRef": "#/$defs/SubmodulesPageV1",
+        "value": {
+          "repositoryId": "repo_engine",
+          "worktreeId": "wt_engine_main",
+          "snapshotId": "rsnapshot_00000000000000000000000000000002",
+          "readAtUnixMs": "1710000000000",
+          "truncated": false,
+          "items": [{ "worktreeId": "wt_engine_main", "pathId": "path_vendor-lib", "displayPath": "vendor/lib", "recordedOid": null, "indexOid": null, "actualOid": null, "state": "uninitialized", "urlEndpoint": { "kind": "network", "transport": "https", "hostDisplay": "example.test" }, "branchDisplay": null, "repositoryId": null }],
+          "nextCursor": null
+        }
+      },
+      "getPathPreviews": {
+        "responseRef": "#/$defs/PathPreviewsV1",
+        "value": {
+          "repositoryId": "repo_engine",
+          "worktreeId": "wt_engine_main",
+          "snapshotId": "rsnapshot_00000000000000000000000000000002",
+          "readAtUnixMs": "1710000000000",
+          "tokens": [{ "pathId": "path_readme", "previewToken": "pt_readme_01", "sizeBytes": "18", "contentKind": "text", "algorithm": "sha256", "expiresAtUnixMs": "1710000300000" }]
+        }
+      },
+      "readDiff": {
+        "responseRef": "#/$defs/DiffPageV1",
+        "value": {
+          "repositoryId": "repo_demo",
+          "worktreeId": "wt_main",
+          "snapshotId": "rsnapshot_00000000000000000000000000000001",
+          "readAtUnixMs": "1710000000000",
+          "query": { "kind": "unstaged", "worktreeId": "wt_main", "limit": 200 },
+          "files": [
+            {
+              "pathId": "path_src-main",
+              "displayPath": "src/main.rs",
+              "oldPathId": null,
+              "oldDisplayPath": null,
+              "changeKind": "modified",
+              "binary": false,
+              "submodule": false,
+              "insertions": 1,
+              "deletions": 1,
+              "oldMode": "100644",
+              "newMode": "100644",
+              "patch": {
+                "kind": "text",
+                "hunks": [
+                  {
+                    "oldStart": 1,
+                    "oldLines": 1,
+                    "newStart": 1,
+                    "newLines": 1,
+                    "header": "@@ -1,1 +1,1 @@",
+                    "lines": [
+                      { "kind": "deletion", "oldLine": 1, "newLine": null, "text": "old" },
+                      { "kind": "addition", "oldLine": null, "newLine": 1, "text": "new" }
+                    ]
+                  }
+                ],
+                "synthesized": false
+              }
+            }
+          ],
+          "stats": { "filesChanged": 1, "insertions": 1, "deletions": 1, "binaryFiles": 0 },
+          "truncated": false,
+          "nextCursor": null
+        }
+      },
+      "previewMutation": {
+        "responseRef": "#/$defs/MutationPreviewV1",
+        "value": {
+          "previewId": "rpreview_00000000000000000000000000000001",
+          "recoveryId": "rrecovery_00000000000000000000000000000011",
+          "targetKind": "worktree",
+          "resourceLabel": "main worktree",
+          "operationKind": "switchBranch",
+          "summaryKey": "mutation.switchBranch",
+          "displayPaths": [],
+          "requiresNativeApproval": true,
+          "expiresAtUnixMs": "1710000300000"
+        }
+      },
+      "getMutationJob": {
+        "responseRef": "#/$defs/MutationJobV1",
+        "values": [
+          {
+            "jobId": "rjob_00000000000000000000000000000002",
+            "state": "succeeded",
+            "sequence": "2",
+            "createdAtUnixMs": "1710000000000",
+            "updatedAtUnixMs": "1710000000002",
+            "problemCode": null
+          },
+          {
+            "jobId": "rjob_00000000000000000000000000000003",
+            "state": "failed",
+            "sequence": "3",
+            "createdAtUnixMs": "1710000000000",
+            "updatedAtUnixMs": "1710000000003",
+            "problemCode": "GitCommandFailed"
+          },
+          {
+            "jobId": "rjob_00000000000000000000000000000009",
+            "state": "succeeded",
+            "sequence": "2",
+            "createdAtUnixMs": "1710000000000",
+            "updatedAtUnixMs": "1710000000009",
+            "problemCode": null
+          }
+        ]
+      },
+      "listMutationRecoveries": {
+        "responseRef": "#/$defs/MutationRecoveryPageV1",
+        "value": {
+          "snapshotId": "rrecoverysnapshot_00000000000000000000000000000001",
+          "items": [
+            { "recoveryId": "rrecovery_0000000000000000000000000000000b", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000011", "writeFence": "blocked", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000011", "state": "accepted", "sequence": "0", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000011", "problemCode": null } } },
+            { "recoveryId": "rrecovery_0000000000000000000000000000000a", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000010", "writeFence": "blocked", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000010", "state": "running", "sequence": "1", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000010", "problemCode": null } } },
+            { "recoveryId": "rrecovery_00000000000000000000000000000009", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000009", "writeFence": "blocked", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000009", "state": "succeeded", "sequence": "2", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000009", "problemCode": null } } },
+            { "recoveryId": "rrecovery_00000000000000000000000000000008", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000008", "writeFence": "blocked", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000008", "state": "failed", "sequence": "3", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000008", "problemCode": "GitCommandFailed" } } },
+            { "recoveryId": "rrecovery_00000000000000000000000000000007", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000007", "writeFence": "blocked", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000007", "state": "needsAttention", "sequence": "4", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000007", "problemCode": "NeedsAttention" } } },
+            { "recoveryId": "rrecovery_00000000000000000000000000000006", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000006", "writeFence": "blocked", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000006", "state": "unknown", "sequence": "5", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000006", "problemCode": "UncertainOutcome" } } },
+            { "recoveryId": "rrecovery_00000000000000000000000000000005", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000005", "writeFence": "blocked", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000005", "state": "cancelled", "sequence": "6", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000005", "problemCode": null } } },
+            { "recoveryId": "rrecovery_00000000000000000000000000000004", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000004", "writeFence": "blocked", "state": { "kind": "unknown" } },
+            { "recoveryId": "rrecovery_00000000000000000000000000000003", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000003", "writeFence": "blocked", "state": { "kind": "notAccepted" } },
+            { "recoveryId": "rrecovery_00000000000000000000000000000002", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000002", "writeFence": "blocked", "state": { "kind": "reconciled" } },
+            { "recoveryId": "rrecovery_00000000000000000000000000000001", "operationKind": "stagePaths", "resourceLabel": "Workspace A", "summaryKey": "mutation.stagePaths", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000001", "writeFence": "blocked", "state": { "kind": "ownerAcceptedUnknown" } }
+          ],
+          "nextCursor": null
+        }
+      },
+      "requestMutationSubmission": {
+        "responseRef": "#/$defs/RefyardMutationSubmissionResultV1",
+        "values": [
+          {
+            "decision": "approved",
+            "outcome": {
+              "jobId": "rjob_00000000000000000000000000000001",
+              "state": "accepted",
+              "sequence": "0",
+              "createdAtUnixMs": "1710000000000",
+              "updatedAtUnixMs": "1710000000000",
+              "problemCode": null
+            }
+          },
+          { "decision": "denied" },
+          { "decision": "cancelled" }
+        ]
+      }
+    },
+    "spaceLens": {
+      "context": {
+        "responseRef": "#/$defs/ViewContextV1",
+        "value": {
+          "contractMajor": 1,
+          "featureBits": ["space-lens.scan"],
+          "packId": "space-lens",
+          "packDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "xrossVersion": "1.0.0",
+          "sourceClientIncarnation": "33333333333333333333333333333333",
+          "targetDeviceId": "xdev_2aaaaaaaaaaaaaaaaaaaaaaaaa",
+          "targetDisplayLabel": "Work Mac",
+          "targetPolicyRevision": "4",
+          "bridgeGeneration": "44444444444444444444444444444444",
+          "locale": "en"
+        }
+      },
+      "capabilities": {
+        "responseRef": "#/$defs/SpaceLensCapabilitiesV1",
+        "value": {
+          "apiMajor": 1,
+          "contractVersion": "1.0.0",
+          "scan": { "start": true, "cancel": true, "maxConcurrent": 2 },
+          "cleanup": { "plan": true, "execute": true, "mode": "trash" },
+          "providers": { "iCloud": "available" }
+        }
+      },
+      "listRoots": {
+        "responseRef": "#/$defs/SpaceRootsPageV1",
+        "value": {
+          "items": [
+            {
+              "rootId": "xroot_00000000000000000000000000000001",
+              "label": "Main volume",
+              "kind": "volume",
+              "sizeBytes": "100",
+              "usedBytes": "60",
+              "providerFeatures": ["filesystem", "git"]
+            }
+          ],
+          "nextCursor": "cur_roots_2"
+        }
+      },
+      "getScan": {
+        "responseRef": "#/$defs/ScanStatusV1",
+        "value": {
+          "scanId": "xscan_00000000000000000000000000000001",
+          "state": "ready",
+          "progressPermille": 1000,
+          "bytesVisited": "100",
+          "entriesVisited": "10",
+          "rootIds": ["xroot_00000000000000000000000000000001"],
+          "snapshotId": "xsnapshot_00000000000000000000000000000001",
+          "rootNodes": [{ "rootId": "xroot_00000000000000000000000000000001", "nodeId": "xnode_00000000000000000000000000000001" }],
+          "updatedAtUnixMs": "1710000000000"
+        }
+      },
+      "cancelScan": {
+        "responseRef": "#/$defs/ScanStatusV1",
+        "value": {
+          "scanId": "xscan_00000000000000000000000000000001",
+          "state": "cancelled",
+          "bytesVisited": "50",
+          "entriesVisited": "5",
+          "rootIds": ["xroot_00000000000000000000000000000001"],
+          "updatedAtUnixMs": "1710000000002"
+        }
+      },
+      "startScan": {
+        "responseRef": "#/$defs/ScanStatusV1",
+        "value": {
+          "scanId": "xscan_00000000000000000000000000000002",
+          "state": "scanning",
+          "progressPermille": 0,
+          "bytesVisited": "0",
+          "entriesVisited": "0",
+          "rootIds": ["xroot_00000000000000000000000000000001"],
+          "updatedAtUnixMs": "1710000000000"
+        }
+      },
+      "treeSlice": {
+        "responseRef": "#/$defs/TreeSliceV1",
+        "value": {
+          "kind": "treeSlice",
+          "snapshotId": "xsnapshot_00000000000000000000000000000001",
+          "focusNodeId": "xnode_00000000000000000000000000000001",
+          "tree": [{ "nodeId": "xnode_00000000000000000000000000000001", "parentId": "xnode_00000000000000000000000000000000", "name": "Projects", "displayPath": "Projects", "sizeBytes": "60", "depth": 0, "childCount": 1, "ignored": false, "collapsed": false, "hasChildren": true }],
+          "ancestors": [],
+          "totalBytes": "60",
+          "truncated": false,
+          "omittedBytes": "0",
+          "omittedCount": 0,
+          "generatedAtUnixMs": "1710000000000"
+        }
+      },
+      "childrenPage": {
+        "responseRef": "#/$defs/ChildrenPageV1",
+        "value": {
+          "kind": "childrenPage",
+          "snapshotId": "xsnapshot_00000000000000000000000000000001",
+          "nodeId": "xnode_00000000000000000000000000000001",
+          "items": [{ "nodeId": "xnode_00000000000000000000000000000002", "parentId": "xnode_00000000000000000000000000000001", "name": "repo", "displayPath": "Projects/repo", "sizeBytes": "60", "depth": 1, "childCount": 0, "ignored": false, "collapsed": false, "hasChildren": false }],
+          "nextCursor": null,
+          "total": 1,
+          "sort": "name"
+        }
+      },
+      "listAncestors": {
+        "responseRef": "#/$defs/AncestorsPageV1",
+        "value": {
+          "kind": "ancestorsPage",
+          "snapshotId": "xsnapshot_00000000000000000000000000000001",
+          "nodeId": "xnode_00000000000000000000000000000002",
+          "items": [{ "nodeId": "xnode_00000000000000000000000000000001", "parentId": "xnode_00000000000000000000000000000000", "name": "Projects", "displayPath": "Projects", "sizeBytes": "60", "depth": 0, "childCount": 1, "ignored": false, "collapsed": false, "hasChildren": true }],
+          "nextCursor": null
+        }
+      },
+      "listCandidates": {
+        "responseRef": "#/$defs/SpaceCandidatesPageV1",
+        "value": {
+          "items": [{ "nodeId": "xnode_00000000000000000000000000000003", "displayPath": "Projects/repo/node_modules", "sizeBytes": "40", "reasonCode": "node", "preset": "node" }],
+          "nextCursor": null
+        }
+      },
+      "previewCleanup": {
+        "responseRef": "#/$defs/CleanupPlanV1",
+        "value": {
+          "planId": "xplan_00000000000000000000000000000001",
+          "snapshotId": "xsnapshot_00000000000000000000000000000001",
+          "selected": [{ "nodeId": "xnode_00000000000000000000000000000003", "displayPath": "Projects/repo/node_modules", "sizeBytes": "40", "reasonCode": "node", "preset": "node" }],
+          "totalBytes": "40",
+          "mode": "trash",
+          "createdAtUnixMs": "1710000000000",
+          "expiresAtUnixMs": "1710000300000"
+        }
+      },
+      "planICloudEviction": {
+        "responseRef": "#/$defs/ICloudPlanSummaryV1",
+        "value": {
+          "planId": "xicloud_00000000000000000000000000000001",
+          "rootId": "xroot_00000000000000000000000000000001",
+          "snapshotId": "xsnapshot_00000000000000000000000000000001",
+          "selectedCount": 1,
+          "bytesToEvict": "25",
+          "expiresAtUnixMs": "1710000300000"
+        }
+      },
+      "getCleanupJob": {
+        "responseRef": "#/$defs/SpaceJobV1",
+        "value": {
+          "jobId": "xjob_00000000000000000000000000000003",
+          "state": "succeeded",
+          "sequence": "2",
+          "completedCount": 1,
+          "totalCount": 1,
+          "completedBytes": "40",
+          "totalBytes": "40",
+          "outcomes": [{ "code": "evicted", "count": 1 }]
+        }
+      },
+      "controlICloudEviction": {
+        "responseRef": "#/$defs/SpaceJobV1",
+        "value": {
+          "jobId": "xjob_00000000000000000000000000000001",
+          "state": "cancelled",
+          "sequence": "3",
+          "completedCount": 1,
+          "totalCount": 1,
+          "completedBytes": "40",
+          "totalBytes": "40",
+          "outcomes": [{ "code": "evicted", "count": 1 }]
+        }
+      },
+      "requestCleanupApproval": {
+        "responseRef": "#/$defs/CleanupApprovalResultV1",
+        "values": [
+          {
+            "decision": "approved",
+            "outcome": {
+              "jobId": "xjob_00000000000000000000000000000001",
+              "state": "accepted",
+              "sequence": "0",
+              "completedCount": 0,
+              "totalCount": 1,
+              "completedBytes": "0",
+              "totalBytes": "10",
+              "outcomes": []
+            }
+          },
+          { "decision": "denied" },
+          { "decision": "cancelled" }
+        ]
+      },
+      "requestICloudEvictionApproval": {
+        "responseRef": "#/$defs/ICloudEvictionApprovalResultV1",
+        "values": [
+          {
+            "decision": "approved",
+            "outcome": {
+              "jobId": "xjob_00000000000000000000000000000002",
+              "state": "accepted",
+              "sequence": "0",
+              "completedCount": 0,
+              "totalCount": 1,
+              "completedBytes": "0",
+              "totalBytes": "10",
+              "outcomes": []
+            }
+          },
+          { "decision": "denied" },
+          { "decision": "cancelled" }
+        ]
+      }
+    }
+  },
+  "recoveryScenarios": {
+    "exactPreviewCorrelation": {
+      "previews": [
+        { "previewId": "rpreview_00000000000000000000000000000001", "recoveryId": "rrecovery_00000000000000000000000000000011", "targetKind": "worktree", "resourceLabel": "main worktree", "operationKind": "switchBranch", "summaryKey": "mutation.switchBranch", "displayPaths": [], "requiresNativeApproval": true, "expiresAtUnixMs": "1710000300000" },
+        { "previewId": "rpreview_00000000000000000000000000000002", "recoveryId": "rrecovery_00000000000000000000000000000012", "targetKind": "worktree", "resourceLabel": "main worktree", "operationKind": "switchBranch", "summaryKey": "mutation.switchBranch", "displayPaths": [], "requiresNativeApproval": true, "expiresAtUnixMs": "1710000300000" }
+      ],
+      "rows": [
+        { "recoveryId": "rrecovery_00000000000000000000000000000012", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000002", "writeFence": "blocked", "state": { "kind": "unknown" } },
+        { "recoveryId": "rrecovery_00000000000000000000000000000011", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000001", "writeFence": "blocked", "state": { "kind": "notAccepted" } }
+      ]
+    },
+    "sameLabelReverseOrder": {
+      "nativeResources": { "rrecovery_00000000000000000000000000000011": "worktree-A", "rrecovery_00000000000000000000000000000012": "worktree-B" },
+      "firstPage": {
+        "snapshotId": "rrecoverysnapshot_00000000000000000000000000000007",
+        "items": [
+          { "recoveryId": "rrecovery_00000000000000000000000000000011", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000001", "writeFence": "released", "state": { "kind": "notAccepted" } },
+          { "recoveryId": "rrecovery_00000000000000000000000000000012", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000002", "writeFence": "blocked", "state": { "kind": "unknown" } }
+        ],
+        "nextCursor": null
+      },
+      "reversedPage": {
+        "snapshotId": "rrecoverysnapshot_00000000000000000000000000000007",
+        "items": [
+          { "recoveryId": "rrecovery_00000000000000000000000000000012", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000002", "writeFence": "blocked", "state": { "kind": "unknown" } },
+          { "recoveryId": "rrecovery_00000000000000000000000000000011", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000001", "writeFence": "released", "state": { "kind": "notAccepted" } }
+        ],
+        "nextCursor": null
+      }
+    },
+    "writeFenceDisposition": {
+      "nativeResource": "worktree-A",
+      "terminalObserved": {
+        "nativeEvidence": "terminal job observed; fresh target state and durable fence release pending",
+        "page": { "snapshotId": "rrecoverysnapshot_00000000000000000000000000000008", "items": [
+          { "recoveryId": "rrecovery_00000000000000000000000000000013", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000013", "writeFence": "blocked", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000013", "state": "succeeded", "sequence": "2", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000013", "problemCode": null } } }
+        ], "nextCursor": null }
+      },
+      "nativeReleased": {
+        "nativeEvidence": "exact terminal job durably observed; fresh target state checked; no other unresolved row for resource",
+        "page": { "snapshotId": "rrecoverysnapshot_00000000000000000000000000000009", "items": [
+          { "recoveryId": "rrecovery_00000000000000000000000000000013", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000013", "writeFence": "released", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000013", "state": "succeeded", "sequence": "2", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000013", "problemCode": null } } }
+        ], "nextCursor": null }
+      },
+      "otherRowStillBlocks": {
+        "nativeEvidence": "same native resource has a second unresolved local row",
+        "page": { "snapshotId": "rrecoverysnapshot_0000000000000000000000000000000a", "items": [
+          { "recoveryId": "rrecovery_00000000000000000000000000000013", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000013", "writeFence": "blocked", "state": { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000013", "state": "succeeded", "sequence": "2", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000013", "problemCode": null } } },
+          { "recoveryId": "rrecovery_00000000000000000000000000000014", "operationKind": "switchBranch", "resourceLabel": "main worktree", "summaryKey": "mutation.switchBranch", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000014", "writeFence": "blocked", "state": { "kind": "unknown" } }
+        ], "nextCursor": null }
+      }
+    },
+    "restartStable": {
+      "request": { "query": { "limit": 20 } },
+      "first": {
+        "scope": {
+          "targetDeviceId": "xdev_1aaaaaaaaaaaaaaaaaaaaaaaaa",
+          "hostProcessIncarnation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bridgeGeneration": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "page": {
+          "snapshotId": "rrecoverysnapshot_00000000000000000000000000000002",
+          "items": [{
+            "recoveryId": "rrecovery_0000000000000000000000000000000c",
+            "operationKind": "stagePaths",
+            "resourceLabel": "Workspace A",
+            "summaryKey": "mutation.stagePaths",
+            "createdAtUnixMs": "1710000000000",
+            "updatedAtUnixMs": "1710000000012",
+            "writeFence": "blocked",
+            "state": { "kind": "unknown" }
+          }],
+          "nextCursor": null
+        }
+      },
+      "reopened": {
+        "scope": {
+          "targetDeviceId": "xdev_1aaaaaaaaaaaaaaaaaaaaaaaaa",
+          "hostProcessIncarnation": "cccccccccccccccccccccccccccccccc",
+          "bridgeGeneration": "dddddddddddddddddddddddddddddddd"
+        },
+        "page": {
+          "snapshotId": "rrecoverysnapshot_00000000000000000000000000000003",
+          "items": [{
+            "recoveryId": "rrecovery_0000000000000000000000000000000c",
+            "operationKind": "stagePaths",
+            "resourceLabel": "Workspace A",
+            "summaryKey": "mutation.stagePaths",
+            "createdAtUnixMs": "1710000000000",
+            "updatedAtUnixMs": "1710000000012",
+            "writeFence": "blocked",
+            "state": { "kind": "unknown" }
+          }],
+          "nextCursor": null
+        }
+      }
+    },
+    "otherTarget": {
+      "request": { "query": { "limit": 20 } },
+      "targetA": {
+        "scope": {
+          "targetDeviceId": "xdev_1aaaaaaaaaaaaaaaaaaaaaaaaa",
+          "hostProcessIncarnation": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "bridgeGeneration": "ffffffffffffffffffffffffffffffff"
+        },
+        "page": {
+          "snapshotId": "rrecoverysnapshot_00000000000000000000000000000004",
+          "items": [{
+            "recoveryId": "rrecovery_0000000000000000000000000000000d",
+            "operationKind": "stagePaths",
+            "resourceLabel": "Workspace A",
+            "summaryKey": "mutation.stagePaths",
+            "createdAtUnixMs": "1710000000000",
+            "updatedAtUnixMs": "1710000000013",
+            "writeFence": "blocked",
+            "state": { "kind": "unknown" }
+          }],
+          "nextCursor": null
+        }
+      },
+      "targetB": {
+        "scope": {
+          "targetDeviceId": "xdev_1bbbbbbbbbbbbbbbbbbbbbbbbb",
+          "hostProcessIncarnation": "11111111111111111111111111111111",
+          "bridgeGeneration": "22222222222222222222222222222222"
+        },
+        "page": {
+          "snapshotId": "rrecoverysnapshot_00000000000000000000000000000005",
+          "items": [{
+            "recoveryId": "rrecovery_0000000000000000000000000000000e",
+            "operationKind": "stagePaths",
+            "resourceLabel": "Workspace B",
+            "summaryKey": "mutation.stagePaths",
+            "createdAtUnixMs": "1710000000000",
+            "updatedAtUnixMs": "1710000000014",
+            "writeFence": "blocked",
+            "state": { "kind": "unknown" }
+          }],
+          "nextCursor": null
+        }
+      }
+    },
+    "cursorScope": {
+      "scope": {
+        "targetDeviceId": "xdev_1aaaaaaaaaaaaaaaaaaaaaaaaa",
+        "hostProcessIncarnation": "33333333333333333333333333333333",
+        "bridgeGeneration": "44444444444444444444444444444444"
+      },
+      "firstRequest": { "query": { "limit": 1 } },
+      "firstPage": {
+        "snapshotId": "rrecoverysnapshot_00000000000000000000000000000006",
+        "items": [{
+          "recoveryId": "rrecovery_0000000000000000000000000000000f",
+          "operationKind": "stagePaths",
+          "resourceLabel": "Workspace A",
+          "summaryKey": "mutation.stagePaths",
+          "createdAtUnixMs": "1710000000000",
+          "updatedAtUnixMs": "1710000000015",
+          "writeFence": "blocked",
+          "state": { "kind": "unknown" }
+        }],
+        "nextCursor": "cur_recovery_page_2"
+      },
+      "continuationRequest": { "query": { "cursor": "cur_recovery_page_2", "limit": 1 } },
+      "continuationPage": {
+        "snapshotId": "rrecoverysnapshot_00000000000000000000000000000006",
+        "items": [{
+          "recoveryId": "rrecovery_00000000000000000000000000000010",
+          "operationKind": "stagePaths",
+          "resourceLabel": "Workspace A",
+          "summaryKey": "mutation.stagePaths",
+          "createdAtUnixMs": "1710000000000",
+          "updatedAtUnixMs": "1710000000016",
+          "writeFence": "blocked",
+          "state": { "kind": "unknown" }
+        }],
+        "nextCursor": null
+      },
+      "staleRequest": { "query": { "cursor": "cur_recovery_page_2", "limit": 1 } },
+      "changedGenerationScope": {
+        "targetDeviceId": "xdev_1aaaaaaaaaaaaaaaaaaaaaaaaa",
+        "hostProcessIncarnation": "55555555555555555555555555555555",
+        "bridgeGeneration": "66666666666666666666666666666666"
+      },
+      "changedTargetScope": {
+        "targetDeviceId": "xdev_1bbbbbbbbbbbbbbbbbbbbbbbbb",
+        "hostProcessIncarnation": "77777777777777777777777777777777",
+        "bridgeGeneration": "88888888888888888888888888888888"
+      },
+      "staleError": { "domain": "host", "code": "StaleGeneration", "retryable": false, "parameters": [] }
+    },
+    "reattachAndConclusions": {
+      "scope": {
+        "targetDeviceId": "xdev_1aaaaaaaaaaaaaaaaaaaaaaaaa",
+        "hostProcessIncarnation": "99999999999999999999999999999999",
+        "bridgeGeneration": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "listRequest": { "query": { "limit": 20 } },
+      "recoveryId": "rrecovery_00000000000000000000000000000009",
+      "getMutationJobRequest": { "jobId": "rjob_00000000000000000000000000000009" },
+      "watchMutationRequest": { "jobId": "rjob_00000000000000000000000000000009" },
+      "uniformUnknown": {
+        "observations": [
+          { "source": "remoteMissing", "state": { "kind": "unknown" } },
+          { "source": "expired", "state": { "kind": "unknown" } },
+          { "source": "crossActor", "state": { "kind": "unknown" } },
+          { "source": "pruned", "state": { "kind": "unknown" } },
+          { "source": "lookupUnavailable", "state": { "kind": "unknown" } },
+          { "source": "transportTimeout", "state": { "kind": "unknown" } }
+        ]
+      },
+      "recoveryConclusions": [
+        { "state": { "kind": "unknown" }, "freshPreviewAllowed": false, "success": false },
+        { "state": { "kind": "notAccepted" }, "freshPreviewAllowed": true, "success": false },
+        { "state": { "kind": "reconciled" }, "freshPreviewAllowed": true, "success": false },
+        { "state": { "kind": "ownerAcceptedUnknown" }, "freshPreviewAllowed": true, "success": false }
+      ]
+    }
+  },
+  "streamVariants": {
+    "refyard": {
+      "watchRepository": {
+        "responseRef": "#/$defs/SequencedRefyardRepositoryEventV1",
+        "values": [
+          { "kind": "event", "sequence": "1", "value": { "kind": "snapshotChanged", "snapshotId": "rsnapshot_00000000000000000000000000000001" } },
+          { "kind": "gap", "requestedAfter": "1", "oldestAvailable": "3" },
+          { "kind": "terminal", "sequence": "3", "outcome": "completed" },
+          { "kind": "terminal", "sequence": "3", "outcome": "cancelled" },
+          { "kind": "terminal", "sequence": "3", "outcome": "failed" }
+        ]
+      },
+      "watchMutation": {
+        "responseRef": "#/$defs/SequencedRefyardMutationEventV1",
+        "values": [
+          {
+            "kind": "event",
+            "sequence": "1",
+            "value": {
+              "jobId": "rjob_00000000000000000000000000000001",
+              "state": "running",
+              "sequence": "1",
+              "createdAtUnixMs": "1710000000000",
+              "updatedAtUnixMs": "1710000000001",
+              "problemCode": null
+            }
+          },
+          { "kind": "gap", "requestedAfter": "1", "oldestAvailable": "3" },
+          { "kind": "terminal", "sequence": "3", "outcome": "completed" },
+          { "kind": "terminal", "sequence": "3", "outcome": "cancelled" },
+          { "kind": "terminal", "sequence": "3", "outcome": "failed" }
+        ]
+      }
+    },
+    "spaceLens": {
+      "watchScan": {
+        "responseRef": "#/$defs/SequencedSpaceScanEventV1",
+        "values": [
+          {
+            "kind": "event",
+            "sequence": "1",
+            "value": {
+              "kind": "progress",
+              "scan": {
+                "scanId": "xscan_00000000000000000000000000000001",
+                "state": "scanning",
+                "progressPermille": 500,
+                "bytesVisited": "50",
+                "entriesVisited": "5",
+                "rootIds": ["xroot_00000000000000000000000000000001"],
+                "updatedAtUnixMs": "1710000000000"
+              }
+            }
+          },
+          {
+            "kind": "event",
+            "sequence": "2",
+            "value": {
+              "kind": "ready",
+              "scan": {
+                "scanId": "xscan_00000000000000000000000000000001",
+                "state": "ready",
+                "progressPermille": 1000,
+                "bytesVisited": "100",
+                "entriesVisited": "10",
+                "rootIds": ["xroot_00000000000000000000000000000001"],
+                "snapshotId": "xsnapshot_00000000000000000000000000000001",
+                "rootNodes": [{ "rootId": "xroot_00000000000000000000000000000001", "nodeId": "xnode_00000000000000000000000000000001" }],
+                "updatedAtUnixMs": "1710000000001"
+              }
+            }
+          },
+          {
+            "kind": "event",
+            "sequence": "3",
+            "value": {
+              "kind": "cancelled",
+              "scan": {
+                "scanId": "xscan_00000000000000000000000000000001",
+                "state": "cancelled",
+                "bytesVisited": "50",
+                "entriesVisited": "5",
+                "rootIds": ["xroot_00000000000000000000000000000001"],
+                "updatedAtUnixMs": "1710000000002"
+              }
+            }
+          },
+          {
+            "kind": "event",
+            "sequence": "4",
+            "value": {
+              "kind": "failed",
+              "scan": {
+                "scanId": "xscan_00000000000000000000000000000001",
+                "state": "failed",
+                "bytesVisited": "50",
+                "entriesVisited": "5",
+                "rootIds": ["xroot_00000000000000000000000000000001"],
+                "updatedAtUnixMs": "1710000000003"
+              },
+              "error": "unavailable"
+            }
+          },
+          { "kind": "gap", "requestedAfter": "1", "oldestAvailable": "5" },
+          { "kind": "terminal", "sequence": "5", "outcome": "completed" },
+          { "kind": "terminal", "sequence": "5", "outcome": "cancelled" },
+          { "kind": "terminal", "sequence": "5", "outcome": "failed" }
+        ]
+      },
+      "watchCleanup": {
+        "responseRef": "#/$defs/SequencedSpaceCleanupEventV1",
+        "values": [
+          {
+            "kind": "event",
+            "sequence": "1",
+            "value": {
+              "kind": "jobUpdated",
+              "job": {
+                "jobId": "xjob_00000000000000000000000000000001",
+                "state": "succeeded",
+                "sequence": "1",
+                "completedCount": 1,
+                "totalCount": 1,
+                "completedBytes": "10",
+                "totalBytes": "10",
+                "outcomes": [{ "code": "evicted", "count": 1 }]
+              }
+            }
+          },
+          { "kind": "gap", "requestedAfter": "1", "oldestAvailable": "3" },
+          { "kind": "terminal", "sequence": "3", "outcome": "completed" },
+          { "kind": "terminal", "sequence": "3", "outcome": "cancelled" },
+          { "kind": "terminal", "sequence": "3", "outcome": "failed" }
+        ]
+      }
+    }
+  }
+}

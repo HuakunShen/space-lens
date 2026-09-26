@@ -148,6 +148,8 @@ docs
 .svelte-kit-desktop
 /apps/web/build
 /apps/web/build-desktop
+/apps/web/build-xross-local
+/apps/web/build-xross-hosted
 /apps/desktop/src-tauri/target
 /apps/desktop/src-tauri/gen
 *.vsix

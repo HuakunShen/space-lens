@@ -1,10 +1,11 @@
 <script lang="ts">
   import { LoaderCircle, Octagon, PackageOpen } from "@lucide/svelte";
   import type { ScanStatus } from "../../types";
-  import { formatBytes, formatPercent } from "../../lib/format";
+  import { formatPercent } from "../../lib/format";
   import { Badge } from "../ui/badge/index";
   import { Button } from "../ui/button/index";
   import { Progress } from "../ui/progress/index";
+  import { useLensI18n } from "../../lib/i18n/context.svelte";
 
   interface Props {
     status: ScanStatus | null;
@@ -21,6 +22,7 @@
     onOpenCollector,
     onCancel,
   }: Props = $props();
+  const i18n = useLensI18n();
 </script>
 
 <footer class="border-t bg-background/55 px-4 py-2 backdrop-blur-xl">
@@ -31,15 +33,15 @@
           <LoaderCircle class="size-4 animate-spin text-primary" />
         {/if}
         <span class="truncate text-muted-foreground"
-          >{status?.message ?? "Ready"}</span
+          >{status?.message || i18n.t('lens.status.ready')}</span
         >
         {#if status?.state === "scanning"}
           <span class="shrink-0 text-muted-foreground">
-            {formatBytes(status.bytesScanned)}
+            {i18n.bytes(status.bytesScanned)}
           </span>
         {/if}
         {#if status?.progress !== null && status?.progress !== undefined}
-          <Badge variant="secondary">{formatPercent(status.progress)}</Badge>
+          <Badge variant="secondary">{formatPercent(status.progress, i18n.locale)}</Badge>
         {/if}
       </div>
       {#if status?.progress !== null && status?.progress !== undefined}
@@ -47,7 +49,7 @@
       {:else if status?.state === "scanning"}
         <Progress indeterminate class="max-w-md" />
         <p class="truncate font-mono text-xs text-muted-foreground">
-          {status.currentPath ?? "Preparing scanner..."}
+          {status.currentPath ?? i18n.t('lens.status.preparing')}
         </p>
       {/if}
     </div>
@@ -59,7 +61,7 @@
       class="justify-start"
     >
       <PackageOpen class="size-4" />
-      Collector: {collectorCount} / {formatBytes(collectorTotal)}
+      {i18n.t('lens.status.collector', { count: i18n.count(collectorCount), size: i18n.bytes(collectorTotal) })}
     </Button>
     <Button
       variant="ghost"
@@ -69,7 +71,7 @@
       disabled={status?.state !== "scanning"}
     >
       <Octagon class="size-4" />
-      Stop
+      {i18n.t('lens.status.stop')}
     </Button>
   </div>
 </footer>

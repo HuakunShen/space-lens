@@ -1,16 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import {
-    BreadcrumbBar,
-    ChildList,
-    CollectorPanel,
     ConnectionPanel,
     ScanPicker,
     StateBanner,
-    StatusBar,
-    SunburstChart,
   } from '@space-lens/web-ui'
-  import { Search } from '@lucide/svelte'
+  import WorkbenchSurface from '../lib/workbench/WorkbenchSurface.svelte'
   import type { CollectorEntry, ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
   import { ServiceError } from '@space-lens/client'
   import {
@@ -39,9 +34,6 @@
   const hosted = $derived(
     workbench.resolvedUrl !== null && !workbench.sameOrigin && workbench.phase !== 'ready',
   )
-  const ancestors = $derived(workbench.slice === null ? [] : [...workbench.slice.ancestors, workbench.slice.focusNode])
-  const collectedIds = $derived(new Set(workbench.collector.map((entry) => entry.nodeId)))
-  const collectorTotal = $derived(workbench.collector.reduce((total, entry) => total + entry.size, 0))
   const targets = $derived.by<ScanTarget[]>(() => {
     const current = workbench.targets ?? []
     const recentList = loadRecentTargets() ?? []
@@ -309,67 +301,24 @@
       />
       <StateBanner state="loading" title="Scanning {workbench.status.label ?? '…'}" detail="The engine reports no progress; this finishes when the tree is complete." />
     {:else if workbench.status.state === 'ready'}
-      <header
-      data-tauri-drag-region
-      class={[
-        "flex h-12 shrink-0 items-center justify-between border-b",
-        __SPACLENS_DESKTOP__ ? "pl-[140px] pr-4" : "px-4",
-      ]}
-    >
-        <div class="flex items-center gap-2.5">
-          <div class="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Search size={15} />
-          </div>
-          <span class="font-semibold">Space Lens</span>
-        </div>
-        <span class="rounded-full border px-2 py-0.5 text-xs">{__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}</span>
-      </header>
-      {#if workbench.error}
-        <StateBanner state="error" title="Something failed" detail={workbench.error} />
-      {/if}
-      {#if workbench.slice?.truncated}
-        <StateBanner state="truncated" title="Part of this view is collapsed" detail="{workbench.slice.omittedCount} children were summarized; open a folder to go deeper." />
-      {/if}
-      {#if !__SPACLENS_DESKTOP__ && workbench.streamState !== 'live'}
-        <StateBanner state="disconnected" title="no live updates ({workbench.streamState})" detail="Data still loads on demand." />
-      {/if}
-      <div class="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div class="flex min-w-0 flex-col items-center gap-3">
-          <SunburstChart
-            tree={workbench.slice?.tree ?? null}
-            focusNode={workbench.slice?.focusNode ?? null}
-            hoveredId={workbench.hoveredId}
-            collectedIds={collectedIds}
-            onHover={(id) => (workbench.hoveredId = id)}
-            onOpen={(node) => void focus(node)}
-            onContext={(node, x, y) => collect(node)}
-          />
-          <BreadcrumbBar items={ancestors} onSelect={(node) => void focus(node)} />
-        </div>
-        <ChildList
-          items={workbench.items}
-          hoveredId={workbench.hoveredId}
-          collectedIds={collectedIds}
-          onHover={(id) => (workbench.hoveredId = id)}
-          onOpen={(node) => void focus(node)}
-          onCollect={(node) => collect(node)}
-          onContext={(node) => collect(node)}
-        />
-      </div>
-      <StatusBar
+      <WorkbenchSurface
+        mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
         status={workbench.status}
-        collectorTotal={collectorTotal}
-        collectorCount={workbench.collector.length}
-        onOpenCollector={() => (collectorOpen = true)}
-        onCancel={() => void cancelScan()}
-      />
-      <CollectorPanel
-        open={collectorOpen}
-        entries={workbench.collector}
-        totalSize={collectorTotal}
+        slice={workbench.slice}
+        items={workbench.items}
+        hoveredId={workbench.hoveredId}
+        collector={workbench.collector}
+        {collectorOpen}
         deleting={workbench.deleting}
-        onClose={() => (collectorOpen = false)}
-        onRemove={(id) => (workbench.collector = workbench.collector.filter((entry) => entry.id !== id))}
+        error={workbench.error}
+        streamState={workbench.streamState}
+        onHover={(id) => (workbench.hoveredId = id)}
+        onFocus={(node) => void focus(node)}
+        onCollect={(node) => collect(node)}
+        onCancel={() => void cancelScan()}
+        onOpenCollector={() => (collectorOpen = true)}
+        onCloseCollector={() => (collectorOpen = false)}
+        onRemoveCollector={(id) => (workbench.collector = workbench.collector.filter((entry) => entry.id !== id))}
         onDelete={() => void deleteCollected()}
       />
     {:else if workbench.status.state === 'failed'}

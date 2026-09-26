@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useLensI18n } from '../../lib/i18n/context.svelte'
   /**
    * Full-width connection surface shown when no backend session exists.
    * Pure presentation: the page owns discovery, tickets, and the exchange.
@@ -30,12 +31,13 @@
     onPassword,
     onConnect,
   }: Props = $props()
+  const i18n = useLensI18n()
 </script>
 
 <div class="mx-auto flex min-h-screen w-full max-w-xl flex-col items-center justify-center gap-6 p-6 pt-14">
   <div class="flex flex-col items-center gap-2 text-center">
     <h1 class="text-2xl font-semibold tracking-tight">Space Lens</h1>
-    <p class="text-muted-foreground text-sm">Pair with a running <code class="font-mono">spacelens serve</code> to see your disk.</p>
+    <p class="text-muted-foreground text-sm">{i18n.t('lens.connection.intro')}</p>
   </div>
 
   <form
@@ -47,7 +49,7 @@
   >
     <div class="flex flex-col gap-4">
       <label class="flex flex-col gap-1.5">
-        <span class="text-sm font-medium">Server address</span>
+        <span class="text-sm font-medium">{i18n.t('lens.connection.address')}</span>
         <input
           class="border-input bg-background h-9 rounded-md border px-3 font-mono text-sm"
           placeholder="http://127.0.0.1:9420"
@@ -55,15 +57,15 @@
           oninput={(event) => onBaseUrl(event.currentTarget.value)}
         />
         <span class="text-muted-foreground text-xs">
-          {sameOrigin ? 'same origin' : 'remote address'} — printed by <code class="font-mono">spacelens serve</code>
+          {i18n.t(sameOrigin ? 'lens.connection.sameOrigin' : 'lens.connection.remote')} — {i18n.t('lens.connection.printedBy')}
         </span>
       </label>
 
       <label class="flex flex-col gap-1.5">
-        <span class="text-sm font-medium">Pairing ticket</span>
+        <span class="text-sm font-medium">{i18n.t('lens.connection.ticket')}</span>
         <input
           class="border-input bg-background h-9 rounded-md border px-3 font-mono text-sm"
-          placeholder="paste the ?pair=… ticket or the whole URL"
+          placeholder={i18n.t('lens.connection.ticketHint')}
           value={ticket}
           oninput={(event) => onTicket(event.currentTarget.value)}
         />
@@ -71,11 +73,11 @@
 
       {#if hosted}
         <label class="flex flex-col gap-1.5">
-          <span class="text-sm font-medium">Hosted password</span>
+          <span class="text-sm font-medium">{i18n.t('lens.connection.password')}</span>
           <input
             class="border-input bg-background h-9 rounded-md border px-3 text-sm"
             type="password"
-            placeholder="required for non-loopback UIs"
+            placeholder={i18n.t('lens.connection.passwordHint')}
             value={password}
             oninput={(event) => onPassword(event.currentTarget.value)}
           />
@@ -91,7 +93,7 @@
         type="submit"
         disabled={phase === 'connecting'}
       >
-        {phase === 'connecting' ? 'Connecting…' : 'Connect'}
+        {i18n.t(phase === 'connecting' ? 'lens.connection.connecting' : 'lens.connection.connect')}
       </button>
     </div>
   </form>

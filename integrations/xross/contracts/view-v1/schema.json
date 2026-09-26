@@ -1,0 +1,1629 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xross.one/schemas/view-v1.json",
+  "title": "Xross Local View Contract v1",
+  "$comment": "Portable DTO schema. A host validator must enforce the complete x-xross-* vocabulary in addition to standard JSON Schema keywords. Reject any unpaired UTF-16 surrogate in any parsed string before schema acceptance or byte accounting, including escaped lone surrogates; UTF-8 encoders must not replace them. x-xross-maxUtf8Bytes is a UTF-8 byte bound; x-xross-maxEncodedBytes is the RFC 8785 JCS UTF-8 byte length of the complete instance at that schema node, checked after standard schema and non-size Xross constraints. This is a portable DTO-value bound, not a transport limit. The transport annotation's adapter application-byte scopes are exact: local WebView counts the complete UTF-8 serialized kkrpc message at the native/WebView adapter seam (including the kkrpc envelope); hosted fetch request/response count exact HTTP entity-body bytes (zero-argument no-body requests count zero); hosted NDJSON streamEventBytes counts each record's raw UTF-8 bytes including its LF or CRLF delimiter when present, and counts an unterminated final record without a delimiter. Enforce raw message/body byte ceilings before JSON parsing; HTTP headers and lower-layer TLS/OS IPC framing are excluded. u64 wire values use canonical decimal text because WebView JSON cannot preserve arbitrary JavaScript integer precision. The catalog's request schema describes one DTO argument, not a kkrpc frame: the native host must enforce exactly argumentCount entries in the incoming args array, then validate the single request object. Optional object fields are absent, never null or undefined. Stream event payloads require per-yield validation because kkrpc's output hook sees the AsyncIterable object, not each yielded event.",
+  "x-xross-transport-limits": {
+    "requestBytes": 65536,
+    "responseBytes": 1048576,
+    "streamEventBytes": 65536,
+    "byteScopes": {
+      "localWebView": "Complete UTF-8 serialized kkrpc message at the native/WebView adapter seam, including kkrpc envelope metadata.",
+      "hostedFetchRequest": "Exact RequestInit.body bytes exposed to Fetch; zero-argument methods with no body count zero bytes.",
+      "hostedFetchResponse": "Exact Response.body bytes exposed by Fetch for unary success/error responses, including typed error bodies.",
+      "hostedFetchStreamEvent": "Exact raw UTF-8 bytes of one NDJSON record, including its LF or CRLF delimiter when present; an unterminated final record has no delimiter byte."
+    }
+  },
+  "x-xross-method-errors": "#/$defs/ViewErrorV1",
+  "x-xross-call-encoding": "kkrpc-call-args-array; exact arity from argumentCount; request schema validates args[0] only; zero-argument methods require [] and have request:null",
+  "x-xross-methods": {
+    "refyard": {
+      "context": { "mode": "unary", "argumentCount": 0, "request": null, "response": "#/$defs/ViewContextV1" },
+      "capabilities": { "mode": "unary", "argumentCount": 0, "request": null, "response": "#/$defs/RefyardCapabilitiesV1" },
+      "listWorkspaceRoots": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ListWorkspaceRootsRequestV1", "response": "#/$defs/WorkspaceRootsPageV1" },
+      "listRepositories": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ListRepositoriesRequestV1", "response": "#/$defs/RepositoriesPageV1" },
+      "getStatus": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/GetStatusRequestV1", "response": "#/$defs/StatusPageV1" },
+      "historyPage": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/HistoryPageRequestV1", "response": "#/$defs/HistoryPageV1" },
+      "listRefs": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ListRefsRequestV1", "response": "#/$defs/RefsPageV1" },
+      "listWorktrees": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/RepositoryRequestV1", "response": "#/$defs/WorktreesSnapshotV1" },
+      "listStashes": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ListStashesRequestV1", "response": "#/$defs/StashesPageV1" },
+      "listSubmodules": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ListSubmodulesRequestV1", "response": "#/$defs/SubmodulesPageV1" },
+      "getPathPreviews": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/GetPathPreviewsRequestV1", "response": "#/$defs/PathPreviewsV1" },
+      "readDiff": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ReadDiffRequestV1", "response": "#/$defs/DiffPageV1" },
+      "previewMutation": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/PreviewMutationRequestV1", "response": "#/$defs/MutationPreviewV1" },
+      "requestMutationSubmission": { "mode": "nativeApproval", "argumentCount": 1, "request": "#/$defs/RequestMutationSubmissionRequestV1", "response": "#/$defs/RefyardMutationSubmissionResultV1" },
+      "getMutationJob": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/GetMutationJobRequestV1", "response": "#/$defs/MutationJobV1" },
+      "listMutationRecoveries": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ListMutationRecoveriesRequestV1", "response": "#/$defs/MutationRecoveryPageV1" },
+      "watchRepository": { "mode": "serverStream", "argumentCount": 1, "request": "#/$defs/WatchRepositoryRequestV1", "response": "#/$defs/SequencedRefyardRepositoryEventV1" },
+      "watchMutation": { "mode": "serverStream", "argumentCount": 1, "request": "#/$defs/WatchMutationRequestV1", "response": "#/$defs/SequencedRefyardMutationEventV1" }
+    },
+    "spaceLens": {
+      "context": { "mode": "unary", "argumentCount": 0, "request": null, "response": "#/$defs/ViewContextV1" },
+      "capabilities": { "mode": "unary", "argumentCount": 0, "request": null, "response": "#/$defs/SpaceLensCapabilitiesV1" },
+      "listRoots": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ListRootsRequestV1", "response": "#/$defs/SpaceRootsPageV1" },
+      "startScan": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/StartScanRequestV1", "response": "#/$defs/ScanStatusV1" },
+      "getScan": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/GetScanRequestV1", "response": "#/$defs/ScanStatusV1" },
+      "watchScan": { "mode": "serverStream", "argumentCount": 1, "request": "#/$defs/WatchScanRequestV1", "response": "#/$defs/SequencedSpaceScanEventV1" },
+      "cancelScan": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/CancelScanRequestV1", "response": "#/$defs/ScanStatusV1" },
+      "treeSlice": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/TreeSliceRequestV1", "response": "#/$defs/TreeSliceV1" },
+      "childrenPage": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ChildrenPageRequestV1", "response": "#/$defs/ChildrenPageV1" },
+      "listAncestors": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ListAncestorsRequestV1", "response": "#/$defs/AncestorsPageV1" },
+      "listCandidates": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ListCandidatesRequestV1", "response": "#/$defs/SpaceCandidatesPageV1" },
+      "previewCleanup": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/PreviewCleanupRequestV1", "response": "#/$defs/CleanupPlanV1" },
+      "requestCleanupApproval": { "mode": "nativeApproval", "argumentCount": 1, "request": "#/$defs/RequestCleanupApprovalRequestV1", "response": "#/$defs/CleanupApprovalResultV1" },
+      "planICloudEviction": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/PlanICloudEvictionRequestV1", "response": "#/$defs/ICloudPlanSummaryV1" },
+      "requestICloudEvictionApproval": { "mode": "nativeApproval", "argumentCount": 1, "request": "#/$defs/RequestICloudEvictionApprovalRequestV1", "response": "#/$defs/ICloudEvictionApprovalResultV1" },
+      "getCleanupJob": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/GetCleanupJobRequestV1", "response": "#/$defs/SpaceJobV1" },
+      "watchCleanup": { "mode": "serverStream", "argumentCount": 1, "request": "#/$defs/WatchCleanupRequestV1", "response": "#/$defs/SequencedSpaceCleanupEventV1" },
+      "controlICloudEviction": { "mode": "unary", "argumentCount": 1, "request": "#/$defs/ControlICloudEvictionRequestV1", "response": "#/$defs/SpaceJobV1" }
+    }
+  },
+  "$defs": {
+    "DeviceIdV1": {
+      "type": "string",
+      "pattern": "^xdev_[0-7][0-9a-hjkmnp-tv-z]{25}$",
+      "not": { "const": "xdev_00000000000000000000000000" },
+      "description": "Canonical Display spelling of the authenticated nonzero 128-bit Xross DeviceId."
+    },
+    "ServiceInstanceIdV1": {
+      "type": "string",
+      "pattern": "^srvc_[A-Za-z0-9_-]{1,96}$",
+      "description": "Pinned Refyard service-process identity; changes across restarts."
+    },
+    "WorkspaceRootIdV1": {
+      "type": "string",
+      "pattern": "^root_[A-Za-z0-9_-]{1,96}$",
+      "description": "Target-minted Refyard workspace root id; not a filesystem path or authority by possession."
+    },
+    "RepositoryIdV1": {
+      "type": "string",
+      "pattern": "^repo_[A-Za-z0-9_-]{1,96}$"
+    },
+    "WorktreeIdV1": {
+      "type": "string",
+      "pattern": "^wt_[A-Za-z0-9_-]{1,96}$"
+    },
+    "PathIdV1": {
+      "type": "string",
+      "pattern": "^path_[A-Za-z0-9_-]{1,96}$",
+      "description": "Target-minted opaque selector; display paths are never accepted in its place."
+    },
+    "RefyardSnapshotIdV1": {
+      "type": "string",
+      "pattern": "^rsnapshot_[0-9a-f]{32}$",
+      "description": "Domain-tagged encoding of Plan 0082's RefyardSnapshotId; the target privately maps it to Refyard's source snap_ id."
+    },
+    "PathPreviewTokenV1": {
+      "type": "string",
+      "pattern": "^pt_[A-Za-z0-9_-]{1,96}$",
+      "description": "Pinned Refyard path preview precondition token; never a mutation preview handle."
+    },
+    "MutationPreviewIdV1": {
+      "type": "string",
+      "pattern": "^rpreview_[0-9a-f]{32}$",
+      "description": "Native-owned single-use mutation approval ledger handle; distinct from Refyard source op_ and pt_ identifiers."
+    },
+    "RefyardJobIdV1": {
+      "type": "string",
+      "pattern": "^rjob_[0-9a-f]{32}$",
+      "description": "Domain-tagged encoding of Plan 0082's distinct 128-bit RefyardJobId."
+    },
+    "MutationRecoveryIdV1": {
+      "type": "string",
+      "pattern": "^rrecovery_[0-9a-f]{32}$",
+      "description": "Native-owned durable recovery-row identity; distinct from job, preview and source operation ids."
+    },
+    "MutationRecoverySnapshotIdV1": {
+      "type": "string",
+      "pattern": "^rrecoverysnapshot_[0-9a-f]{32}$",
+      "description": "Native-owned recovery page snapshot identity; distinct from recovery-row and Refyard source snapshot ids."
+    },
+    "CursorIdV1": {
+      "type": "string",
+      "pattern": "^cur_[A-Za-z0-9_-]{1,96}$"
+    },
+    "SpaceRootIdV1": {
+      "type": "string",
+      "pattern": "^xroot_[0-9a-f]{32}$"
+    },
+    "SpaceNodeIdV1": {
+      "type": "string",
+      "pattern": "^xnode_[0-9a-f]{32}$"
+    },
+    "SpaceSnapshotIdV1": {
+      "type": "string",
+      "pattern": "^xsnapshot_[0-9a-f]{32}$"
+    },
+    "SpaceScanIdV1": {
+      "type": "string",
+      "pattern": "^xscan_[0-9a-f]{32}$"
+    },
+    "SpaceJobIdV1": {
+      "type": "string",
+      "pattern": "^xjob_[0-9a-f]{32}$"
+    },
+    "SpacePlanIdV1": {
+      "type": "string",
+      "pattern": "^xplan_[0-9a-f]{32}$"
+    },
+    "SpaceICloudPlanIdV1": {
+      "type": "string",
+      "pattern": "^xicloud_[0-9a-f]{32}$"
+    },
+    "ViewContextV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractMajor",
+        "featureBits",
+        "packId",
+        "packDigest",
+        "xrossVersion",
+        "sourceClientIncarnation",
+        "targetDeviceId",
+        "targetDisplayLabel",
+        "targetPolicyRevision",
+        "bridgeGeneration",
+        "locale"
+      ],
+      "properties": {
+        "contractMajor": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "featureBits": {
+          "type": "array",
+          "uniqueItems": true,
+          "x-xross-sorted": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "packId": {
+          "enum": ["refyard", "space-lens"]
+        },
+        "packDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 bytes encoded as lowercase hexadecimal."
+        },
+        "xrossVersion": {
+          "type": "string",
+          "maxLength": 32,
+          "x-xross-maxUtf8Bytes": 32,
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+        },
+        "sourceClientIncarnation": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$",
+          "description": "16 bytes encoded as lowercase hexadecimal."
+        },
+        "targetDeviceId": {
+          "$ref": "#/$defs/DeviceIdV1"
+        },
+        "targetDisplayLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "x-xross-maxUtf8Bytes": 128
+        },
+        "targetPolicyRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20,
+          "pattern": "^(0|[1-9][0-9]{0,19})$",
+          "x-xross-uint64-max": "18446744073709551615"
+        },
+        "bridgeGeneration": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$",
+          "description": "16 bytes encoded as lowercase hexadecimal."
+        },
+        "locale": {
+          "enum": ["en", "zh-Hans", "ja", "es", "fr"]
+        }
+      }
+    },
+    "SafeNonnegativeIntegerV1": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "UInt32V1": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+    "UInt64V1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20,
+      "pattern": "^(0|[1-9][0-9]{0,19})$",
+      "x-xross-uint64-max": "18446744073709551615"
+    },
+    "UnixMillisV1": { "$ref": "#/$defs/UInt64V1" },
+    "CursorV1": { "$ref": "#/$defs/CursorIdV1" },
+    "ObjectIdV1": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+      "description": "Git object id; the selected repository object format determines the accepted width."
+    },
+    "DisplayString256V1": {
+      "type": "string",
+      "maxLength": 256,
+      "x-xross-maxUtf8Bytes": 1024
+    },
+    "DisplayPathV1": {
+      "type": "string",
+      "maxLength": 4096,
+      "x-xross-maxUtf8Bytes": 4096,
+      "description": "Target-authored root/worktree-relative display data only; never request authority."
+    },
+    "PageCursorV1": {
+      "oneOf": [
+        { "$ref": "#/$defs/CursorV1" },
+        { "type": "null" }
+      ]
+    },
+    "RemoteEndpointSummaryV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "transport", "hostDisplay"],
+          "properties": {
+            "kind": { "const": "network" },
+            "transport": { "enum": ["https", "http", "ssh", "git"] },
+            "hostDisplay": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253,
+              "pattern": "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*$",
+              "x-xross-maxUtf8Bytes": 253
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "redacted" } }
+        }
+      ]
+    },
+    "ViewFieldNameV1": {
+      "enum": ["cursor", "limit", "rootIds", "pathIds", "nodeIds", "relativeDepth", "maxChildren", "maxNodes", "operation", "target", "snapshotId", "worktreeId"]
+    },
+    "ViewLimitNameV1": {
+      "enum": ["requestBytes", "responseBytes", "pageItems", "cursorBytes", "displayBytes", "diffBytes", "streamEventBytes", "rootIds", "pathIds", "nodeIds", "relativeDepth", "maxChildren", "maxNodes", "ancestors"]
+    },
+    "ViewErrorParameterV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "fieldName"],
+          "properties": { "kind": { "const": "fieldName" }, "fieldName": { "$ref": "#/$defs/ViewFieldNameV1" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "limitName", "maximum", "actual"],
+          "properties": {
+            "kind": { "const": "limit" },
+            "limitName": { "$ref": "#/$defs/ViewLimitNameV1" },
+            "maximum": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+            "actual": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "retryAfterMs"],
+          "properties": { "kind": { "const": "retryAfter" }, "retryAfterMs": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" } }
+        }
+      ]
+    },
+    "ViewErrorV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domain", "code", "retryable", "parameters"],
+          "properties": {
+            "domain": { "const": "host" },
+            "code": { "enum": ["HostUnavailable", "IncompatibleContract", "PermissionDenied", "TargetOffline", "ResourceUnavailable", "RecoveryUnavailable", "UnsupportedOnTarget", "MalformedPayload", "LimitExceeded", "StaleGeneration", "StreamGap", "Internal"] },
+            "retryable": { "type": "boolean" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/ViewErrorParameterV1" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domain", "code", "retryable", "parameters"],
+          "properties": {
+            "domain": { "const": "refyard" },
+            "code": { "enum": ["Unauthenticated", "Forbidden", "NotFound", "InvalidRequest", "UnsupportedOperation", "InvalidOperationPayload", "UnsupportedPathEncoding", "StaleSnapshot", "StalePreview", "Conflict", "IdempotencyConflict", "ResourceBusy", "LimitExceeded", "GitCommandFailed", "NeedsAttention", "UncertainOutcome", "Timeout", "Cancelled", "Unavailable", "ProviderNotConnected", "NoProviderRemote", "ProviderUnauthorized", "ProviderRateLimited", "InternalError"] },
+            "retryable": { "type": "boolean" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/ViewErrorParameterV1" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["domain", "code", "retryable", "parameters"],
+          "properties": {
+            "domain": { "const": "space-lens" },
+            "code": { "enum": ["Unauthenticated", "Forbidden", "NotFound", "InvalidRequest", "UnsupportedOperation", "LimitExceeded", "StalePlan", "StaleSnapshot", "Conflict", "Timeout", "Cancelled", "Unavailable", "InternalError"] },
+            "retryable": { "type": "boolean" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/ViewErrorParameterV1" } }
+          }
+        }
+      ]
+    },
+    "SpaceJobApprovalResultV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["decision", "outcome"], "properties": { "decision": { "const": "approved" }, "outcome": { "$ref": "#/$defs/SpaceJobV1" } } },
+        { "type": "object", "additionalProperties": false, "required": ["decision"], "properties": { "decision": { "enum": ["denied", "cancelled"] } } }
+      ]
+    },
+    "CleanupApprovalResultV1": { "$ref": "#/$defs/SpaceJobApprovalResultV1" },
+    "ICloudEvictionApprovalResultV1": { "$ref": "#/$defs/SpaceJobApprovalResultV1" },
+    "StreamGapV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "requestedAfter", "oldestAvailable"],
+      "properties": {
+        "kind": { "const": "gap" },
+        "requestedAfter": { "$ref": "#/$defs/UInt64V1" },
+        "oldestAvailable": { "$ref": "#/$defs/UInt64V1" }
+      }
+    },
+    "StreamTerminalV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sequence", "outcome"],
+      "properties": {
+        "kind": { "const": "terminal" },
+        "sequence": { "$ref": "#/$defs/UInt64V1" },
+        "outcome": { "enum": ["completed", "cancelled", "failed"] }
+      }
+    },
+    "CleanupWatchEventV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "job"],
+      "properties": {
+        "kind": { "const": "jobUpdated" },
+        "job": { "$ref": "#/$defs/SpaceJobV1" }
+      }
+    },
+    "SequencedSpaceScanEventV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "sequence", "value"],
+          "properties": {
+            "kind": { "const": "event" },
+            "sequence": { "$ref": "#/$defs/UInt64V1" },
+            "value": { "$ref": "#/$defs/ScanWatchEventV1" }
+          }
+        },
+        { "$ref": "#/$defs/StreamGapV1" },
+        { "$ref": "#/$defs/StreamTerminalV1" }
+      ]
+    },
+    "SequencedSpaceCleanupEventV1": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "sequence", "value"],
+          "properties": {
+            "kind": { "const": "event" },
+            "sequence": { "$ref": "#/$defs/UInt64V1" },
+            "value": { "$ref": "#/$defs/CleanupWatchEventV1" }
+          }
+        },
+        { "$ref": "#/$defs/StreamGapV1" },
+        { "$ref": "#/$defs/StreamTerminalV1" }
+      ]
+    },
+    "RuntimeLimitsV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["historyDefaultPageSize", "historyMaxPageSize", "patchMaxBytesPerFile", "patchMaxLinesPerFile", "objectMaxBytes", "logicalCacheMaxBytes", "previewTokenTtlSeconds", "readonlyDeadlineSeconds", "networkDeadlineSeconds", "hookDeadlineSeconds", "queuedOperationsPerActor", "concurrentGitProcesses", "concurrentReadersPerRepository", "eventRingMaxEvents", "eventRingMaxBytes", "pathSelectionMaxEntries", "historyTipsMax", "commitMessageMaxBytes", "branchNameMaxLength"],
+      "properties": {
+        "historyDefaultPageSize": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "historyMaxPageSize": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "patchMaxBytesPerFile": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "patchMaxLinesPerFile": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "objectMaxBytes": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "logicalCacheMaxBytes": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "previewTokenTtlSeconds": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "readonlyDeadlineSeconds": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "networkDeadlineSeconds": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "hookDeadlineSeconds": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "queuedOperationsPerActor": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "concurrentGitProcesses": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "concurrentReadersPerRepository": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "eventRingMaxEvents": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "eventRingMaxBytes": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "pathSelectionMaxEntries": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "historyTipsMax": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "commitMessageMaxBytes": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "branchNameMaxLength": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" }
+      }
+    },
+    "PageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "nextCursor"],
+      "properties": {
+        "items": { "type": "array", "maxItems": 200 },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      }
+    },
+    "GitObjectFormatV1": { "enum": ["sha1", "sha256"] },
+    "GitOperationInProgressV1": {
+      "enum": ["merge", "cherry-pick", "revert", "rebase", "bisect", "apply-mailbox", "unknown"]
+    },
+    "RefyardReadKindV1": {
+      "enum": ["capabilities", "filesystem", "repositories", "status", "history", "refs", "diff", "worktrees", "submodules", "stashes", "operations", "events"]
+    },
+    "RefyardOperationKindV1": {
+      "enum": [
+        "initRepository", "cloneRepository", "stagePaths", "unstagePaths", "discardTrackedPaths",
+        "commit", "amendCommit", "createBranch", "switchBranch", "renameBranch", "deleteBranch",
+        "setBranchUpstream", "addRemote", "updateRemote", "removeRemote", "fetch", "push", "pull",
+        "createStash", "applyStash", "popStash", "dropStash", "createTag", "deleteTag", "pushTag",
+        "createWorktree", "removeWorktree", "lockWorktree", "unlockWorktree", "addSubmodule",
+        "updateSubmodule", "syncSubmodule", "merge", "continueMerge", "abortMerge", "revertCommit",
+        "resetBranch", "cherryPick", "continueCherryPick", "abortCherryPick", "rebase", "continueRebase",
+        "abortRebase", "dropCommit", "squashCommit"
+      ]
+    },
+    "RefyardTargetKindV1": { "enum": ["workspace", "repository", "worktree"] },
+    "RefyardUnavailableReasonKeyV1": {
+      "enum": ["notImplemented", "gitFeatureMissing", "unsupportedTarget", "unknown"]
+    },
+    "GitRefNameV1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "x-xross-maxUtf8Bytes": 1020,
+      "description": "Source-authored Git branch or tag display name; preserves code points exactly."
+    },
+    "GitFullRefNameV1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "x-xross-maxUtf8Bytes": 4096
+    },
+    "GitModeV1": {
+      "type": "string",
+      "pattern": "^[0-7]{6}$",
+      "maxLength": 6
+    },
+    "GitStatusCharacterV1": {
+      "type": "string",
+      "pattern": "^(?: |[MADRCU?!])$",
+      "minLength": 1,
+      "maxLength": 1
+    },
+    "HeadStateV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "branchName", "oid", "detached"],
+      "properties": {
+        "kind": { "enum": ["born", "unborn"] },
+        "branchName": { "type": ["string", "null"], "maxLength": 255, "x-xross-maxUtf8Bytes": 1020 },
+        "oid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] },
+        "detached": { "type": "boolean" }
+      }
+    },
+    "WorkspaceRootSummaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workspaceRootId", "displayLabel", "policyRevision"],
+      "properties": {
+        "workspaceRootId": { "$ref": "#/$defs/WorkspaceRootIdV1" },
+        "displayLabel": { "$ref": "#/$defs/DisplayString256V1" },
+        "policyRevision": { "$ref": "#/$defs/UInt64V1" }
+      }
+    },
+    "RepositorySummaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "workspaceRootId", "displayName", "objectFormat", "worktreeIds", "primaryWorktreeId", "head", "operationInProgress"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "workspaceRootId": { "$ref": "#/$defs/WorkspaceRootIdV1" },
+        "displayName": { "$ref": "#/$defs/DisplayString256V1" },
+        "rootRelativeDisplayPath": { "$ref": "#/$defs/DisplayPathV1" },
+        "objectFormat": { "$ref": "#/$defs/GitObjectFormatV1" },
+        "worktreeIds": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/WorktreeIdV1" } },
+        "primaryWorktreeId": { "$ref": "#/$defs/WorktreeIdV1" },
+        "head": { "$ref": "#/$defs/HeadStateV1" },
+        "operationInProgress": { "oneOf": [{ "$ref": "#/$defs/GitOperationInProgressV1" }, { "type": "null" }] },
+        "lastFetchedAt": { "$ref": "#/$defs/UnixMillisV1" }
+      }
+    },
+    "WorkspaceRootsPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "nextCursor"],
+      "properties": {
+        "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/WorkspaceRootSummaryV1" } },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      }
+    },
+    "RepositoriesPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "nextCursor"],
+      "properties": {
+        "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/RepositorySummaryV1" } },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      }
+    },
+    "OperationCapabilityV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationKind", "targets"],
+      "properties": {
+        "operationKind": { "$ref": "#/$defs/RefyardOperationKindV1" },
+        "targets": { "type": "array", "minItems": 1, "maxItems": 3, "uniqueItems": true, "items": { "$ref": "#/$defs/RefyardTargetKindV1" }, "x-xross-sorted": true }
+      }
+    },
+    "UnavailableOperationGroupV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reasonKey", "operationIds"],
+      "properties": {
+        "reasonKey": { "$ref": "#/$defs/RefyardUnavailableReasonKeyV1" },
+        "operationIds": { "type": "array", "minItems": 1, "maxItems": 45, "uniqueItems": true, "items": { "$ref": "#/$defs/RefyardOperationKindV1" } }
+      }
+    },
+    "GitHostInfoV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "version"],
+      "properties": {
+        "kind": { "enum": ["macos", "linux", "windows", "unknown"] },
+        "version": { "type": "string", "maxLength": 128, "x-xross-maxUtf8Bytes": 512 }
+      }
+    },
+    "GitFeaturesV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["porcelainV2Status", "worktreeListZ", "catFileBatch", "pushPorcelain", "fetchPorcelain", "objectFormats"],
+      "properties": {
+        "porcelainV2Status": { "type": "boolean" },
+        "worktreeListZ": { "type": "boolean" },
+        "catFileBatch": { "type": "boolean" },
+        "pushPorcelain": { "type": "boolean" },
+        "fetchPorcelain": { "type": "boolean" },
+        "objectFormats": { "type": "array", "minItems": 1, "maxItems": 2, "uniqueItems": true, "items": { "$ref": "#/$defs/GitObjectFormatV1" }, "x-xross-sorted": true }
+      }
+    },
+    "RefyardCapabilitiesV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiMajor", "contractVersion", "serviceInstanceId", "host", "git", "reads", "operations", "limits", "unavailable"],
+      "properties": {
+        "apiMajor": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "contractVersion": { "type": "string", "minLength": 1, "maxLength": 64, "x-xross-maxUtf8Bytes": 64 },
+        "serviceInstanceId": { "$ref": "#/$defs/ServiceInstanceIdV1" },
+        "host": { "$ref": "#/$defs/GitHostInfoV1" },
+        "git": { "type": "object", "additionalProperties": false, "required": ["version", "features"], "properties": { "version": { "type": "string", "minLength": 1, "maxLength": 128, "x-xross-maxUtf8Bytes": 512 }, "features": { "$ref": "#/$defs/GitFeaturesV1" } } },
+        "reads": { "type": "array", "maxItems": 12, "uniqueItems": true, "items": { "$ref": "#/$defs/RefyardReadKindV1" }, "x-xross-sorted": true },
+        "providers": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 64, "x-xross-maxUtf8Bytes": 64 }, "x-xross-sorted": true },
+        "operations": { "type": "array", "maxItems": 45, "uniqueItems": true, "items": { "$ref": "#/$defs/OperationCapabilityV1" }, "x-xross-sorted-by": ["operationKind", "targets"] },
+        "limits": { "$ref": "#/$defs/RuntimeLimitsV1" },
+        "unavailable": { "type": "array", "maxItems": 45, "items": { "$ref": "#/$defs/UnavailableOperationGroupV1" } }
+      }
+    },
+    "RefyardListQueryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["limit"],
+      "properties": { "cursor": { "$ref": "#/$defs/CursorV1" }, "limit": { "type": "integer", "minimum": 1, "maximum": 200 } }
+    },
+    "StatusQueryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["limit"],
+      "properties": { "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" }, "cursor": { "$ref": "#/$defs/CursorV1" }, "limit": { "type": "integer", "minimum": 1, "maximum": 200 } }
+    },
+    "StatusEntryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pathId", "displayPath", "pathEncoding", "kind", "indexStatus", "worktreeStatus", "originalPathId", "originalDisplayPath", "headOid", "indexOid", "headMode", "indexMode", "worktreeMode", "submodule", "unmergedStages"],
+      "properties": {
+        "pathId": { "$ref": "#/$defs/PathIdV1" },
+        "displayPath": { "$ref": "#/$defs/DisplayPathV1" },
+        "pathEncoding": { "enum": ["utf8", "base64"] },
+        "kind": { "enum": ["ordinary", "renamed", "copied", "unmerged", "untracked", "ignored"] },
+        "indexStatus": { "$ref": "#/$defs/GitStatusCharacterV1" },
+        "worktreeStatus": { "$ref": "#/$defs/GitStatusCharacterV1" },
+        "originalPathId": { "oneOf": [{ "$ref": "#/$defs/PathIdV1" }, { "type": "null" }] },
+        "originalDisplayPath": { "oneOf": [{ "$ref": "#/$defs/DisplayPathV1" }, { "type": "null" }] },
+        "headOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] },
+        "indexOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] },
+        "headMode": { "oneOf": [{ "$ref": "#/$defs/GitModeV1" }, { "type": "null" }] },
+        "indexMode": { "oneOf": [{ "$ref": "#/$defs/GitModeV1" }, { "type": "null" }] },
+        "worktreeMode": { "oneOf": [{ "$ref": "#/$defs/GitModeV1" }, { "type": "null" }] },
+        "submodule": { "oneOf": [{ "type": "object", "additionalProperties": false, "required": ["commitChanged", "modified", "untracked"], "properties": { "commitChanged": { "type": "boolean" }, "modified": { "type": "boolean" }, "untracked": { "type": "boolean" } } }, { "type": "null" }] },
+        "unmergedStages": { "oneOf": [{ "type": "array", "maxItems": 3, "items": { "type": "object", "additionalProperties": false, "required": ["stage", "mode", "oid"], "properties": { "stage": { "type": "integer", "minimum": 1, "maximum": 3 }, "mode": { "oneOf": [{ "$ref": "#/$defs/GitModeV1" }, { "type": "null" }] }, "oid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] } } } }, { "type": "null" }] }
+      }
+    },
+    "StatusPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "worktreeId", "snapshotId", "readAtUnixMs", "head", "upstream", "operationInProgress", "entries", "entryCount", "truncated", "nextCursor"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" },
+        "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "readAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "head": { "$ref": "#/$defs/HeadStateV1" },
+        "upstream": { "oneOf": [{ "type": "object", "additionalProperties": false, "required": ["name", "ahead", "behind"], "properties": { "name": { "$ref": "#/$defs/GitFullRefNameV1" }, "ahead": { "$ref": "#/$defs/UInt32V1" }, "behind": { "$ref": "#/$defs/UInt32V1" } } }, { "type": "null" }] },
+        "operationInProgress": { "oneOf": [{ "$ref": "#/$defs/GitOperationInProgressV1" }, { "type": "null" }] },
+        "entries": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/StatusEntryV1" } },
+        "entryCount": { "$ref": "#/$defs/UInt32V1" },
+        "truncated": { "type": "boolean" },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      }
+    },
+    "HistoryQueryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" },
+        "cursor": { "$ref": "#/$defs/CursorV1" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "detailOid": { "$ref": "#/$defs/ObjectIdV1" },
+        "firstParentOnly": { "type": "boolean" },
+        "message": { "type": "string", "maxLength": 4096, "x-xross-maxUtf8Bytes": 16384 },
+        "author": { "type": "string", "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 },
+        "oidPrefix": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[0-9a-f]+$" },
+        "refFullName": { "$ref": "#/$defs/GitFullRefNameV1" },
+        "committedAfter": { "$ref": "#/$defs/UnixMillisV1" },
+        "committedBefore": { "$ref": "#/$defs/UnixMillisV1" },
+        "pathId": { "$ref": "#/$defs/PathIdV1" }
+      }
+    },
+    "CommitSummaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oid", "parents", "subject", "authorName", "authorEmail", "authoredAtUnixMs", "committedAtUnixMs", "refNames", "signed", "boundary", "missingParents"],
+      "properties": {
+        "oid": { "$ref": "#/$defs/ObjectIdV1" },
+        "parents": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/ObjectIdV1" } },
+        "subject": { "type": "string", "maxLength": 4096, "x-xross-maxUtf8Bytes": 16384 },
+        "authorName": { "type": "string", "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 },
+        "authorEmail": { "type": "string", "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 },
+        "authoredAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "committedAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "refNames": { "type": "array", "maxItems": 512, "items": { "$ref": "#/$defs/GitFullRefNameV1" } },
+        "signed": { "type": "boolean" },
+        "boundary": { "type": "boolean" },
+        "missingParents": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/ObjectIdV1" } }
+      }
+    },
+    "CommitDetailV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oid", "tree", "parents", "authorName", "authorEmail", "authoredAtUnixMs", "committerName", "committerEmail", "committedAtUnixMs", "subject", "body", "encoding", "signatureState"],
+      "properties": {
+        "oid": { "$ref": "#/$defs/ObjectIdV1" },
+        "tree": { "$ref": "#/$defs/ObjectIdV1" },
+        "parents": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/ObjectIdV1" } },
+        "authorName": { "type": "string", "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 },
+        "authorEmail": { "type": "string", "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 },
+        "authoredAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "committerName": { "type": "string", "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 },
+        "committerEmail": { "type": "string", "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 },
+        "committedAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "subject": { "type": "string", "maxLength": 4096, "x-xross-maxUtf8Bytes": 16384 },
+        "body": { "type": "string", "maxLength": 65536, "x-xross-maxUtf8Bytes": 262144 },
+        "encoding": { "type": ["string", "null"], "maxLength": 128, "x-xross-maxUtf8Bytes": 512 },
+        "signatureState": { "enum": ["unsigned", "valid", "invalid", "unknown"] }
+      }
+    },
+    "HistoryPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "snapshotId", "readAtUnixMs", "objectFormat", "shallow", "topology", "commits", "nextCursor", "tipsMoved", "truncated", "detail"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "readAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "objectFormat": { "$ref": "#/$defs/GitObjectFormatV1" },
+        "shallow": { "type": "boolean" },
+        "topology": { "enum": ["continuous", "sparse"] },
+        "commits": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/CommitSummaryV1" } },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" },
+        "tipsMoved": { "type": "boolean" },
+        "truncated": { "type": "boolean" },
+        "detail": { "oneOf": [{ "$ref": "#/$defs/CommitDetailV1" }, { "type": "null" }] }
+      }
+    },
+    "RefEntryV1": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "name", "fullName", "oid", "isCurrent", "upstream"],
+          "properties": {
+            "kind": { "const": "localBranch" }, "name": { "$ref": "#/$defs/GitRefNameV1" },
+            "fullName": { "$ref": "#/$defs/GitFullRefNameV1" }, "oid": { "$ref": "#/$defs/ObjectIdV1" },
+            "isCurrent": { "type": "boolean" },
+            "upstream": { "oneOf": [{ "type": "object", "additionalProperties": false, "required": ["fullName", "ahead", "behind", "gone"], "properties": { "fullName": { "$ref": "#/$defs/GitFullRefNameV1" }, "ahead": { "$ref": "#/$defs/UInt32V1" }, "behind": { "$ref": "#/$defs/UInt32V1" }, "gone": { "type": "boolean" } } }, { "type": "null" }] }
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "name", "fullName", "oid", "remoteName"],
+          "properties": { "kind": { "const": "remoteTracking" }, "name": { "$ref": "#/$defs/GitRefNameV1" }, "fullName": { "$ref": "#/$defs/GitFullRefNameV1" }, "oid": { "$ref": "#/$defs/ObjectIdV1" }, "remoteName": { "type": "string", "minLength": 1, "maxLength": 64 } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "name", "fullName", "oid", "annotated", "targetOid"],
+          "properties": { "kind": { "const": "tag" }, "name": { "$ref": "#/$defs/GitRefNameV1" }, "fullName": { "$ref": "#/$defs/GitFullRefNameV1" }, "oid": { "$ref": "#/$defs/ObjectIdV1" }, "annotated": { "type": "boolean" }, "targetOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "name", "fetchEndpoint", "pushEndpoint"],
+          "properties": { "kind": { "const": "remote" }, "name": { "type": "string", "minLength": 1, "maxLength": 64 }, "fetchEndpoint": { "$ref": "#/$defs/RemoteEndpointSummaryV1" }, "pushEndpoint": { "oneOf": [{ "$ref": "#/$defs/RemoteEndpointSummaryV1" }, { "type": "null" }] } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["kind", "fullName", "oid", "category"],
+          "properties": { "kind": { "const": "other" }, "fullName": { "$ref": "#/$defs/GitFullRefNameV1" }, "oid": { "$ref": "#/$defs/ObjectIdV1" }, "category": { "enum": ["stash", "notes", "replace", "other"] } }
+        }
+      ]
+    },
+    "RefsPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshotId", "repositoryId", "readAtUnixMs", "objectFormat", "head", "truncated", "items", "nextCursor"],
+      "properties": {
+        "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "readAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "objectFormat": { "$ref": "#/$defs/GitObjectFormatV1" },
+        "head": { "$ref": "#/$defs/HeadStateV1" },
+        "truncated": { "type": "boolean" },
+        "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/RefEntryV1" } },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      }
+    },
+    "WorktreeSummaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "rootRelativeDisplayPath", "head", "main", "bare", "detached", "locked", "lockReason", "prunable"],
+      "properties": {
+        "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" },
+        "rootRelativeDisplayPath": { "$ref": "#/$defs/DisplayPathV1" },
+        "head": { "$ref": "#/$defs/HeadStateV1" },
+        "main": { "type": "boolean" },
+        "bare": { "type": "boolean" },
+        "detached": { "type": "boolean" },
+        "locked": { "type": "boolean" },
+        "lockReason": { "type": ["string", "null"], "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 },
+        "prunable": { "type": "boolean" }
+      }
+    },
+    "WorktreesSnapshotV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "snapshotId", "readAtUnixMs", "worktrees"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "readAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "worktrees": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/WorktreeSummaryV1" } }
+      }
+    },
+    "StashEntryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oid", "locator", "message", "createdAtUnixMs", "branchDisplay"],
+      "properties": {
+        "oid": { "$ref": "#/$defs/ObjectIdV1" },
+        "locator": { "type": "string", "pattern": "^stash@\\{(?:0|[1-9][0-9]*)\\}$", "maxLength": 32 },
+        "message": { "type": "string", "maxLength": 4096, "x-xross-maxUtf8Bytes": 16384 },
+        "createdAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "branchDisplay": { "type": ["string", "null"], "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 }
+      }
+    },
+    "StashesPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "snapshotId", "readAtUnixMs", "truncated", "items", "nextCursor"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "readAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "truncated": { "type": "boolean" },
+        "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/StashEntryV1" } },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      }
+    },
+    "SubmoduleSummaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["worktreeId", "pathId", "displayPath", "recordedOid", "indexOid", "actualOid", "state", "urlEndpoint", "branchDisplay", "repositoryId"],
+      "properties": {
+        "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" },
+        "pathId": { "$ref": "#/$defs/PathIdV1" },
+        "displayPath": { "$ref": "#/$defs/DisplayPathV1" },
+        "recordedOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] },
+        "indexOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] },
+        "actualOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] },
+        "state": { "enum": ["initialized", "uninitialized", "conflicted", "unknown"] },
+        "urlEndpoint": { "$ref": "#/$defs/RemoteEndpointSummaryV1" },
+        "branchDisplay": { "type": ["string", "null"], "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 },
+        "repositoryId": { "oneOf": [{ "$ref": "#/$defs/RepositoryIdV1" }, { "type": "null" }] }
+      }
+    },
+    "SubmodulesPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "worktreeId", "snapshotId", "readAtUnixMs", "truncated", "items", "nextCursor"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" },
+        "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "readAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "truncated": { "type": "boolean" },
+        "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/SubmoduleSummaryV1" } },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      }
+    },
+    "PathPreviewV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pathId", "previewToken", "sizeBytes", "contentKind", "algorithm", "expiresAtUnixMs"],
+      "properties": {
+        "pathId": { "$ref": "#/$defs/PathIdV1" },
+        "previewToken": { "$ref": "#/$defs/PathPreviewTokenV1" },
+        "sizeBytes": { "oneOf": [{ "$ref": "#/$defs/UInt64V1" }, { "type": "null" }] },
+        "contentKind": { "enum": ["text", "binary", "unrepresentable"] },
+        "algorithm": { "const": "sha256" },
+        "expiresAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" }
+      }
+    },
+    "PathPreviewsV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "worktreeId", "snapshotId", "readAtUnixMs", "tokens"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" },
+        "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "readAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "tokens": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/PathPreviewV1" } }
+      }
+    },
+    "DiffQueryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "limit"],
+      "properties": {
+        "kind": { "enum": ["unstaged", "staged", "untracked", "commit", "range"] },
+        "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" },
+        "oid": { "$ref": "#/$defs/ObjectIdV1" },
+        "fromOid": { "$ref": "#/$defs/ObjectIdV1" },
+        "toOid": { "$ref": "#/$defs/ObjectIdV1" },
+        "pathId": { "$ref": "#/$defs/PathIdV1" },
+        "cursor": { "$ref": "#/$defs/CursorV1" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
+      }
+    },
+    "PatchLineV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "oldLine", "newLine", "text"],
+      "properties": {
+        "kind": { "enum": ["context", "addition", "deletion"] },
+        "oldLine": { "oneOf": [{ "$ref": "#/$defs/UInt32V1" }, { "type": "null" }] },
+        "newLine": { "oneOf": [{ "$ref": "#/$defs/UInt32V1" }, { "type": "null" }] },
+        "text": { "type": "string", "maxLength": 65536, "x-xross-maxUtf8Bytes": 262144 }
+      }
+    },
+    "PatchHunkV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oldStart", "oldLines", "newStart", "newLines", "header", "lines"],
+      "properties": {
+        "oldStart": { "$ref": "#/$defs/UInt32V1" },
+        "oldLines": { "$ref": "#/$defs/UInt32V1" },
+        "newStart": { "$ref": "#/$defs/UInt32V1" },
+        "newLines": { "$ref": "#/$defs/UInt32V1" },
+        "header": { "type": "string", "maxLength": 4096, "x-xross-maxUtf8Bytes": 16384 },
+        "lines": { "type": "array", "maxItems": 20000, "items": { "$ref": "#/$defs/PatchLineV1" } }
+      }
+    },
+    "FilePatchV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "hunks", "synthesized"], "properties": { "kind": { "const": "text" }, "hunks": { "type": "array", "maxItems": 2000, "items": { "$ref": "#/$defs/PatchHunkV1" } }, "synthesized": { "type": "boolean" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "binary" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "reason"], "properties": { "kind": { "const": "oversize" }, "reason": { "enum": ["byteLimit", "lineLimit"] } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "reason"], "properties": { "kind": { "const": "unavailable" }, "reason": { "enum": ["pathUnrepresentable", "objectMissing", "unsupported"] } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "oldOid", "newOid"], "properties": { "kind": { "const": "submodule" }, "oldOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] }, "newOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] } } }
+      ]
+    },
+    "DiffFileV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pathId", "displayPath", "oldPathId", "oldDisplayPath", "changeKind", "binary", "submodule", "insertions", "deletions", "oldMode", "newMode", "patch"],
+      "properties": {
+        "pathId": { "$ref": "#/$defs/PathIdV1" },
+        "displayPath": { "$ref": "#/$defs/DisplayPathV1" },
+        "oldPathId": { "oneOf": [{ "$ref": "#/$defs/PathIdV1" }, { "type": "null" }] },
+        "oldDisplayPath": { "oneOf": [{ "$ref": "#/$defs/DisplayPathV1" }, { "type": "null" }] },
+        "changeKind": { "enum": ["added", "modified", "deleted", "renamed", "copied", "typeChanged", "unmerged", "unknown"] },
+        "binary": { "type": "boolean" },
+        "submodule": { "type": "boolean" },
+        "insertions": { "oneOf": [{ "$ref": "#/$defs/UInt32V1" }, { "type": "null" }] },
+        "deletions": { "oneOf": [{ "$ref": "#/$defs/UInt32V1" }, { "type": "null" }] },
+        "oldMode": { "oneOf": [{ "$ref": "#/$defs/GitModeV1" }, { "type": "null" }] },
+        "newMode": { "oneOf": [{ "$ref": "#/$defs/GitModeV1" }, { "type": "null" }] },
+        "patch": { "$ref": "#/$defs/FilePatchV1" }
+      }
+    },
+    "DiffPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "worktreeId", "snapshotId", "readAtUnixMs", "query", "files", "stats", "truncated", "nextCursor"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "worktreeId": { "oneOf": [{ "$ref": "#/$defs/WorktreeIdV1" }, { "type": "null" }] },
+        "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "readAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "query": { "$ref": "#/$defs/DiffQueryV1" },
+        "files": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/DiffFileV1" } },
+        "stats": { "type": "object", "additionalProperties": false, "required": ["filesChanged", "insertions", "deletions", "binaryFiles"], "properties": { "filesChanged": { "$ref": "#/$defs/UInt32V1" }, "insertions": { "$ref": "#/$defs/UInt32V1" }, "deletions": { "$ref": "#/$defs/UInt32V1" }, "binaryFiles": { "$ref": "#/$defs/UInt32V1" } } },
+        "truncated": { "type": "boolean" },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      },
+      "x-xross-maxEncodedBytes": 262144
+    },
+    "RemoteNameV1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "CommitMessageV1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1048576,
+      "x-xross-maxUtf8Bytes": 1048576
+    },
+    "RemoteUrlInputV1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "format": "xross-refyard-remote-url",
+      "description": "HTTPS or SSH remote syntax only; reject local/file paths and inline credentials, query secrets and fragments."
+    },
+    "DestinationV1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "x-xross-maxUtf8Bytes": 1024,
+      "x-xross-relative-git-destination": true,
+      "description": "Forward-slash-separated relative destination; no dot segments, .git component, drive prefix, absolute root, or backslash."
+    },
+    "PathSelectionV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pathIds", "previewTokens"],
+      "properties": {
+        "pathIds": { "type": "array", "minItems": 1, "maxItems": 1000, "uniqueItems": true, "items": { "$ref": "#/$defs/PathIdV1" } },
+        "previewTokens": { "type": "array", "minItems": 1, "maxItems": 1000, "uniqueItems": true, "items": { "$ref": "#/$defs/PathPreviewTokenV1" } }
+      },
+      "x-xross-equal-array-lengths": ["pathIds", "previewTokens"]
+    },
+    "PlainPathSelectionV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pathIds"],
+      "properties": { "pathIds": { "type": "array", "minItems": 1, "maxItems": 1000, "uniqueItems": true, "items": { "$ref": "#/$defs/PathIdV1" } } }
+    },
+    "BranchUpstreamV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["remoteName", "branchName"],
+      "properties": { "remoteName": { "$ref": "#/$defs/RemoteNameV1" }, "branchName": { "$ref": "#/$defs/GitRefNameV1" } }
+    },
+    "StashLocatorV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["oid", "locator"],
+      "properties": { "oid": { "$ref": "#/$defs/ObjectIdV1" }, "locator": { "type": "string", "pattern": "^stash@\\{(?:0|[1-9][0-9]*)\\}$", "maxLength": 32 } }
+    },
+    "WorktreeReferenceV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "branchName"], "properties": { "kind": { "const": "existingBranch" }, "branchName": { "$ref": "#/$defs/GitRefNameV1" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "branchName", "startOid"], "properties": { "kind": { "const": "newBranch" }, "branchName": { "$ref": "#/$defs/GitRefNameV1" }, "startOid": { "$ref": "#/$defs/ObjectIdV1" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "oid"], "properties": { "kind": { "const": "detached" }, "oid": { "$ref": "#/$defs/ObjectIdV1" } } }
+      ]
+    },
+    "RefyardMutationTargetV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "workspaceRootId", "relativeDestination"], "properties": { "kind": { "const": "workspace" }, "workspaceRootId": { "$ref": "#/$defs/WorkspaceRootIdV1" }, "relativeDestination": { "$ref": "#/$defs/DestinationV1" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "repositoryId", "expectedSnapshotId"], "properties": { "kind": { "const": "repository" }, "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" }, "expectedSnapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "repositoryId", "worktreeId", "expectedSnapshotId"], "properties": { "kind": { "const": "worktree" }, "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" }, "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" }, "expectedSnapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" } } }
+      ]
+    },
+    "RefyardMutationOperationV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "initialBranch"], "properties": { "kind": { "const": "initRepository" }, "initialBranch": { "oneOf": [{ "$ref": "#/$defs/GitRefNameV1" }, { "type": "null" }] } }, "x-xross-target-kinds": ["workspace"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "remoteUrl", "relativeDestination", "initializeSubmodules"], "properties": { "kind": { "const": "cloneRepository" }, "remoteUrl": { "$ref": "#/$defs/RemoteUrlInputV1" }, "relativeDestination": { "$ref": "#/$defs/DestinationV1" }, "initializeSubmodules": { "type": "boolean" } }, "x-xross-target-kinds": ["workspace"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "pathIds", "previewTokens"], "properties": { "kind": { "const": "stagePaths" }, "pathIds": { "$ref": "#/$defs/PathSelectionV1/properties/pathIds" }, "previewTokens": { "$ref": "#/$defs/PathSelectionV1/properties/previewTokens" } }, "x-xross-target-kinds": ["worktree"], "x-xross-equal-array-lengths": ["pathIds", "previewTokens"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "pathIds"], "properties": { "kind": { "const": "unstagePaths" }, "pathIds": { "$ref": "#/$defs/PlainPathSelectionV1/properties/pathIds" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "pathIds", "previewTokens", "confirmed"], "properties": { "kind": { "const": "discardTrackedPaths" }, "pathIds": { "$ref": "#/$defs/PathSelectionV1/properties/pathIds" }, "previewTokens": { "$ref": "#/$defs/PathSelectionV1/properties/previewTokens" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["worktree"], "x-xross-equal-array-lengths": ["pathIds", "previewTokens"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "message"], "properties": { "kind": { "const": "commit" }, "message": { "$ref": "#/$defs/CommitMessageV1" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "message", "confirmed"], "properties": { "kind": { "const": "amendCommit" }, "message": { "oneOf": [{ "$ref": "#/$defs/CommitMessageV1" }, { "type": "null" }] }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "branchName", "startOid", "switchToIt"], "properties": { "kind": { "const": "createBranch" }, "branchName": { "$ref": "#/$defs/GitRefNameV1" }, "startOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] }, "switchToIt": { "type": "boolean" } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "branchName"], "properties": { "kind": { "const": "switchBranch" }, "branchName": { "$ref": "#/$defs/GitRefNameV1" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "branchName", "newName"], "properties": { "kind": { "const": "renameBranch" }, "branchName": { "$ref": "#/$defs/GitRefNameV1" }, "newName": { "$ref": "#/$defs/GitRefNameV1" } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "branchName", "confirmed"], "properties": { "kind": { "const": "deleteBranch" }, "branchName": { "$ref": "#/$defs/GitRefNameV1" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "branchName", "upstream"], "properties": { "kind": { "const": "setBranchUpstream" }, "branchName": { "$ref": "#/$defs/GitRefNameV1" }, "upstream": { "oneOf": [{ "$ref": "#/$defs/BranchUpstreamV1" }, { "type": "null" }] } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "remoteName", "fetchUrl", "pushUrl"], "properties": { "kind": { "const": "addRemote" }, "remoteName": { "$ref": "#/$defs/RemoteNameV1" }, "fetchUrl": { "$ref": "#/$defs/RemoteUrlInputV1" }, "pushUrl": { "oneOf": [{ "$ref": "#/$defs/RemoteUrlInputV1" }, { "type": "null" }] } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "remoteName", "newName", "fetchUrl", "pushUrl"], "properties": { "kind": { "const": "updateRemote" }, "remoteName": { "$ref": "#/$defs/RemoteNameV1" }, "newName": { "oneOf": [{ "$ref": "#/$defs/RemoteNameV1" }, { "type": "null" }] }, "fetchUrl": { "oneOf": [{ "$ref": "#/$defs/RemoteUrlInputV1" }, { "type": "null" }] }, "pushUrl": { "oneOf": [{ "$ref": "#/$defs/RemoteUrlInputV1" }, { "type": "null" }] } }, "x-xross-target-kinds": ["repository"], "x-xross-at-least-one-nonnull": ["newName", "fetchUrl", "pushUrl"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "remoteName", "confirmed"], "properties": { "kind": { "const": "removeRemote" }, "remoteName": { "$ref": "#/$defs/RemoteNameV1" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "remoteName", "prune", "tags"], "properties": { "kind": { "const": "fetch" }, "remoteName": { "$ref": "#/$defs/RemoteNameV1" }, "prune": { "type": "boolean" }, "tags": { "enum": ["none", "following"] } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "remoteName", "sourceRef", "destinationRef", "setUpstream"], "properties": { "kind": { "const": "push" }, "remoteName": { "$ref": "#/$defs/RemoteNameV1" }, "sourceRef": { "$ref": "#/$defs/GitFullRefNameV1" }, "destinationRef": { "$ref": "#/$defs/GitFullRefNameV1" }, "setUpstream": { "type": "boolean" } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "remoteName", "mode"], "properties": { "kind": { "const": "pull" }, "remoteName": { "$ref": "#/$defs/RemoteNameV1" }, "mode": { "const": "ff-only" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "message", "includeUntracked", "keepIndex"], "properties": { "kind": { "const": "createStash" }, "message": { "oneOf": [{ "$ref": "#/$defs/CommitMessageV1" }, { "type": "null" }] }, "includeUntracked": { "type": "boolean" }, "keepIndex": { "type": "boolean" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "stash", "restoreIndex"], "properties": { "kind": { "const": "applyStash" }, "stash": { "$ref": "#/$defs/StashLocatorV1" }, "restoreIndex": { "type": "boolean" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "stash", "restoreIndex", "confirmed"], "properties": { "kind": { "const": "popStash" }, "stash": { "$ref": "#/$defs/StashLocatorV1" }, "restoreIndex": { "type": "boolean" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "stash", "confirmed"], "properties": { "kind": { "const": "dropStash" }, "stash": { "$ref": "#/$defs/StashLocatorV1" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "tagName", "targetOid", "annotation"], "properties": { "kind": { "const": "createTag" }, "tagName": { "$ref": "#/$defs/GitRefNameV1" }, "targetOid": { "oneOf": [{ "$ref": "#/$defs/ObjectIdV1" }, { "type": "null" }] }, "annotation": { "oneOf": [{ "type": "object", "additionalProperties": false, "required": ["message"], "properties": { "message": { "$ref": "#/$defs/CommitMessageV1" } } }, { "type": "null" }] } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "tagName", "confirmed"], "properties": { "kind": { "const": "deleteTag" }, "tagName": { "$ref": "#/$defs/GitRefNameV1" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "remoteName", "tagName"], "properties": { "kind": { "const": "pushTag" }, "remoteName": { "$ref": "#/$defs/RemoteNameV1" }, "tagName": { "$ref": "#/$defs/GitRefNameV1" } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "relativeDestination", "reference"], "properties": { "kind": { "const": "createWorktree" }, "relativeDestination": { "$ref": "#/$defs/DestinationV1" }, "reference": { "$ref": "#/$defs/WorktreeReferenceV1" } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "worktreeId", "confirmed"], "properties": { "kind": { "const": "removeWorktree" }, "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "worktreeId", "reason"], "properties": { "kind": { "const": "lockWorktree" }, "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" }, "reason": { "type": ["string", "null"], "maxLength": 1024, "x-xross-maxUtf8Bytes": 4096 } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "worktreeId"], "properties": { "kind": { "const": "unlockWorktree" }, "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" } }, "x-xross-target-kinds": ["repository"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "remoteUrl", "relativePath", "branchName", "initialize"], "properties": { "kind": { "const": "addSubmodule" }, "remoteUrl": { "$ref": "#/$defs/RemoteUrlInputV1" }, "relativePath": { "$ref": "#/$defs/DestinationV1" }, "branchName": { "oneOf": [{ "$ref": "#/$defs/GitRefNameV1" }, { "type": "null" }] }, "initialize": { "type": "boolean" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "pathIds", "initialize", "recursive"], "properties": { "kind": { "const": "updateSubmodule" }, "pathIds": { "$ref": "#/$defs/PlainPathSelectionV1/properties/pathIds" }, "initialize": { "type": "boolean" }, "recursive": { "type": "boolean" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "pathIds", "recursive"], "properties": { "kind": { "const": "syncSubmodule" }, "pathIds": { "$ref": "#/$defs/PlainPathSelectionV1/properties/pathIds" }, "recursive": { "type": "boolean" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "sourceOid", "mode", "message"], "properties": { "kind": { "const": "merge" }, "sourceOid": { "$ref": "#/$defs/ObjectIdV1" }, "mode": { "enum": ["default", "no-ff"] }, "message": { "oneOf": [{ "$ref": "#/$defs/CommitMessageV1" }, { "type": "null" }] } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "message"], "properties": { "kind": { "const": "continueMerge" }, "message": { "oneOf": [{ "$ref": "#/$defs/CommitMessageV1" }, { "type": "null" }] } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "confirmed"], "properties": { "kind": { "const": "abortMerge" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "oid"], "properties": { "kind": { "const": "revertCommit" }, "oid": { "$ref": "#/$defs/ObjectIdV1" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "oid", "mode"], "properties": { "kind": { "const": "resetBranch" }, "oid": { "$ref": "#/$defs/ObjectIdV1" }, "mode": { "enum": ["soft", "mixed"] } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "oid"], "properties": { "kind": { "const": "cherryPick" }, "oid": { "$ref": "#/$defs/ObjectIdV1" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "continueCherryPick" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "confirmed"], "properties": { "kind": { "const": "abortCherryPick" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "upstreamOid"], "properties": { "kind": { "const": "rebase" }, "upstreamOid": { "$ref": "#/$defs/ObjectIdV1" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "continueRebase" } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "confirmed"], "properties": { "kind": { "const": "abortRebase" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "oid", "confirmed"], "properties": { "kind": { "const": "dropCommit" }, "oid": { "$ref": "#/$defs/ObjectIdV1" }, "confirmed": { "const": true } }, "x-xross-target-kinds": ["worktree"] },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "message"], "properties": { "kind": { "const": "squashCommit" }, "message": { "oneOf": [{ "$ref": "#/$defs/CommitMessageV1" }, { "type": "null" }] } }, "x-xross-target-kinds": ["worktree"] }
+      ]
+    },
+    "RefyardMutationIntentV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "operation"],
+      "properties": {
+        "target": { "$ref": "#/$defs/RefyardMutationTargetV1" },
+        "operation": { "$ref": "#/$defs/RefyardMutationOperationV1" }
+      },
+      "x-xross-target-operation-map": "vectors/refyard-operation-targets.json"
+    },
+    "SpaceLensCapabilitiesV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["apiMajor", "contractVersion", "scan", "cleanup", "providers"],
+      "properties": {
+        "apiMajor": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "contractVersion": { "type": "string", "minLength": 1, "maxLength": 64, "x-xross-maxUtf8Bytes": 64 },
+        "scan": { "type": "object", "additionalProperties": false, "required": ["start", "cancel", "maxConcurrent"], "properties": { "start": { "type": "boolean" }, "cancel": { "type": "boolean" }, "maxConcurrent": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" } } },
+        "cleanup": { "type": "object", "additionalProperties": false, "required": ["plan", "execute", "mode"], "properties": { "plan": { "type": "boolean" }, "execute": { "type": "boolean" }, "mode": { "enum": ["none", "trash"] } } },
+        "providers": { "type": "object", "additionalProperties": false, "required": ["iCloud"], "properties": { "iCloud": { "enum": ["available", "unavailable"] } } }
+      }
+    },
+    "RootSummaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rootId", "label", "kind", "providerFeatures"],
+      "properties": {
+        "rootId": { "$ref": "#/$defs/SpaceRootIdV1" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 200, "x-xross-maxUtf8Bytes": 800 },
+        "kind": { "enum": ["volume", "folder", "multiFolder"] },
+        "sizeBytes": { "$ref": "#/$defs/UInt64V1" },
+        "usedBytes": { "$ref": "#/$defs/UInt64V1" },
+        "providerFeatures": { "type": "array", "uniqueItems": true, "items": { "enum": ["git", "icloud", "trash", "filesystem"] } }
+      }
+    },
+    "ScanOptionsV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ignoreHidden", "respectGitignore", "ignoredMode"],
+      "properties": {
+        "ignoreHidden": { "type": "boolean" },
+        "respectGitignore": { "type": "boolean" },
+        "ignoredMode": { "enum": ["summarize", "exclude"] },
+        "label": { "type": "string", "maxLength": 200, "x-xross-maxUtf8Bytes": 800 }
+      }
+    },
+    "StartScanRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rootIds", "options"],
+      "properties": {
+        "rootIds": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/SpaceRootIdV1" } },
+        "options": { "$ref": "#/$defs/ScanOptionsV1" }
+      }
+    },
+    "ScanRootNodeV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rootId", "nodeId"],
+      "properties": {
+        "rootId": { "$ref": "#/$defs/SpaceRootIdV1" },
+        "nodeId": { "$ref": "#/$defs/SpaceNodeIdV1" }
+      }
+    },
+    "ScanStatusV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "x-xross-scan-root-bindings": true,
+      "required": ["scanId", "state", "bytesVisited", "entriesVisited", "rootIds", "updatedAtUnixMs"],
+      "properties": {
+        "scanId": { "$ref": "#/$defs/SpaceScanIdV1" },
+        "state": { "enum": ["queued", "scanning", "ready", "cancelled", "failed"] },
+        "progressPermille": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "bytesVisited": { "$ref": "#/$defs/UInt64V1" },
+        "entriesVisited": { "$ref": "#/$defs/UInt64V1" },
+        "currentPathDisplay": { "$ref": "#/$defs/DisplayPathV1" },
+        "rootIds": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/SpaceRootIdV1" } },
+        "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" },
+        "rootNodes": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/ScanRootNodeV1" } },
+        "updatedAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" }
+      },
+      "allOf": [
+        { "if": { "properties": { "state": { "const": "ready" } }, "required": ["state"] }, "then": { "required": ["snapshotId", "rootNodes"] } },
+        { "if": { "properties": { "state": { "enum": ["queued", "scanning", "cancelled", "failed"] } }, "required": ["state"] }, "then": { "not": { "anyOf": [{ "required": ["snapshotId"] }, { "required": ["rootNodes"] }] } } }
+      ]
+    },
+    "ScanWatchEventV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "x-xross-scan-watch-state": true, "required": ["kind", "scan"], "properties": { "kind": { "enum": ["progress", "ready", "cancelled"] }, "scan": { "$ref": "#/$defs/ScanStatusV1" } } },
+        { "type": "object", "additionalProperties": false, "x-xross-scan-watch-state": true, "required": ["kind", "scan", "error"], "properties": { "kind": { "const": "failed" }, "scan": { "$ref": "#/$defs/ScanStatusV1" }, "error": { "enum": ["unavailable", "limitExceeded", "internal"] } } }
+      ]
+    },
+    "SnapshotNodeV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "name", "displayPath", "sizeBytes", "depth", "childCount", "ignored", "collapsed", "hasChildren"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/SpaceNodeIdV1" },
+        "parentId": { "$ref": "#/$defs/SpaceNodeIdV1" },
+        "name": { "type": "string", "maxLength": 4096, "x-xross-maxUtf8Bytes": 4096 },
+        "displayPath": { "$ref": "#/$defs/DisplayPathV1" },
+        "sizeBytes": { "$ref": "#/$defs/UInt64V1" },
+        "depth": { "$ref": "#/$defs/UInt32V1" },
+        "childCount": { "$ref": "#/$defs/UInt32V1" },
+        "ignored": { "type": "boolean" },
+        "collapsed": { "type": "boolean" },
+        "hasChildren": { "type": "boolean" }
+      }
+    },
+    "TreeSliceV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "snapshotId", "focusNodeId", "tree", "ancestors", "totalBytes", "truncated", "omittedBytes", "omittedCount", "generatedAtUnixMs"],
+      "properties": {
+        "kind": { "const": "treeSlice" },
+        "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" },
+        "focusNodeId": { "$ref": "#/$defs/SpaceNodeIdV1" },
+        "tree": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/SnapshotNodeV1" } },
+        "ancestors": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/SnapshotNodeV1" } },
+        "totalBytes": { "$ref": "#/$defs/UInt64V1" },
+        "truncated": { "type": "boolean" },
+        "omittedBytes": { "$ref": "#/$defs/UInt64V1" },
+        "omittedCount": { "$ref": "#/$defs/UInt32V1" },
+        "generatedAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" }
+      }
+    },
+    "ChildrenPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "snapshotId", "nodeId", "items", "nextCursor", "total", "sort"],
+      "properties": {
+        "kind": { "const": "childrenPage" },
+        "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" },
+        "nodeId": { "$ref": "#/$defs/SpaceNodeIdV1" },
+        "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/SnapshotNodeV1" } },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" },
+        "total": { "$ref": "#/$defs/SafeNonnegativeIntegerV1" },
+        "sort": { "enum": ["name", "size", "path"] }
+      }
+    },
+    "AncestorsPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "snapshotId", "nodeId", "items", "nextCursor"],
+      "properties": {
+        "kind": { "const": "ancestorsPage" },
+        "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" },
+        "nodeId": { "$ref": "#/$defs/SpaceNodeIdV1" },
+        "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/SnapshotNodeV1" } },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      }
+    },
+    "SnapshotPageV1": {
+      "oneOf": [
+        { "$ref": "#/$defs/TreeSliceV1" },
+        { "$ref": "#/$defs/ChildrenPageV1" },
+        { "$ref": "#/$defs/AncestorsPageV1" }
+      ]
+    },
+    "TreeSliceQueryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relativeDepth", "maxChildren", "maxNodes"],
+      "properties": {
+        "relativeDepth": { "type": "integer", "minimum": 0, "maximum": 24 },
+        "maxChildren": { "type": "integer", "minimum": 0, "maximum": 50 },
+        "maxNodes": { "type": "integer", "minimum": 1, "maximum": 200 }
+      }
+    },
+    "PageQueryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["limit"],
+      "properties": { "cursor": { "$ref": "#/$defs/CursorIdV1" }, "limit": { "type": "integer", "minimum": 1, "maximum": 200 } }
+    },
+    "CleanupCandidateV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeId", "displayPath", "sizeBytes", "reasonCode"],
+      "properties": {
+        "nodeId": { "$ref": "#/$defs/SpaceNodeIdV1" },
+        "displayPath": { "$ref": "#/$defs/DisplayPathV1" },
+        "sizeBytes": { "$ref": "#/$defs/UInt64V1" },
+        "reasonCode": { "enum": ["ignored", "staged", "node", "rust", "gitignored", "unknown"] },
+        "preset": { "enum": ["node", "rust", "gitignored"] }
+      }
+    },
+    "CleanupPlanV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planId", "snapshotId", "selected", "totalBytes", "mode", "createdAtUnixMs", "expiresAtUnixMs"],
+      "properties": {
+        "planId": { "$ref": "#/$defs/SpacePlanIdV1" },
+        "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" },
+        "selected": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/CleanupCandidateV1" } },
+        "totalBytes": { "$ref": "#/$defs/UInt64V1" },
+        "mode": { "const": "trash" },
+        "createdAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "expiresAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" }
+      }
+    },
+    "ICloudPlanSummaryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planId", "rootId", "snapshotId", "selectedCount", "bytesToEvict", "expiresAtUnixMs"],
+      "properties": {
+        "planId": { "$ref": "#/$defs/SpaceICloudPlanIdV1" },
+        "rootId": { "$ref": "#/$defs/SpaceRootIdV1" },
+        "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" },
+        "selectedCount": { "$ref": "#/$defs/UInt32V1" },
+        "bytesToEvict": { "$ref": "#/$defs/UInt64V1" },
+        "expiresAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" }
+      }
+    },
+    "SpaceJobV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jobId", "state", "sequence", "completedCount", "totalCount", "completedBytes", "totalBytes", "outcomes"],
+      "properties": {
+        "jobId": { "$ref": "#/$defs/SpaceJobIdV1" },
+        "state": { "enum": ["accepted", "running", "paused", "succeeded", "failed", "cancelled", "needsAttention"] },
+        "sequence": { "$ref": "#/$defs/UInt64V1" },
+        "completedCount": { "$ref": "#/$defs/UInt32V1" },
+        "totalCount": { "$ref": "#/$defs/UInt32V1" },
+        "completedBytes": { "$ref": "#/$defs/UInt64V1" },
+        "totalBytes": { "$ref": "#/$defs/UInt64V1" },
+        "outcomes": { "type": "array", "maxItems": 4, "uniqueItems": true, "x-xross-unique-by": "code", "items": { "type": "object", "additionalProperties": false, "required": ["code", "count"], "properties": { "code": { "enum": ["evicted", "skipped", "failed", "unavailable"] }, "count": { "$ref": "#/$defs/UInt32V1" } } } }
+      }
+    },
+    "ListWorkspaceRootsRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query"],
+      "properties": { "query": { "$ref": "#/$defs/RefyardListQueryV1" } }
+    },
+    "ListRepositoriesRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query"],
+      "properties": { "query": { "$ref": "#/$defs/RefyardListQueryV1" } }
+    },
+    "GetStatusRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "query"],
+      "properties": { "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" }, "query": { "$ref": "#/$defs/StatusQueryV1" } }
+    },
+    "HistoryPageRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "query"],
+      "properties": { "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" }, "query": { "$ref": "#/$defs/HistoryQueryV1" } }
+    },
+    "ListRefsRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "query"],
+      "properties": { "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" }, "query": { "$ref": "#/$defs/RefyardListQueryV1" } }
+    },
+    "RepositoryRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId"],
+      "properties": { "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" } }
+    },
+    "ListStashesRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "query"],
+      "properties": { "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" }, "query": { "$ref": "#/$defs/RefyardListQueryV1" } }
+    },
+    "ListSubmodulesRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "worktreeId", "query"],
+      "properties": { "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" }, "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" }, "query": { "$ref": "#/$defs/RefyardListQueryV1" } }
+    },
+    "GetPathPreviewsRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "worktreeId", "expectedSnapshotId", "pathIds"],
+      "properties": {
+        "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" },
+        "worktreeId": { "$ref": "#/$defs/WorktreeIdV1" },
+        "expectedSnapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "pathIds": { "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": { "$ref": "#/$defs/PathIdV1" } }
+      }
+    },
+    "ReadDiffRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId", "query"],
+      "properties": { "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" }, "query": { "$ref": "#/$defs/DiffQueryV1" } }
+    },
+    "PreviewMutationRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent"],
+      "properties": { "intent": { "$ref": "#/$defs/RefyardMutationIntentV1" } }
+    },
+    "RequestMutationSubmissionRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previewId"],
+      "properties": { "previewId": { "$ref": "#/$defs/MutationPreviewIdV1" } }
+    },
+    "GetMutationJobRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jobId"],
+      "properties": { "jobId": { "$ref": "#/$defs/RefyardJobIdV1" } }
+    },
+    "ListMutationRecoveriesRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query"],
+      "properties": { "query": { "$ref": "#/$defs/RefyardListQueryV1" } }
+    },
+    "WatchRepositoryRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repositoryId"],
+      "properties": { "repositoryId": { "$ref": "#/$defs/RepositoryIdV1" }, "sinceSequence": { "$ref": "#/$defs/UInt64V1" } }
+    },
+    "WatchMutationRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jobId"],
+      "properties": { "jobId": { "$ref": "#/$defs/RefyardJobIdV1" }, "sinceSequence": { "$ref": "#/$defs/UInt64V1" } }
+    },
+    "RefyardProblemCodeV1": {
+      "enum": ["Unauthenticated", "Forbidden", "NotFound", "InvalidRequest", "UnsupportedOperation", "InvalidOperationPayload", "UnsupportedPathEncoding", "StaleSnapshot", "StalePreview", "Conflict", "IdempotencyConflict", "ResourceBusy", "LimitExceeded", "GitCommandFailed", "NeedsAttention", "UncertainOutcome", "Timeout", "Cancelled", "Unavailable", "ProviderNotConnected", "NoProviderRemote", "ProviderUnauthorized", "ProviderRateLimited", "InternalError"]
+    },
+    "MutationPreviewV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["previewId", "recoveryId", "targetKind", "resourceLabel", "operationKind", "summaryKey", "displayPaths", "requiresNativeApproval", "expiresAtUnixMs"],
+      "properties": {
+        "previewId": { "$ref": "#/$defs/MutationPreviewIdV1" },
+        "recoveryId": { "$ref": "#/$defs/MutationRecoveryIdV1" },
+        "targetKind": { "$ref": "#/$defs/RefyardTargetKindV1" },
+        "resourceLabel": { "$ref": "#/$defs/DisplayString256V1" },
+        "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" },
+        "operationKind": { "$ref": "#/$defs/RefyardOperationKindV1" },
+        "summaryKey": { "type": "string", "minLength": 1, "maxLength": 96, "x-xross-maxUtf8Bytes": 96, "pattern": "^[A-Za-z0-9_.-]+$" },
+        "displayPaths": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/DisplayPathV1" } },
+        "requiresNativeApproval": { "type": "boolean" },
+        "expiresAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" }
+      }
+    },
+    "MutationJobV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jobId", "state", "sequence", "createdAtUnixMs", "updatedAtUnixMs", "problemCode"],
+      "properties": {
+        "jobId": { "$ref": "#/$defs/RefyardJobIdV1" },
+        "state": { "enum": ["accepted", "running", "succeeded", "failed", "needsAttention", "unknown", "cancelled"] },
+        "sequence": { "$ref": "#/$defs/UInt64V1" },
+        "createdAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "updatedAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "problemCode": { "oneOf": [{ "$ref": "#/$defs/RefyardProblemCodeV1" }, { "type": "null" }] }
+      }
+    },
+    "MutationRecoveryStateV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "job"], "properties": { "kind": { "const": "found" }, "job": { "$ref": "#/$defs/MutationJobV1" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "unknown" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "notAccepted" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "reconciled" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "ownerAcceptedUnknown" } } }
+      ]
+    },
+    "MutationRecoveryWriteFenceV1": {
+      "oneOf": [{ "const": "blocked" }, { "const": "released" }]
+    },
+    "MutationRecoveryV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recoveryId", "operationKind", "resourceLabel", "summaryKey", "createdAtUnixMs", "updatedAtUnixMs", "state", "writeFence"],
+      "properties": {
+        "recoveryId": { "$ref": "#/$defs/MutationRecoveryIdV1" },
+        "operationKind": { "$ref": "#/$defs/RefyardOperationKindV1" },
+        "resourceLabel": { "$ref": "#/$defs/DisplayString256V1" },
+        "summaryKey": { "type": "string", "minLength": 1, "maxLength": 96, "x-xross-maxUtf8Bytes": 96, "pattern": "^[A-Za-z0-9_.-]+$" },
+        "createdAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "updatedAtUnixMs": { "$ref": "#/$defs/UnixMillisV1" },
+        "state": { "$ref": "#/$defs/MutationRecoveryStateV1" },
+        "writeFence": { "$ref": "#/$defs/MutationRecoveryWriteFenceV1" }
+      }
+    },
+    "MutationRecoveryPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshotId", "items", "nextCursor"],
+      "properties": {
+        "snapshotId": { "$ref": "#/$defs/MutationRecoverySnapshotIdV1" },
+        "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/MutationRecoveryV1" } },
+        "nextCursor": { "$ref": "#/$defs/PageCursorV1" }
+      },
+      "x-xross-maxEncodedBytes": 1048576
+    },
+    "RefyardMutationSubmissionResultV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["decision", "outcome"], "properties": { "decision": { "const": "approved" }, "outcome": { "$ref": "#/$defs/MutationJobV1" } } },
+        { "type": "object", "additionalProperties": false, "required": ["decision"], "properties": { "decision": { "enum": ["denied", "cancelled"] } } }
+      ]
+    },
+    "RepositoryWatchEventV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "snapshotId"],
+      "properties": { "kind": { "const": "snapshotChanged" }, "snapshotId": { "$ref": "#/$defs/RefyardSnapshotIdV1" } }
+    },
+    "MutationWatchEventV1": { "$ref": "#/$defs/MutationJobV1" },
+    "SequencedRefyardRepositoryEventV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "sequence", "value"], "properties": { "kind": { "const": "event" }, "sequence": { "$ref": "#/$defs/UInt64V1" }, "value": { "$ref": "#/$defs/RepositoryWatchEventV1" } } },
+        { "$ref": "#/$defs/StreamGapV1" },
+        { "$ref": "#/$defs/StreamTerminalV1" }
+      ]
+    },
+    "SequencedRefyardMutationEventV1": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind", "sequence", "value"], "properties": { "kind": { "const": "event" }, "sequence": { "$ref": "#/$defs/UInt64V1" }, "value": { "$ref": "#/$defs/MutationWatchEventV1" } } },
+        { "$ref": "#/$defs/StreamGapV1" },
+        { "$ref": "#/$defs/StreamTerminalV1" }
+      ]
+    },
+    "ListRootsRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query"],
+      "properties": { "query": { "$ref": "#/$defs/PageQueryV1" } }
+    },
+    "SpaceRootsPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "nextCursor"],
+      "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/RootSummaryV1" } }, "nextCursor": { "$ref": "#/$defs/PageCursorV1" } }
+    },
+    "GetScanRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scanId"],
+      "properties": { "scanId": { "$ref": "#/$defs/SpaceScanIdV1" } }
+    },
+    "WatchScanRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scanId"],
+      "properties": { "scanId": { "$ref": "#/$defs/SpaceScanIdV1" }, "sinceSequence": { "$ref": "#/$defs/UInt64V1" } }
+    },
+    "CancelScanRequestV1": { "$ref": "#/$defs/GetScanRequestV1" },
+    "TreeSliceRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshotId", "nodeId", "query"],
+      "properties": { "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" }, "nodeId": { "$ref": "#/$defs/SpaceNodeIdV1" }, "query": { "$ref": "#/$defs/TreeSliceQueryV1" } }
+    },
+    "ChildrenPageRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshotId", "nodeId", "query"],
+      "properties": { "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" }, "nodeId": { "$ref": "#/$defs/SpaceNodeIdV1" }, "query": { "$ref": "#/$defs/PageQueryV1" } }
+    },
+    "ListAncestorsRequestV1": { "$ref": "#/$defs/ChildrenPageRequestV1" },
+    "ListCandidatesRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshotId", "query"],
+      "properties": { "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" }, "query": { "$ref": "#/$defs/PageQueryV1" } }
+    },
+    "SpaceCandidatesPageV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "nextCursor"],
+      "properties": { "items": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/CleanupCandidateV1" } }, "nextCursor": { "$ref": "#/$defs/PageCursorV1" } }
+    },
+    "PreviewCleanupRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshotId", "nodeIds"],
+      "properties": { "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" }, "nodeIds": { "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": { "$ref": "#/$defs/SpaceNodeIdV1" } } }
+    },
+    "RequestCleanupApprovalRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planId"],
+      "properties": { "planId": { "$ref": "#/$defs/SpacePlanIdV1" } }
+    },
+    "PlanICloudEvictionRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rootId", "snapshotId"],
+      "properties": { "rootId": { "$ref": "#/$defs/SpaceRootIdV1" }, "snapshotId": { "$ref": "#/$defs/SpaceSnapshotIdV1" } }
+    },
+    "RequestICloudEvictionApprovalRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["planId"],
+      "properties": { "planId": { "$ref": "#/$defs/SpaceICloudPlanIdV1" } }
+    },
+    "GetCleanupJobRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jobId"],
+      "properties": { "jobId": { "$ref": "#/$defs/SpaceJobIdV1" } }
+    },
+    "WatchCleanupRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jobId"],
+      "properties": { "jobId": { "$ref": "#/$defs/SpaceJobIdV1" }, "sinceSequence": { "$ref": "#/$defs/UInt64V1" } }
+    },
+    "ControlICloudEvictionRequestV1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jobId", "command"],
+      "properties": { "jobId": { "$ref": "#/$defs/SpaceJobIdV1" }, "command": { "enum": ["pause", "resume", "cancel"] } }
+    }
+  }
+}

@@ -21,8 +21,8 @@ export interface SunburstSegment {
   node: TreeSliceNode
 }
 
-export function buildSunburstSegments(tree: TreeSliceNode, radius: number): SunburstSegment[] {
-  const root = hierarchy(withOmittedBuckets(tree))
+export function buildSunburstSegments(tree: TreeSliceNode, radius: number, otherLabel = 'Other'): SunburstSegment[] {
+  const root = hierarchy(withOmittedBuckets(tree, otherLabel))
     .sum((node) => (node.children.length > 0 ? 0 : Math.max(1, node.size)))
     .sort((left, right) => (right.value ?? 0) - (left.value ?? 0))
 
@@ -61,12 +61,12 @@ export function buildSunburstSegments(tree: TreeSliceNode, radius: number): Sunb
     })
 }
 
-function withOmittedBuckets(node: TreeSliceNode): TreeSliceNode {
-  const children = node.children.map(withOmittedBuckets)
+function withOmittedBuckets(node: TreeSliceNode, otherLabel: string): TreeSliceNode {
+  const children = node.children.map((child) => withOmittedBuckets(child, otherLabel))
   if (node.omittedBytes > 0) {
     children.push({
       id: `${node.id}:omitted`,
-      name: 'Other',
+      name: otherLabel,
       path: node.path,
       size: node.omittedBytes,
       depth: node.depth + 1,

@@ -257,9 +257,15 @@
     stroke-width 120ms ease;
 }
 
-.arc:focus,
 .arc:focus-visible {
-  outline: none;
+  stroke: var(--foreground);
+  stroke-width: 2.5;
+  filter: brightness(1.15);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arc { transition: none; }
+  .animate-spin { animation: none; }
 }
 
 .arc:hover,

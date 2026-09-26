@@ -1,0 +1,97 @@
+{
+  "contractMajor": 1,
+  "acceptedIntents": [
+    { "target": { "kind": "workspace", "workspaceRootId": "root_owner-approved", "relativeDestination": "repo" }, "operation": { "kind": "initRepository", "initialBranch": null } },
+    { "target": { "kind": "workspace", "workspaceRootId": "root_owner-approved", "relativeDestination": "repo" }, "operation": { "kind": "cloneRepository", "remoteUrl": "https://github.com/acme/repo.git", "relativeDestination": "repo", "initializeSubmodules": false } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "stagePaths", "pathIds": ["path_a"], "previewTokens": ["pt_a"] } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "unstagePaths", "pathIds": ["path_a"] } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "discardTrackedPaths", "pathIds": ["path_a"], "previewTokens": ["pt_a"], "confirmed": true } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "commit", "message": "Initial commit" } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "amendCommit", "message": null, "confirmed": true } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "createBranch", "branchName": "feature", "startOid": null, "switchToIt": false } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "switchBranch", "branchName": "main" } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "renameBranch", "branchName": "feature", "newName": "renamed" } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "deleteBranch", "branchName": "feature", "confirmed": true } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "setBranchUpstream", "branchName": "main", "upstream": { "remoteName": "origin", "branchName": "main" } } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "addRemote", "remoteName": "origin", "fetchUrl": "https://github.com/acme/repo.git", "pushUrl": null } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "updateRemote", "remoteName": "origin", "newName": null, "fetchUrl": "https://github.com/acme/repo.git", "pushUrl": null } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "removeRemote", "remoteName": "origin", "confirmed": true } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "fetch", "remoteName": "origin", "prune": false, "tags": "none" } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "push", "remoteName": "origin", "sourceRef": "refs/heads/main", "destinationRef": "refs/heads/main", "setUpstream": false } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "pull", "remoteName": "origin", "mode": "ff-only" } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "createStash", "message": null, "includeUntracked": false, "keepIndex": false } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "applyStash", "stash": { "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "locator": "stash@{0}" }, "restoreIndex": false } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "popStash", "stash": { "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "locator": "stash@{0}" }, "restoreIndex": false, "confirmed": true } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "dropStash", "stash": { "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "locator": "stash@{0}" }, "confirmed": true } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "createTag", "tagName": "v1", "targetOid": null, "annotation": null } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "deleteTag", "tagName": "v1", "confirmed": true } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "pushTag", "remoteName": "origin", "tagName": "v1" } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "createWorktree", "relativeDestination": "feature-wt", "reference": { "kind": "existingBranch", "branchName": "main" } } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "removeWorktree", "worktreeId": "wt_main", "confirmed": true } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "lockWorktree", "worktreeId": "wt_main", "reason": null } },
+    { "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "unlockWorktree", "worktreeId": "wt_main" } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "addSubmodule", "remoteUrl": "https://github.com/acme/repo.git", "relativePath": "deps/sub", "branchName": null, "initialize": true } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "updateSubmodule", "pathIds": ["path_a"], "initialize": true, "recursive": false } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "syncSubmodule", "pathIds": ["path_a"], "recursive": false } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "merge", "sourceOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "mode": "default", "message": null } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "continueMerge", "message": null } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "abortMerge", "confirmed": true } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "revertCommit", "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "resetBranch", "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "mode": "soft" } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "cherryPick", "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "continueCherryPick" } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "abortCherryPick", "confirmed": true } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "rebase", "upstreamOid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "continueRebase" } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "abortRebase", "confirmed": true } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "dropCommit", "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "confirmed": true } },
+    { "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" }, "operation": { "kind": "squashCommit", "message": null } }
+  ],
+  "rejectedIntents": [
+    {
+      "name": "webview-cannot-select-client-request-id",
+      "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" },
+      "operation": { "kind": "stagePaths", "pathIds": ["path_a"], "previewTokens": ["pt_a"], "clientRequestId": "webview-controlled" }
+    },
+    {
+      "name": "required-operation-field-missing",
+      "target": { "kind": "workspace", "workspaceRootId": "root_owner-approved", "relativeDestination": "repo" },
+      "operation": { "kind": "initRepository" }
+    },
+    {
+      "name": "unknown-process-authority-field",
+      "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" },
+      "operation": { "kind": "commit", "message": "Initial commit", "argv": ["--config", "core.hooksPath=/tmp"] }
+    },
+    {
+      "name": "workspace-destination-traversal",
+      "target": { "kind": "workspace", "workspaceRootId": "root_owner-approved", "relativeDestination": "../outside" },
+      "operation": { "kind": "initRepository", "initialBranch": null }
+    },
+    {
+      "name": "source-snapshot-id-cannot-cross-view-boundary",
+      "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "snap_source-1" },
+      "operation": { "kind": "commit", "message": "Initial commit" }
+    },
+    {
+      "name": "source-operation-id-is-not-a-path-preview-token",
+      "target": { "kind": "worktree", "repositoryId": "repo_local", "worktreeId": "wt_main", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" },
+      "operation": { "kind": "stagePaths", "pathIds": ["path_a"], "previewTokens": ["op_submitted-operation"] }
+    },
+    {
+      "name": "workspace-operation-cannot-target-worktree",
+      "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" },
+      "operation": { "kind": "initRepository", "initialBranch": null }
+    },
+    {
+      "name": "local-file-clone-url-refused",
+      "target": { "kind": "workspace", "workspaceRootId": "root_owner-approved", "relativeDestination": "repo" },
+      "operation": { "kind": "cloneRepository", "remoteUrl": "file:///srv/git/repo.git", "relativeDestination": "repo", "initializeSubmodules": false }
+    },
+    {
+      "name": "inline-credential-url-refused",
+      "target": { "kind": "repository", "repositoryId": "repo_local", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001" },
+      "operation": { "kind": "addRemote", "remoteName": "origin", "fetchUrl": "https://token@example.com/acme/repo.git", "pushUrl": null }
+    }
+  ]
+}

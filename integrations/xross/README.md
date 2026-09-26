@@ -1,0 +1,5 @@
+# Xross Space Lens view contract
+
+This directory contains the exact Task 0.4 view-v1 schema and eight golden-vector snapshots, plus compile-time API declarations copied from Xross commit `00bec7a3faf8f2ef4714a4c71641beb9a41cdfad` (`packages/embedded-web/src/contracts/view-v1/{types.ts,ids.ts}` and `packages/embedded-web/src/surfaces/{view-context.ts,space-lens/api.ts}`). The copied context parser has one local strict-index guard to satisfy Space Lens's TypeScript settings; it preserves the same sorted/unique feature validation.
+
+The web adapter imports these declarations without an Xross workspace dependency, kkrpc, or any Xross runtime code. The canonical schema SHA-256 is `9f365418a12fec02c7ebbc770fa019e52c9d9e037817a4c3ef1c590888e1ba68`; the portable sorted eight-vector manifest digest (`shasum -a 256 *.json | shasum -a 256` from `vectors/`) is `30f38f660ff324638a59b5e49f70ee176aae5ce8a159a65d93465d1114f9ad40`. Keep the schema and vectors byte-identical to the canonical Task 0.4 artifact; incompatible DTO changes require a view-contract major version change.

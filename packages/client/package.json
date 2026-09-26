@@ -6,6 +6,8 @@
   "description": "Transport clients for the Space Lens contract: authenticated REST + fetch-based SSE. Shared by the web app, the Tauri desktop adapter, and the VS Code webview bridge.",
   "exports": {
     ".": "./src/index.ts",
+    "./xross-view": "./src/xross-view.ts",
+    "./xross-projection": "./src/xross-projection.ts",
     "./package.json": "./package.json"
   },
   "scripts": {

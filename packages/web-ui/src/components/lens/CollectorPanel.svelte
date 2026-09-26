@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Minus, Trash2 } from "@lucide/svelte";
   import type { CollectorEntry } from "../../types";
-  import { formatBytes } from "../../lib/format";
+  import { useLensI18n } from "../../lib/i18n/context.svelte";
   import { Button } from "../ui/button/index";
   import { ScrollArea } from "../ui/scroll-area/index";
   import * as Sheet from "../ui/sheet/index";
@@ -14,6 +14,7 @@
     onClose: () => void;
     onRemove: (id: string) => void;
     onDelete: () => void;
+    actionLabel?: string;
   }
 
   let {
@@ -24,15 +25,17 @@
     onClose,
     onRemove,
     onDelete,
+    actionLabel,
   }: Props = $props();
+  const i18n = useLensI18n();
 </script>
 
 <Sheet.Root {open} onOpenChange={(value) => (!value ? onClose() : undefined)}>
   <Sheet.Content class="flex w-full flex-col gap-0 sm:max-w-xl">
     <Sheet.Header class="border-b pb-5">
-      <Sheet.Title>Collector</Sheet.Title>
+      <Sheet.Title>{i18n.t('lens.collector.title')}</Sheet.Title>
       <Sheet.Description>
-        {entries.length} selected items, {formatBytes(totalSize)} queued for review.
+        {i18n.t('lens.collector.summary', { count: i18n.count(entries.length), size: i18n.bytes(totalSize) })}
       </Sheet.Description>
     </Sheet.Header>
 
@@ -41,7 +44,7 @@
         <p
           class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground"
         >
-          No selected items.
+          {i18n.t('lens.collector.empty')}
         </p>
       {:else}
         <div class="grid gap-2 pr-3">
@@ -56,14 +59,14 @@
                 >
               </div>
               <span class="text-sm font-medium tabular-nums"
-                >{formatBytes(entry.size)}</span
+                >{i18n.bytes(entry.size)}</span
               >
               <Button
                 variant="ghost"
                 size="icon-sm"
                 type="button"
                 onclick={() => onRemove(entry.id)}
-                aria-label={`Remove ${entry.name}`}
+                aria-label={i18n.t('lens.collector.remove', { name: entry.name })}
               >
                 <Minus class="size-4" />
               </Button>
@@ -75,7 +78,7 @@
 
     <Sheet.Footer class="border-t pt-4">
       <Button variant="outline" type="button" onclick={onClose}
-        >Review later</Button
+        >{i18n.t('lens.collector.later')}</Button
       >
       <Button
         variant="destructive"
@@ -84,7 +87,7 @@
         disabled={entries.length === 0 || deleting}
       >
         <Trash2 class="size-4" />
-        {deleting ? "Deleting..." : "Delete selected"}
+        {actionLabel ?? i18n.t(deleting ? 'lens.collector.deleting' : 'lens.collector.delete')}
       </Button>
     </Sheet.Footer>
   </Sheet.Content>

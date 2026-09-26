@@ -1,0 +1,43 @@
+{
+  "note": "Canonical DTO examples only; these are not kkrpc frames. A zero-argument method has argumentCount 0 and request null. A parameterized method has exactly one request object and argumentCount 1. Optional properties are omitted.",
+  "refyard": {
+    "context": { "argumentCount": 0, "request": null },
+    "capabilities": { "argumentCount": 0, "request": null },
+    "listWorkspaceRoots": { "argumentCount": 1, "request": { "query": { "limit": 10 } } },
+    "listRepositories": { "argumentCount": 1, "request": { "query": { "limit": 10 } } },
+    "getStatus": { "argumentCount": 1, "request": { "repositoryId": "repo_abc", "query": { "limit": 10 } } },
+    "historyPage": { "argumentCount": 1, "request": { "repositoryId": "repo_abc", "query": {} } },
+    "listRefs": { "argumentCount": 1, "request": { "repositoryId": "repo_abc", "query": { "limit": 10 } } },
+    "listWorktrees": { "argumentCount": 1, "request": { "repositoryId": "repo_abc" } },
+    "listStashes": { "argumentCount": 1, "request": { "repositoryId": "repo_abc", "query": { "limit": 10 } } },
+    "listSubmodules": { "argumentCount": 1, "request": { "repositoryId": "repo_abc", "worktreeId": "wt_abc", "query": { "limit": 10 } } },
+    "getPathPreviews": { "argumentCount": 1, "request": { "repositoryId": "repo_abc", "worktreeId": "wt_abc", "expectedSnapshotId": "rsnapshot_00000000000000000000000000000001", "pathIds": ["path_abc"] } },
+    "readDiff": { "argumentCount": 1, "request": { "repositoryId": "repo_abc", "query": { "kind": "unstaged", "limit": 10 } } },
+    "previewMutation": { "argumentCount": 1, "request": { "intent": { "target": { "kind": "workspace", "workspaceRootId": "root_abc", "relativeDestination": "demo" }, "operation": { "kind": "initRepository", "initialBranch": null } } } },
+    "requestMutationSubmission": { "argumentCount": 1, "request": { "previewId": "rpreview_00000000000000000000000000000001" } },
+    "getMutationJob": { "argumentCount": 1, "request": { "jobId": "rjob_00000000000000000000000000000001" } },
+    "listMutationRecoveries": { "argumentCount": 1, "request": { "query": { "limit": 20 } } },
+    "watchRepository": { "argumentCount": 1, "request": { "repositoryId": "repo_abc" } },
+    "watchMutation": { "argumentCount": 1, "request": { "jobId": "rjob_00000000000000000000000000000001" } }
+  },
+  "spaceLens": {
+    "context": { "argumentCount": 0, "request": null },
+    "capabilities": { "argumentCount": 0, "request": null },
+    "listRoots": { "argumentCount": 1, "request": { "query": { "limit": 10 } } },
+    "startScan": { "argumentCount": 1, "request": { "rootIds": ["xroot_00000000000000000000000000000001"], "options": { "ignoreHidden": false, "respectGitignore": true, "ignoredMode": "summarize" } } },
+    "getScan": { "argumentCount": 1, "request": { "scanId": "xscan_00000000000000000000000000000001" } },
+    "watchScan": { "argumentCount": 1, "request": { "scanId": "xscan_00000000000000000000000000000001" } },
+    "cancelScan": { "argumentCount": 1, "request": { "scanId": "xscan_00000000000000000000000000000001" } },
+    "treeSlice": { "argumentCount": 1, "request": { "snapshotId": "xsnapshot_00000000000000000000000000000001", "nodeId": "xnode_00000000000000000000000000000001", "query": { "relativeDepth": 2, "maxChildren": 20, "maxNodes": 100 } } },
+    "childrenPage": { "argumentCount": 1, "request": { "snapshotId": "xsnapshot_00000000000000000000000000000001", "nodeId": "xnode_00000000000000000000000000000001", "query": { "limit": 20 } } },
+    "listAncestors": { "argumentCount": 1, "request": { "snapshotId": "xsnapshot_00000000000000000000000000000001", "nodeId": "xnode_00000000000000000000000000000001", "query": { "limit": 20 } } },
+    "listCandidates": { "argumentCount": 1, "request": { "snapshotId": "xsnapshot_00000000000000000000000000000001", "query": { "limit": 20 } } },
+    "previewCleanup": { "argumentCount": 1, "request": { "snapshotId": "xsnapshot_00000000000000000000000000000001", "nodeIds": ["xnode_00000000000000000000000000000001"] } },
+    "requestCleanupApproval": { "argumentCount": 1, "request": { "planId": "xplan_00000000000000000000000000000001" } },
+    "planICloudEviction": { "argumentCount": 1, "request": { "rootId": "xroot_00000000000000000000000000000001", "snapshotId": "xsnapshot_00000000000000000000000000000001" } },
+    "requestICloudEvictionApproval": { "argumentCount": 1, "request": { "planId": "xicloud_00000000000000000000000000000001" } },
+    "getCleanupJob": { "argumentCount": 1, "request": { "jobId": "xjob_00000000000000000000000000000001" } },
+    "watchCleanup": { "argumentCount": 1, "request": { "jobId": "xjob_00000000000000000000000000000001" } },
+    "controlICloudEviction": { "argumentCount": 1, "request": { "jobId": "xjob_00000000000000000000000000000001", "command": "cancel" } }
+  }
+}

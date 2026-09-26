@@ -1,0 +1,143 @@
+{
+  "$comment": "Named response unions have complete canonical DTO examples. responsePatches are applied to complete method-response DTOs to cover inline union arms; each result is revalidated as a full response.",
+  "FilePatchV1": [
+    { "kind": "text", "hunks": [], "synthesized": false },
+    { "kind": "binary" },
+    { "kind": "oversize", "reason": "byteLimit" },
+    { "kind": "unavailable", "reason": "unsupported" },
+    { "kind": "submodule", "oldOid": null, "newOid": "0000000000000000000000000000000000000001" },
+    { "kind": "submodule", "oldOid": "0000000000000000000000000000000000000001", "newOid": null }
+  ],
+  "PageCursorV1": ["cur_page_2", null],
+  "RefEntryV1": [
+    { "kind": "localBranch", "name": "main", "fullName": "refs/heads/main", "oid": "0000000000000000000000000000000000000001", "isCurrent": true, "upstream": { "fullName": "refs/remotes/origin/main", "ahead": 1, "behind": 0, "gone": false } },
+    { "kind": "localBranch", "name": "feature", "fullName": "refs/heads/feature", "oid": "0000000000000000000000000000000000000002", "isCurrent": false, "upstream": null },
+    { "kind": "remoteTracking", "name": "origin/main", "fullName": "refs/remotes/origin/main", "oid": "0000000000000000000000000000000000000001", "remoteName": "origin" },
+    { "kind": "tag", "name": "v1.0.0", "fullName": "refs/tags/v1.0.0", "oid": "0000000000000000000000000000000000000003", "annotated": false, "targetOid": null },
+    { "kind": "remote", "name": "origin", "fetchEndpoint": { "kind": "network", "transport": "https", "hostDisplay": "example.test" }, "pushEndpoint": { "kind": "redacted" } },
+    { "kind": "remote", "name": "upstream", "fetchEndpoint": { "kind": "network", "transport": "ssh", "hostDisplay": "git.example.test" }, "pushEndpoint": null },
+    { "kind": "other", "fullName": "refs/stash", "oid": "0000000000000000000000000000000000000004", "category": "stash" }
+  ],
+  "RemoteEndpointSummaryV1": [
+    { "kind": "network", "transport": "https", "hostDisplay": "example.test" },
+    { "kind": "redacted" }
+  ],
+  "RefyardMutationSubmissionResultV1": [
+    { "decision": "approved", "outcome": { "jobId": "rjob_00000000000000000000000000000001", "state": "accepted", "sequence": "0", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000000", "problemCode": null } },
+    { "decision": "denied" },
+    { "decision": "cancelled" }
+  ],
+  "MutationRecoveryStateV1": [
+    { "kind": "found", "job": { "jobId": "rjob_00000000000000000000000000000001", "state": "accepted", "sequence": "0", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000000", "problemCode": null } },
+    { "kind": "unknown" },
+    { "kind": "notAccepted" },
+    { "kind": "reconciled" },
+    { "kind": "ownerAcceptedUnknown" }
+  ],
+  "MutationRecoveryWriteFenceV1": ["blocked", "released"],
+  "ViewErrorParameterV1": [
+    { "kind": "fieldName", "fieldName": "operation" },
+    { "kind": "limit", "limitName": "pageItems", "maximum": 200, "actual": 201 },
+    { "kind": "retryAfter", "retryAfterMs": 1000 }
+  ],
+  "ViewErrorV1": [
+    { "domain": "host", "code": "RecoveryUnavailable", "retryable": true, "parameters": [] },
+    { "domain": "host", "code": "StaleGeneration", "retryable": false, "parameters": [] },
+    { "domain": "refyard", "code": "InvalidRequest", "retryable": false, "parameters": [] },
+    { "domain": "space-lens", "code": "Unavailable", "retryable": true, "parameters": [] }
+  ],
+  "ScanWatchEventV1": [
+    { "kind": "progress", "scan": { "scanId": "xscan_00000000000000000000000000000001", "state": "scanning", "progressPermille": 500, "bytesVisited": "50", "entriesVisited": "5", "rootIds": ["xroot_00000000000000000000000000000001"], "updatedAtUnixMs": "1710000000000" } },
+    { "kind": "ready", "scan": { "scanId": "xscan_00000000000000000000000000000001", "state": "ready", "progressPermille": 1000, "bytesVisited": "100", "entriesVisited": "10", "rootIds": ["xroot_00000000000000000000000000000001"], "snapshotId": "xsnapshot_00000000000000000000000000000001", "rootNodes": [{ "rootId": "xroot_00000000000000000000000000000001", "nodeId": "xnode_00000000000000000000000000000001" }], "updatedAtUnixMs": "1710000000001" } },
+    { "kind": "cancelled", "scan": { "scanId": "xscan_00000000000000000000000000000001", "state": "cancelled", "bytesVisited": "50", "entriesVisited": "5", "rootIds": ["xroot_00000000000000000000000000000001"], "updatedAtUnixMs": "1710000000002" } },
+    { "kind": "failed", "scan": { "scanId": "xscan_00000000000000000000000000000001", "state": "failed", "bytesVisited": "50", "entriesVisited": "5", "rootIds": ["xroot_00000000000000000000000000000001"], "updatedAtUnixMs": "1710000000003" }, "error": "unavailable" }
+  ],
+  "SequencedRefyardRepositoryEventV1": [
+    { "kind": "event", "sequence": "1", "value": { "kind": "snapshotChanged", "snapshotId": "rsnapshot_00000000000000000000000000000001" } },
+    { "kind": "gap", "requestedAfter": "1", "oldestAvailable": "3" },
+    { "kind": "terminal", "sequence": "3", "outcome": "completed" }
+  ],
+  "SequencedRefyardMutationEventV1": [
+    { "kind": "event", "sequence": "1", "value": { "jobId": "rjob_00000000000000000000000000000001", "state": "running", "sequence": "1", "createdAtUnixMs": "1710000000000", "updatedAtUnixMs": "1710000000001", "problemCode": null } },
+    { "kind": "gap", "requestedAfter": "1", "oldestAvailable": "3" },
+    { "kind": "terminal", "sequence": "3", "outcome": "completed" }
+  ],
+  "SequencedSpaceScanEventV1": [
+    { "kind": "event", "sequence": "1", "value": { "kind": "progress", "scan": { "scanId": "xscan_00000000000000000000000000000001", "state": "scanning", "progressPermille": 500, "bytesVisited": "50", "entriesVisited": "5", "rootIds": ["xroot_00000000000000000000000000000001"], "updatedAtUnixMs": "1710000000000" } } },
+    { "kind": "gap", "requestedAfter": "1", "oldestAvailable": "3" },
+    { "kind": "terminal", "sequence": "3", "outcome": "completed" }
+  ],
+  "SequencedSpaceCleanupEventV1": [
+    { "kind": "event", "sequence": "1", "value": { "kind": "jobUpdated", "job": { "jobId": "xjob_00000000000000000000000000000001", "state": "succeeded", "sequence": "1", "completedCount": 1, "totalCount": 1, "completedBytes": "10", "totalBytes": "10", "outcomes": [{ "code": "evicted", "count": 1 }] } } },
+    { "kind": "gap", "requestedAfter": "1", "oldestAvailable": "3" },
+    { "kind": "terminal", "sequence": "3", "outcome": "completed" }
+  ],
+  "SpaceJobApprovalResultV1": [
+    { "decision": "approved", "outcome": { "jobId": "xjob_00000000000000000000000000000001", "state": "accepted", "sequence": "0", "completedCount": 0, "totalCount": 1, "completedBytes": "0", "totalBytes": "10", "outcomes": [] } },
+    { "decision": "denied" },
+    { "decision": "cancelled" }
+  ],
+  "responsePatches": [
+    {
+      "surface": "refyard",
+      "method": "readDiff",
+      "overrides": [
+        { "path": "/worktreeId", "value": null },
+        { "path": "/files/0/oldPathId", "value": "path_old-main" },
+        { "path": "/files/0/oldDisplayPath", "value": "src/old-main.rs" },
+        { "path": "/files/0/insertions", "value": null },
+        { "path": "/files/0/deletions", "value": null },
+        { "path": "/files/0/oldMode", "value": null },
+        { "path": "/files/0/newMode", "value": null }
+      ]
+    },
+    {
+      "surface": "refyard",
+      "method": "getPathPreviews",
+      "overrides": [{ "path": "/tokens/0/sizeBytes", "value": null }]
+    },
+    {
+      "surface": "refyard",
+      "method": "listSubmodules",
+      "overrides": [
+        { "path": "/items/0/recordedOid", "value": "0000000000000000000000000000000000000005" },
+        { "path": "/items/0/indexOid", "value": "0000000000000000000000000000000000000006" },
+        { "path": "/items/0/actualOid", "value": "0000000000000000000000000000000000000007" },
+        { "path": "/items/0/repositoryId", "value": "repo_vendor-lib" }
+      ]
+    },
+    {
+      "surface": "refyard",
+      "method": "historyPage",
+      "overrides": [{ "path": "/detail", "value": null }]
+    },
+    {
+      "surface": "refyard",
+      "method": "getStatus",
+      "overrides": [
+        { "path": "/upstream", "value": null },
+        { "path": "/operationInProgress", "value": "rebase" },
+        { "path": "/entries/0/kind", "value": "unmerged" },
+        { "path": "/entries/0/indexStatus", "value": "U" },
+        { "path": "/entries/0/worktreeStatus", "value": "U" },
+        { "path": "/entries/0/originalPathId", "value": "path_original" },
+        { "path": "/entries/0/originalDisplayPath", "value": "src/old-main.rs" },
+        { "path": "/entries/0/headOid", "value": null },
+        { "path": "/entries/0/indexOid", "value": null },
+        { "path": "/entries/0/headMode", "value": null },
+        { "path": "/entries/0/indexMode", "value": null },
+        { "path": "/entries/0/worktreeMode", "value": null },
+        { "path": "/entries/0/submodule", "value": { "commitChanged": true, "modified": false, "untracked": false } },
+        { "path": "/entries/0/unmergedStages", "value": [
+          { "stage": 1, "mode": null, "oid": null },
+          { "stage": 2, "mode": "100644", "oid": "0000000000000000000000000000000000000008" }
+        ] }
+      ]
+    },
+    {
+      "surface": "refyard",
+      "method": "listRepositories",
+      "overrides": [{ "path": "/items/0/operationInProgress", "value": "merge" }]
+    }
+  ]
+}

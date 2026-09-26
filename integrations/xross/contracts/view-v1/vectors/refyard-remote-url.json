@@ -1,0 +1,30 @@
+{
+  "contractMajor": 1,
+  "urlFieldPaths": [
+    "cloneRepository.operation.remoteUrl",
+    "addRemote.operation.fetchUrl",
+    "addRemote.operation.pushUrl",
+    "updateRemote.operation.fetchUrl",
+    "updateRemote.operation.pushUrl",
+    "addSubmodule.operation.remoteUrl"
+  ],
+  "accepted": [
+    "https://github.com/acme/repo.git",
+    "ssh://git@example.com/acme/repo.git",
+    "git@example.com:acme/repo.git"
+  ],
+  "rejected": [
+    "file:///srv/git/repo.git",
+    "/srv/git/repo.git",
+    "C:\\git\\repo.git",
+    "../repo.git",
+    "http://example.com/acme/repo.git",
+    "ext::sh -c id",
+    "https://user:secret@example.com/acme/repo.git",
+    "https://token@example.com/acme/repo.git",
+    "https://example.com/acme/repo.git?access_token=secret",
+    "https://example.com/acme/repo.git#secret",
+    "-https://example.com/acme/repo.git",
+    "https://example.com/a repo.git"
+  ]
+}

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { TreeNodeSummary, TreeSliceNode } from "../../types";
   import { buildSunburstSegments } from "../../lib/sunburst";
-  import { formatBytes } from "../../lib/format";
+  import { useLensI18n } from "../../lib/i18n/context.svelte";
 
   interface Props {
     tree: TreeSliceNode | null;
@@ -24,15 +24,16 @@
   }: Props = $props();
   const size = 620;
   const radius = 295;
-  let segments = $derived(tree ? buildSunburstSegments(tree, radius) : []);
+  const i18n = useLensI18n();
+  let segments = $derived(tree ? buildSunburstSegments(tree, radius, i18n.t('lens.chart.other')) : []);
 </script>
 
-<section class="chart-wrap" aria-label="Disk usage chart">
+<section class="chart-wrap" aria-label={i18n.t('lens.chart.title')}>
   <svg
     class="sunburst"
     viewBox={`0 0 ${size} ${size}`}
     role="img"
-    aria-label="Sunburst disk usage chart"
+    aria-label={i18n.t('lens.chart.title')}
   >
     <g transform={`translate(${size / 2}, ${size / 2})`}>
       <circle class="center-well" r="64"></circle>
@@ -45,7 +46,7 @@
           fill={segment.color}
           role="button"
           tabindex="0"
-          aria-label={`${segment.name}, ${formatBytes(segment.size)}`}
+          aria-label={i18n.t('lens.chart.arc', { name: segment.name, size: i18n.bytes(segment.size) })}
           onmouseenter={() => onHover(segment.id)}
           onmouseleave={() => onHover(null)}
           onclick={() => onOpen(segment.node)}
@@ -61,11 +62,11 @@
             onContext(segment.node, event.clientX, event.clientY);
           }}
         >
-          <title>{segment.path} - {formatBytes(segment.size)}</title>
+          <title>{segment.path} - {i18n.bytes(segment.size)}</title>
         </path>
       {/each}
       <text class="center-size" text-anchor="middle" y="-8"
-        >{focusNode ? formatBytes(focusNode.size) : ""}</text
+        >{focusNode ? i18n.bytes(focusNode.size) : ""}</text
       >
       <text class="center-label" text-anchor="middle" y="24"
         >{focusNode?.name ?? ""}</text

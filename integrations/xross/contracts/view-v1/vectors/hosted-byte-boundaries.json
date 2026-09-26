@@ -1,0 +1,24 @@
+{
+  "$comment": "The request-size seed is synthetic. Unary response boundaries pad a schema-valid ViewContextV1 with JSON whitespace; NDJSON tests use typed events and count delimiter bytes. Focused adapter tests build multibyte UTF-8 bodies and compare their raw byte lengths with schema.json x-xross-transport-limits.",
+  "request": {
+    "maximumBytes": 65536,
+    "overflowByBytes": 1,
+    "acceptedSeed": { "padding": "" }
+  },
+  "response": {
+    "maximumBytes": 1048576,
+    "overflowByBytes": 1
+  },
+  "streamEvent": {
+    "maximumBytes": 65536,
+    "overflowByBytes": 1,
+    "acceptedJsonSeed": {
+      "kind": "event",
+      "sequence": "1",
+      "value": {
+        "kind": "snapshotChanged",
+        "snapshotId": "rsnapshot_00000000000000000000000000000001"
+      }
+    }
+  }
+}

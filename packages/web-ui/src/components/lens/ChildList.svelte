@@ -2,7 +2,7 @@
   import { ChevronRight, Plus } from "@lucide/svelte";
   import type { TreeNodeSummary } from "../../types";
   import { nodeColor } from "../../lib/colors";
-  import { formatBytes } from "../../lib/format";
+  import { useLensI18n } from "../../lib/i18n/context.svelte";
   import { Button } from "../ui/button/index";
   import { ScrollArea } from "../ui/scroll-area/index";
 
@@ -25,9 +25,10 @@
     onCollect,
     onContext,
   }: Props = $props();
+  const i18n = useLensI18n();
 </script>
 
-<ScrollArea class="min-h-0 flex-1 pr-2" aria-label="Directory children">
+<ScrollArea class="min-h-0 flex-1 pr-2" aria-label={i18n.t('lens.children.label')}>
   <div class="grid gap-2" role="list">
     {#each items as item, index (item.id)}
       <div
@@ -61,11 +62,11 @@
         >
           <span class="block truncate text-sm font-medium">{item.name}</span>
           <span class="block truncate text-xs text-muted-foreground"
-            >{item.childCount} items</span
+            >{i18n.t('lens.children.items', { count: i18n.count(item.childCount) })}</span
           >
         </button>
         <span class="text-xs font-medium tabular-nums text-muted-foreground"
-          >{formatBytes(item.size)}</span
+          >{i18n.bytes(item.size)}</span
         >
         <div class="flex items-center gap-1">
           <Button
@@ -73,7 +74,7 @@
             size="icon-sm"
             type="button"
             onclick={() => onCollect(item)}
-            aria-label={`Move ${item.name} to Collector`}
+            aria-label={i18n.t('lens.children.collect', { name: item.name })}
           >
             <Plus class="size-4" />
           </Button>
@@ -82,7 +83,7 @@
             size="icon-sm"
             type="button"
             onclick={() => onOpen(item)}
-            aria-label={`Open ${item.name}`}
+            aria-label={i18n.t('lens.children.open', { name: item.name })}
           >
             <ChevronRight class="size-4" />
           </Button>

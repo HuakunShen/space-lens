@@ -8,7 +8,7 @@
     X,
   } from "@lucide/svelte";
   import type { ScanStatus, ScanTarget } from "../../types";
-  import { formatBytes } from "../../lib/format";
+  import { useLensI18n } from "../../lib/i18n/context.svelte";
   import { Badge } from "../ui/badge/index";
   import { Button } from "../ui/button/index";
   import * as Card from "../ui/card/index";
@@ -58,6 +58,8 @@
   );
   let canScan = $derived(selectedPaths.length > 0 && !busy);
   let isKunkunMode = $derived(mode === "kunkun");
+  let isXrossMode = $derived(mode === "xross");
+  const i18n = useLensI18n();
 
   $effect(() => {
     if (selectedId === "custom") return;
@@ -111,7 +113,7 @@
         </div>
       </div>
       <Badge variant="outline" class="[-webkit-app-region:no-drag]">
-        {mode}
+        {isXrossMode ? 'Xross' : mode}
       </Badge>
     </header>
 
@@ -122,7 +124,7 @@
             <span
               class="px-2 text-xs font-semibold uppercase text-muted-foreground"
             >
-              Recent
+              {i18n.t('lens.picker.recent')}
             </span>
             {#each recentTargets as target (target.id)}
               <div
@@ -150,7 +152,7 @@
                 </button>
                 {#if target.removable}
                   <button
-                    aria-label={`Remove ${target.label} from recent scan paths`}
+                    aria-label={i18n.t('lens.picker.removeRecent', { name: target.label })}
                     class="mr-1 grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                     disabled={forgettingPath === target.path}
                     onclick={(event) => forgetTarget(event, target)}
@@ -168,7 +170,7 @@
           <span
             class="px-2 text-xs font-semibold uppercase text-muted-foreground"
           >
-            Disks and Folders
+            {i18n.t('lens.picker.roots')}
           </span>
           {#each presetTargets as target (target.id)}
             <button
@@ -194,7 +196,7 @@
               </span>
             </button>
           {/each}
-          <button
+          {#if !isXrossMode}<button
             class={[
               "flex min-h-12 items-center gap-2 rounded-md border border-dashed px-2.5 text-left text-sm text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-accent-foreground",
               selectedId === "custom"
@@ -206,12 +208,12 @@
           >
             <Plus size={15} />
             <span class="min-w-0 flex-1">
-              <span class="block truncate font-medium">Choose Folder</span>
+              <span class="block truncate font-medium">{i18n.t('lens.picker.choose')}</span>
               <span class="block truncate text-xs text-muted-foreground">
-                Enter a local path
+                {i18n.t('lens.picker.enter')}
               </span>
             </span>
-          </button>
+          </button>{/if}
         </div>
       </aside>
 
@@ -222,54 +224,57 @@
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <Card.Title class="truncate text-xl">
-                    {selectedTarget?.label ?? "Choose Folder"}
+                    {selectedTarget?.label ?? (isXrossMode ? i18n.t('xross.roots.empty') : i18n.t('lens.picker.choose'))}
                   </Card.Title>
                   <Card.Description class="truncate">
-                    {selectedTarget?.path ??
-                      "Scan one folder or group multiple folders under one root."}
+                    {selectedTarget ? (isXrossMode ? selectedTarget.description : selectedTarget.path) :
+                      (isXrossMode ? i18n.t('xross.roots.empty') : i18n.t('lens.picker.description'))}
                   </Card.Description>
                 </div>
                 <Badge variant="outline" class="capitalize">
-                  {selectedTarget?.kind.replace("-", " ") ?? "folder"}
+                  {isXrossMode
+                    ? i18n.t(selectedTarget?.kind === 'volume' ? 'lens.picker.kind.volume'
+                      : selectedTarget?.kind === 'multi-folder' ? 'lens.picker.kind.multiFolder' : 'lens.picker.kind.folder')
+                    : selectedTarget?.kind.replace("-", " ") ?? "folder"}
                 </Badge>
               </div>
             </Card.Header>
 
-            {#if !selectedTarget}
+            {#if !selectedTarget && !isXrossMode}
               <Card.Content class="grid gap-3">
                 <label class="grid gap-1.5">
                   <span
                     class="text-xs font-semibold uppercase text-muted-foreground"
                   >
-                    Folder path
+                    {i18n.t('lens.picker.folderPath')}
                   </span>
                   <Input
                     bind:value={customPath}
-                    placeholder="/path/to/folder"
+                    placeholder={i18n.t('lens.picker.pathExample')}
                   />
                 </label>
                 <label class="grid gap-1.5">
                   <span
                     class="text-xs font-semibold uppercase text-muted-foreground"
                   >
-                    Optional second folder
+                    {i18n.t('lens.picker.secondFolder')}
                   </span>
                   <Input
                     bind:value={secondPath}
-                    placeholder="/path/to/another-folder"
+                    placeholder={i18n.t('lens.picker.secondExample')}
                   />
                 </label>
               </Card.Content>
-            {:else}
+            {:else if selectedTarget}
               <Card.Content>
                 <div class="rounded-md border bg-background/60 p-3">
                   <span
                     class="text-xs font-semibold uppercase text-muted-foreground"
                   >
-                    Scan root
+                    {i18n.t('lens.picker.scanRoot')}
                   </span>
                   <p class="mt-1 break-all font-mono text-sm">
-                    {selectedTarget.path}
+                    {isXrossMode ? selectedTarget.label : selectedTarget.path}
                   </p>
                 </div>
               </Card.Content>
@@ -277,10 +282,10 @@
 
             <Card.Footer class="justify-between gap-3 border-t bg-muted/20">
               <p class="text-sm text-muted-foreground">
-                Only visible tree slices are loaded, on demand.
+                {i18n.t('lens.picker.onDemand')}
               </p>
               <Button type="button" onclick={scanSelected} disabled={!canScan}>
-                {busy ? "Scanning" : "Scan"}
+                {i18n.t(busy ? 'lens.picker.scanning' : 'lens.picker.scan')}
                 <ArrowRight size={15} />
               </Button>
             </Card.Footer>
@@ -294,11 +299,10 @@
                 <div class="flex items-center justify-between gap-3">
                   <div class="min-w-0">
                     <Card.Title class="truncate text-base">
-                      Building storage map
+                      {i18n.t('lens.picker.building')}
                     </Card.Title>
                     <Card.Description class="truncate">
-                      {formatBytes(status.bytesScanned)} scanned across {status.entriesScanned}
-                      entries
+                      {i18n.t('lens.picker.progress', { size: i18n.bytes(status.bytesScanned), count: i18n.count(status.entriesScanned) })}
                     </Card.Description>
                   </div>
                   <Button
@@ -307,7 +311,7 @@
                     variant="secondary"
                     onclick={onCancel}
                   >
-                    Stop
+                    {i18n.t('lens.status.stop')}
                   </Button>
                 </div>
                 <Progress
@@ -319,7 +323,7 @@
               </Card.Header>
               <Card.Content>
                 <p class="truncate font-mono text-xs text-muted-foreground">
-                  {status.currentPath ?? "Preparing scanner..."}
+                  {status.currentPath ?? i18n.t('lens.status.preparing')}
                 </p>
               </Card.Content>
             </Card.Root>
