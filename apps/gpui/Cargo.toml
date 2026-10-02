@@ -1,0 +1,27 @@
+[package]
+name    = "spacelens-gpui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "spacelens-gpui"
+path = "src/main.rs"
+
+# Deliberately its own workspace: a shell that links the Metal/winit GUI stack
+# must never be reachable from the headless crates (packages/node, apps/cli).
+[workspace]
+
+[dependencies]
+# Meta crate bundling gpui-pre + gpui-base + gpui-component + default assets.
+# Default features are ["assets", "component"]; never enable the tree-sitter
+# syntax-highlighting features, a disk tool pulls no parsers.
+gpui-kit = "0.7"
+# Published to crates.io as kuntu-scan; the path keeps local (submodule) builds.
+space-lens = { package = "kuntu-scan", version = "0.2", path = "../../vendors/kuntu/crates/kuntu-scan" }
+smol       = "2"
+rfd        = "0.15"
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1       = "0.10"
+trash      = "5"
+anyhow     = "1"
