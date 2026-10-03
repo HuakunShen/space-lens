@@ -261,7 +261,7 @@ export function apply(ctx: HostContext): void {
    * SPA needs to go from "loaded" to "scanning": an `api` base naming this
    * mount, and `autoscan`, which starts the root scan once pairing lands.
    */
-  async function serveDocument(res: ServerResponse, url: URL, origin: string): Promise<void> {
+  async function serveDocument(res: ServerResponse, url: URL): Promise<void> {
     const directory = requestedDirectory(url)
     if (directory === null) {
       sendProblem(res, 404, 'no session directory is known to the Space Lens panel yet')
@@ -284,7 +284,10 @@ export function apply(ctx: HostContext): void {
       sendProblem(res, 500, 'the service did not issue a pairing ticket')
       return
     }
-    url.searchParams.set('api', `${origin}${directorySegment(canonical)}`)
+    // Keep the renderer's transport: web uses HTTP, desktop uses dsh-app://app.
+    // An absolute HTTP API would escape desktop's carrier and violate connect-src 'self'.
+    // The Harness owns `/api`, so the same-origin mount prefix is still explicit.
+    url.searchParams.set('api', directorySegment(canonical))
     url.searchParams.set('pair', ticket)
     url.searchParams.set('autoscan', '1')
     res.writeHead(302, {
@@ -296,7 +299,13 @@ export function apply(ctx: HostContext): void {
   }
 
   /** Forward one request to the loopback Space Lens server and stream the answer back. */
-  function proxy(req: IncomingMessage, res: ServerResponse, upstreamPort: number, path: string): void {
+  function proxy(
+    req: IncomingMessage,
+    res: ServerResponse,
+    upstreamPort: number,
+    path: string,
+    origin: string,
+  ): void {
     const upstream = httpRequest({
       host: '127.0.0.1',
       port: upstreamPort,
@@ -306,6 +315,10 @@ export function apply(ctx: HostContext): void {
         ...req.headers,
         // The service answers only on its own authority, and this is that authority.
         host: `127.0.0.1:${upstreamPort}`,
+        // Desktop's trusted carrier checks dsh-app Origin then removes it. Restore its
+        // HTTP identity only AFTER this route's Origin/Host/Fetch-Site policy passed.
+        // Explicit origins survive unchanged; tickets and bearer checks remain upstream.
+        origin: req.headers.origin ?? origin,
       },
     })
     upstream.on('response', (answer) => {
@@ -339,8 +352,20 @@ export function apply(ctx: HostContext): void {
       sendProblem(res, 403, 'this panel is served on a loopback origin only')
       return
     }
+    // An opaque origin is never a loopback page: a sandboxed frame or a file://
+    // page must not reach a scan through this mount.
+    if (origin === 'null') {
+      sendProblem(res, 403, 'request origin is not allowed')
+      return
+    }
     if (typeof origin === 'string' && origin !== '' && !origins.includes(origin)) {
       sendProblem(res, 403, 'request origin is not allowed')
+      return
+    }
+    // An absent Origin is not trusted either: when the browser itself says the
+    // request is cross-site, it is refused before any upstream mapping.
+    if ((origin === undefined || origin === '') && req.headers['sec-fetch-site'] === 'cross-site') {
+      sendProblem(res, 403, 'cross-site requests are refused')
       return
     }
 
@@ -363,7 +388,7 @@ export function apply(ctx: HostContext): void {
     const isDocument =
       (req.method === 'GET' || req.method === 'HEAD') && (req.headers.accept ?? '').includes('text/html')
     if (isDocument && !url.searchParams.has('pair')) {
-      await serveDocument(res, url, `http://${host}`)
+      await serveDocument(res, url)
       return
     }
 
@@ -377,7 +402,7 @@ export function apply(ctx: HostContext): void {
       return
     }
     const running = await ensureServer(directory)
-    proxy(req, res, running.port, split.upstream === '' ? '/' : split.upstream)
+    proxy(req, res, running.port, split.upstream === '' ? '/' : split.upstream, `http://${host}`)
   }
 
   ctx.effect(

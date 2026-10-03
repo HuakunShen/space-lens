@@ -45,6 +45,37 @@ export function hashHostedPassword(password: string): { salt: Buffer; key: Buffe
 }
 
 /**
+ * The loopback spellings of one service's origin.
+ *
+ * `http://127.0.0.1:PORT`, `http://localhost:PORT` and `http://[::1]:PORT` are
+ * the same machine, the same listener and the same trust domain — the origin
+ * policy already treats them as one service's authorities because a user may
+ * open either spelling. A pairing ticket minted while the document was served
+ * on one spelling must therefore redeem from any of them; anything else turns
+ * "which spelling is in the address bar" into a pairing failure.
+ *
+ * Non-loopback origins never match here: a hosted ticket stays bound to the
+ * exact site it was minted for.
+ */
+function sameLoopbackService(first: string, second: string): boolean {
+  if (first === second) {
+    return true
+  }
+  const loopback = (origin: string): string | null => {
+    const match = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):(\d+)$/.exec(origin)
+    if (match === null || match[2] === undefined) {
+      return null
+    }
+    return match[2]
+  }
+  const firstPort = loopback(first)
+  if (firstPort === null) {
+    return false
+  }
+  return loopback(second) === firstPort
+}
+
+/**
  * In-memory ticket and session store. Credentials never touch disk: a restart
  * invalidates everything, which is the correct failure mode for a host whose
  * only durable secret is the terminal it was started from.
@@ -84,14 +115,32 @@ export class AuthService {
     const key = sha256(ticket)
     const record = this.tickets.get(key)
     if (record === undefined) return { ok: false, reason: 'unknown' }
-    // single use: consumed on first sight, whatever the verdict below
-    this.tickets.delete(key)
-    if (record.expiresAtMs <= Date.now()) return { ok: false, reason: 'expired' }
-    if (record.serviceInstanceId !== this.options.serviceInstanceId) return { ok: false, reason: 'unknown' }
-    if (record.origin !== (input.origin ?? '')) return { ok: false, reason: 'origin-mismatch' }
+    if (record.expiresAtMs <= Date.now()) {
+      // Expired tickets are spent: retrying an expired ticket must not read as
+      // "already used".
+      this.tickets.delete(key)
+      return { ok: false, reason: 'expired' }
+    }
+    if (record.serviceInstanceId !== this.options.serviceInstanceId) {
+      this.tickets.delete(key)
+      return { ok: false, reason: 'unknown' }
+    }
+    if (!sameLoopbackService(record.origin, input.origin ?? '')) {
+      // A refused origin does not consume the ticket: the holder never spent
+      // it, and a single probe from another allowed origin must not turn the
+      // legitimate page's next attempt into an "already used" failure. A
+      // successful exchange still consumes it exactly once, below.
+      return { ok: false, reason: 'origin-mismatch' }
+    }
     if (record.passwordRequired) {
+      // A hosted password failure is retryable with the same ticket, but the
+      // request-rate limiter around the endpoint bounds guessing. Invalid
+      // instance and expiry failures above still consume the ticket on first
+      // sight; a refused origin does not, so the holder can still redeem it.
       if (!this.verifyPassword(input.password)) return { ok: false, reason: 'password' }
     }
+    // A successful exchange consumes the ticket exactly once, here.
+    this.tickets.delete(key)
     const session: SessionRecord = {
       token: randomId('sls_'),
       sessionId: randomId('sess_', 12),

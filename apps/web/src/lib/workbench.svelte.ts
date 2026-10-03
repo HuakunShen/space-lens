@@ -2,6 +2,9 @@ import type { CollectorEntry, ScanStatus, ScanTarget, TreeNodeSummary, TreeSlice
 import type { HttpService } from '@space-lens/client'
 import { connectEventStream } from '@space-lens/client'
 import type { WorkbenchService } from '@space-lens/client'
+import { parseBaseUrl } from './base-url.ts'
+
+export { normalizeBaseUrl } from './base-url.ts'
 
 export const BASE_URL_KEY = 'spacelens.baseUrl'
 export const TOKEN_KEY = 'spacelens.session.token'
@@ -11,11 +14,13 @@ export const RECENT_KEY = 'spacelens.recentScans'
 export function resolveBaseUrl(explicit?: string | null): { url: string; sameOrigin: boolean } {
   const fromQuery = explicit ?? new URLSearchParams(window.location.search).get('api') ?? undefined
   const remembered = window.localStorage.getItem(BASE_URL_KEY) ?? undefined
-  const raw = fromQuery ?? remembered ?? window.location.origin
-  const url = raw.replace(/\/$/, '')
-  const sameOrigin = url === window.location.origin
-  return { url, sameOrigin }
+  return parseBaseUrl({
+    queryApi: fromQuery ?? null,
+    storedBaseUrl: remembered ?? null,
+    pageOrigin: window.location.origin,
+  })
 }
+
 
 export function rememberBaseUrl(url: string): void {
   window.localStorage.setItem(BASE_URL_KEY, url.replace(/\/$/, ''))

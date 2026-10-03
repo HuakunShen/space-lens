@@ -42,6 +42,16 @@ inside the API base — `/space-lens/d/<encoded dir>` — a segment that belongs
 this plugin alone; the upstream never sees it. Two Sessions' panels therefore
 cannot be confused about which server they are talking to.
 
+The API override is the root-relative `/space-lens/d/<dir>`, not an absolute HTTP
+address. In the browser this stays on the Harness HTTP origin; in desktop it stays
+on `dsh-app://app` and uses the shell's authenticated forwarding transport. That
+preserves `connect-src 'self'` without CORS allowances or custom schemes in the
+product's origin policy. The desktop forwarder validates the renderer origin and
+removes it before HTTP forwarding. After this route's own Origin/Host/Fetch-Site
+checks pass, the plugin restores a missing Origin from the checked HTTP authority
+for ticket binding. Explicit origins are preserved; cross-site, opaque and foreign
+origins are still refused, and API reads still need a bearer.
+
 The server is started **read-only**: no cleanup scopes, so the embedded workbench
 can look but never trash. Deleting from a panel a session opened implicitly should
 never be the easy path.

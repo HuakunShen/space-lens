@@ -37,6 +37,30 @@ describe('auth service', () => {
     })
   })
 
+  it('redeems a ticket from any loopback spelling of the same service', () => {
+    // Prevents: the embedded panel failing to pair because the document was
+    // minted for `127.0.0.1` while the frame exchanges from `localhost` (or the
+    // reverse) — same machine, same port, same service, different spelling.
+    const auth = makeService()
+    const ticket = auth.mintTicket('http://127.0.0.1:9000', false)
+    expect(auth.exchange(ticket, { origin: 'http://localhost:9000' })).toMatchObject({ ok: true })
+    const reverse = auth.mintTicket('http://localhost:9000', false)
+    expect(auth.exchange(reverse, { origin: 'http://127.0.0.1:9000' })).toMatchObject({ ok: true })
+  })
+
+  it('keeps the ticket when another allowed origin tries to redeem it', () => {
+    // Prevents: a single probe from a different origin permanently consuming
+    // the ticket, so the legitimate holder can still pair afterwards instead
+    // of facing an "already used" failure for a ticket it never spent.
+    const auth = makeService()
+    const ticket = auth.mintTicket('https://site-a.example.test', false)
+    expect(auth.exchange(ticket, { origin: 'https://site-b.example.test' })).toMatchObject({
+      ok: false,
+      reason: 'origin-mismatch',
+    })
+    expect(auth.exchange(ticket, { origin: 'https://site-a.example.test' })).toMatchObject({ ok: true })
+  })
+
   it('binds machine tickets to the empty origin only', () => {
     const auth = makeService()
     const ticket = auth.mintTicket('', false)
