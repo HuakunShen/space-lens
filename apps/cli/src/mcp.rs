@@ -177,6 +177,9 @@ fn scan_snapshot(arguments: &Map<String, Value>) -> Value {
       .and_then(Value::as_bool)
       .unwrap_or(true),
     ignored_mode,
+    // ScanOptions' documented default: measure links as link nodes, never
+    // wander into symlinked external trees from an MCP-initiated snapshot.
+    follow_symlinks: false,
   });
   tool_success(serde_json::to_value(SnapshotEnvelope::from_scan_nodes(
     &tree,
@@ -215,6 +218,9 @@ fn cleanup_candidates(arguments: &Map<String, Value>) -> Value {
       .get("ignoreHidden")
       .and_then(Value::as_bool)
       .unwrap_or(false),
+    // CandidateOptions' documented default: never wander into symlinked
+    // external projects from an MCP-initiated cleanup scan.
+    follow_symlinks: false,
   });
   tool_success(serde_json::to_value(build_removal_plan(candidates)))
 }
