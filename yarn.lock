@@ -3224,7 +3224,7 @@ __metadata:
     "@uniview/tui-solid": "npm:0.0.4"
     effect: "npm:^3.21.5"
     solid-js: "npm:^1.9.14"
-    space-lens: "npm:^0.2.0"
+    space-lens: "npm:^0.3.0"
     tsx: "npm:^4.22.4"
     typescript: "npm:^6.0.3"
     vite: "npm:^8.1.5"
@@ -7293,33 +7293,8 @@ __metadata:
     npm-run-all2: "npm:^8.0.4"
     oxlint: "npm:^1.14.0"
     prettier: "npm:^3.6.2"
-    space-lens-darwin-arm64: "npm:0.2.8"
-    space-lens-darwin-x64: "npm:0.2.8"
-    space-lens-linux-arm64-gnu: "npm:0.2.8"
-    space-lens-linux-arm64-musl: "npm:0.2.8"
-    space-lens-linux-x64-gnu: "npm:0.2.8"
-    space-lens-linux-x64-musl: "npm:0.2.8"
-    space-lens-win32-arm64-msvc: "npm:0.2.8"
-    space-lens-win32-x64-msvc: "npm:0.2.8"
     tinybench: "npm:^6.0.0"
     typescript: "npm:^6.0.0"
-  dependenciesMeta:
-    space-lens-darwin-arm64:
-      optional: true
-    space-lens-darwin-x64:
-      optional: true
-    space-lens-linux-arm64-gnu:
-      optional: true
-    space-lens-linux-arm64-musl:
-      optional: true
-    space-lens-linux-x64-gnu:
-      optional: true
-    space-lens-linux-x64-musl:
-      optional: true
-    space-lens-win32-arm64-msvc:
-      optional: true
-    space-lens-win32-x64-msvc:
-      optional: true
   bin:
     space-lens: bin/cli.mjs
   languageName: unknown

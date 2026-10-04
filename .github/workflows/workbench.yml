@@ -33,6 +33,8 @@ jobs:
         with:
           node-version: 24
       - run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - run: yarn install --immutable
       - name: Contract artifacts are byte-fresh
         run: yarn workspace @space-lens/contract test
@@ -124,6 +126,8 @@ jobs:
         with:
           node-version: 24
       - run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - run: yarn install --immutable
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -161,6 +165,8 @@ jobs:
         with:
           node-version: 24
       - run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - run: yarn install --immutable
       - name: Stamp the tag version into the manifest
         working-directory: apps/vscode

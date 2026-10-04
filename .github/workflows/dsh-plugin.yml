@@ -42,6 +42,8 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - run: corepack enable
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
       - run: yarn install --immutable
 
       - name: The tag names the version package.json carries
