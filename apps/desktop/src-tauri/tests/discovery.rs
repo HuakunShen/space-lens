@@ -121,6 +121,7 @@ fn finds_large_files_inside_summarized_ignored_dirs_without_expanding_browse() {
     .is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn cache_classification_requires_project_markers_and_prunes_nested_candidates() {
   let fixture = Fixture::new();

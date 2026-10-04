@@ -12,7 +12,7 @@
   },
   "scripts": {
     "lint": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "node --test test/",
+    "test": "node --test 'test/*.test.ts'",
     "typecheck": "svelte-check --tsconfig ./tsconfig.json"
   },
   "dependencies": {
