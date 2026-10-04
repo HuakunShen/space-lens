@@ -4738,7 +4738,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "dsh-plugin-spacelens@workspace:apps/dsh"
   dependencies:
-    space-lens: "npm:^0.2.8"
+    space-lens: "npm:^0.3.0"
   languageName: unknown
   linkType: soft
 
@@ -7239,7 +7239,42 @@ __metadata:
   languageName: node
   linkType: hard
 
-"space-lens@npm:^0.2.0, space-lens@npm:^0.2.8, space-lens@workspace:packages/node":
+"space-lens@npm:^0.2.0":
+  version: 0.2.8
+  resolution: "space-lens@npm:0.2.8"
+  dependencies:
+    space-lens-darwin-arm64: "npm:0.2.8"
+    space-lens-darwin-x64: "npm:0.2.8"
+    space-lens-linux-arm64-gnu: "npm:0.2.8"
+    space-lens-linux-arm64-musl: "npm:0.2.8"
+    space-lens-linux-x64-gnu: "npm:0.2.8"
+    space-lens-linux-x64-musl: "npm:0.2.8"
+    space-lens-win32-arm64-msvc: "npm:0.2.8"
+    space-lens-win32-x64-msvc: "npm:0.2.8"
+  dependenciesMeta:
+    space-lens-darwin-arm64:
+      optional: true
+    space-lens-darwin-x64:
+      optional: true
+    space-lens-linux-arm64-gnu:
+      optional: true
+    space-lens-linux-arm64-musl:
+      optional: true
+    space-lens-linux-x64-gnu:
+      optional: true
+    space-lens-linux-x64-musl:
+      optional: true
+    space-lens-win32-arm64-msvc:
+      optional: true
+    space-lens-win32-x64-msvc:
+      optional: true
+  bin:
+    space-lens: bin/cli.mjs
+  checksum: 10c0/dc49dcbbb77c7c767a1e8962d2def8d6974e9c73bb326135c95b6c5bf05f17d63cce910a81954122f7175c8a1a8f4dcfef1175f3525cfcf8025b55bf36aca72e
+  languageName: node
+  linkType: hard
+
+"space-lens@npm:^0.3.0, space-lens@workspace:packages/node":
   version: 0.0.0-use.local
   resolution: "space-lens@workspace:packages/node"
   dependencies:

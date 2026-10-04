@@ -21,7 +21,7 @@ clap       = { version = "4", features = ["derive"] }
 serde      = "1"
 serde_json = "1"
 # Published to crates.io as kuntu-scan; the path keeps local (submodule) builds.
-space-lens = { package = "kuntu-scan", version = "0.2", path = "../../vendors/kuntu/crates/kuntu-scan" }
+space-lens = { package = "kuntu-scan", version = "0.3", path = "../../vendors/kuntu/crates/kuntu-scan" }
 
 # cargo-binstall: prebuilt archives from the `cli-v<version>` GitHub release,
 # produced by .github/workflows/cli-release.yml.
