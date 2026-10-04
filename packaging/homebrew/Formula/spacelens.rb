@@ -22,8 +22,10 @@ class Spacelens < Formula
   license "MIT"
 
   livecheck do
-    url "https://crates.io/api/v1/crates/spacelens"
-    strategy :crates_io
+    # Homebrew 7: the crates_io strategy became :crate and expects the
+    # static.crates.io download URL; it derives the versions API itself.
+    url "https://static.crates.io/crates/spacelens/spacelens-#{version}.crate"
+    strategy :crate
   end
 
   # `spacelens dirty-git` shells out to git for `git status --porcelain`.
