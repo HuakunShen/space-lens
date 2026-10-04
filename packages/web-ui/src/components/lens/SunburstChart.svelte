@@ -5,6 +5,7 @@
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
   import { buildSunburstSegments } from '../../lib/sunburst'
   import { formatBytes } from '../../lib/format'
+  import { formatNodeSize } from '../../lib/node-size'
 
   interface Props {
     tree: TreeSliceNode | null
@@ -73,18 +74,18 @@
               d={segment.pathData}
               fill={segment.color}
               role="button"
-              aria-disabled={segment.isAggregate}
+              aria-disabled={segment.isAggregate || segment.node.scanState === 'skipped'}
               tabindex="0"
-              aria-label={`${segment.name}, ${formatBytes(segment.size)}, ${segment.path}${segment.isAggregate ? ', summarized items' : ''}`}
+              aria-label={`${segment.name}, ${segment.isAggregate ? formatBytes(segment.size) : formatNodeSize(segment.node)}, ${segment.path}${segment.isAggregate ? ', summarized items' : ''}`}
               onmouseenter={() => onHover(segment.id)}
               onmouseleave={() => onHover(null)}
               onfocus={() => onHover(segment.id)}
               onblur={() => onHover(null)}
               onclick={() => {
-                if (!segment.isAggregate) onOpen(segment.node)
+                if (!segment.isAggregate && segment.node.scanState !== 'skipped') onOpen(segment.node)
               }}
               onkeydown={(event) => {
-                if ((event.key === 'Enter' || event.key === ' ') && !segment.isAggregate) {
+                if ((event.key === 'Enter' || event.key === ' ') && !segment.isAggregate && segment.node.scanState !== 'skipped') {
                   event.preventDefault()
                   onOpen(segment.node)
                 }
@@ -95,19 +96,19 @@
               }}
               oncontextmenu={(event) => {
                 event.preventDefault()
-                if (!segment.isAggregate) onContext(segment.node, event.clientX, event.clientY)
+                if (!segment.isAggregate && segment.node.scanState !== 'skipped') onContext(segment.node, event.clientX, event.clientY)
               }}
             />
           {/each}
-          <text class="center-size" text-anchor="middle" y="-6">{inspected ? formatBytes(inspected.size) : ''}</text>
+          <text class="center-size" text-anchor="middle" y="-6">{formatNodeSize(inspected)}</text>
           <text class="center-label" text-anchor="middle" y="18"
-            >{hoveredId && inspected ? percentageLabel + ' of folder' : 'TOTAL SIZE'}</text
+            >{inspected?.scanState === 'skipped' ? 'NOT SCANNED' : hoveredId && inspected ? percentageLabel + ' of folder' : 'MEASURED SIZE'}</text
           >
         </g>
       </svg>
     {/key}
     {#if segments.length === 0}
-      <div class="chart-empty">{focusNode ? 'No child items to display' : 'Choose a folder to explore'}</div>
+      <div class="chart-empty">{focusNode?.scanState === 'skipped' ? 'This location was not scanned' : focusNode ? 'No child items to display' : 'Choose a folder to explore'}</div>
     {/if}
     {#if canGoBack}
       <button class="chart-back" type="button" onclick={onBack} aria-label="Go to parent folder"
@@ -122,17 +123,17 @@
     aria-atomic="true"
   >
     <div class="inspector-icon" style={`--node: ${active?.color ?? 'var(--muted-foreground)'}`}>
-      {#if inspected?.hasChildren}<Folder size={19} />{:else}<File size={19} />{/if}
+      {#if inspected?.hasChildren || inspected?.collapsed}<Folder size={19} />{:else}<File size={19} />{/if}
     </div>
     <div class="inspector-content">
       <div class="inspector-heading">
         <strong>{inspected?.name ?? 'Explore your storage'}</strong><span
-          >{inspected ? formatBytes(inspected.size) : ''}</span
+          >{formatNodeSize(inspected)}</span
         >
       </div>
       <p class="inspector-path">{inspected?.path ?? 'Hover or focus a segment to see its full path.'}</p>
       <p class="inspector-hint">
-        {#if active?.isAggregate}{active.childCount.toLocaleString()} smaller items grouped here · open the parent folder
+        {#if inspected?.scanState === 'skipped'}Not scanned · {inspected.skipReason ?? 'unavailable'}{:else if active?.isAggregate}{active.childCount.toLocaleString()} smaller items grouped here · open the parent folder
           to explore{:else if hoveredId && inspected}{percentageLabel} of this folder · {inspected.hasChildren
             ? 'Click to explore'
             : 'Click to inspect'}{:else}Hover to inspect · click to explore{/if}

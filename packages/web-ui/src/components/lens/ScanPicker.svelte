@@ -9,6 +9,7 @@
   } from "@lucide/svelte";
   import type { ScanStatus, ScanTarget } from "../../types";
   import { formatBytes } from "../../lib/format";
+  import { scanTargetPaths } from "../../lib/scan-targets";
   import { Badge } from "../ui/badge/index";
   import { Button } from "../ui/button/index";
   import * as Card from "../ui/card/index";
@@ -17,6 +18,8 @@
 
   interface Props {
     targets: ScanTarget[];
+    initialPath?: string;
+    canClose?: boolean;
     mode: string;
     logo?: string;
     busy: boolean;
@@ -24,6 +27,7 @@
     status: ScanStatus | null;
     onScan: (paths: string[]) => void;
     onCancel: () => void;
+    onSettings?: () => void;
     onForget?: (path: string) => Promise<void> | void;
     /**
      * Whether the host offers a native folder picker (desktop: the Tauri
@@ -38,6 +42,8 @@
 
   let {
     targets,
+    initialPath = '',
+    canClose = false,
     mode,
     logo,
     busy,
@@ -45,6 +51,7 @@
     status,
     onScan,
     onCancel,
+    onSettings,
     onForget,
     folderPicker = false,
     onPickFolder = undefined,
@@ -52,6 +59,7 @@
   }: Props = $props();
   let selectedId = $state("");
   let customPath = $state("");
+  $effect(() => { if (initialPath) { customPath = initialPath; selectedId = "custom" } });
   let secondPath = $state("");
   let forgettingPath = $state<string | null>(null);
   let pickingFolder = $state(false);
@@ -64,9 +72,13 @@
   let selectedTarget = $derived(
     targets.find((target) => target.id === selectedId),
   );
+  let startupDisk = $derived(targets.some(target => target.source !== 'recent' && target.path === '/System/Volumes/Data'));
+  function targetLabel(target: ScanTarget): string {
+    return startupDisk && target.path === '/' ? 'Macintosh HD' : target.label;
+  }
   let selectedPaths = $derived(
     selectedTarget
-      ? [selectedTarget.path]
+      ? scanTargetPaths(selectedTarget, targets)
       : [customPath, secondPath].map((path) => path.trim()).filter(Boolean),
   );
   let canScan = $derived(selectedPaths.length > 0 && !busy);
@@ -111,7 +123,7 @@
 </script>
 
 <main
-  class="grid h-dvh min-h-0 bg-background text-foreground"
+  class="scan-picker grid h-dvh min-h-0 bg-background text-foreground"
 >
   <section class="flex h-full min-h-0 w-full flex-col">
     <header
@@ -139,12 +151,16 @@
           </h1>
         </div>
       </div>
+      <div class="flex items-center gap-2">
+      {#if canClose && !busy}<Button type="button" variant="ghost" size="sm" onclick={onCancel}>Back to workspace</Button>{/if}
+      {#if onSettings}<Button type="button" variant="ghost" size="sm" onclick={onSettings}>Settings</Button>{/if}
       <Badge variant="outline" class="[-webkit-app-region:no-drag]">
         {mode}
       </Badge>
+      </div>
     </header>
 
-    <div class="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]">
+    <div class="grid min-h-0 flex-1 picker-layout grid-cols-[220px_minmax(0,1fr)]">
       <aside class="flex min-h-0 flex-col gap-3 border-r bg-sidebar/55 p-3">
         {#if recentTargets.length > 0}
           <div class="grid gap-1.5">
@@ -216,7 +232,7 @@
                 <FolderOpen size={15} />
               {/if}
               <span class="min-w-0 flex-1">
-                <span class="block truncate font-medium">{target.label}</span>
+                <span class="block truncate font-medium">{targetLabel(target)}</span>
                 <span class="block truncate text-xs text-muted-foreground">
                   {target.description}
                 </span>
@@ -251,11 +267,11 @@
               <div class="flex items-start justify-between gap-3">
                 <div class="min-w-0">
                   <Card.Title class="truncate text-xl">
-                    {selectedTarget?.label ?? "Choose Folder"}
+                    {status?.state === 'scanning' ? status.label ?? 'Scanning local files' : selectedTarget ? targetLabel(selectedTarget) : "Choose Folder"}
                   </Card.Title>
                   <Card.Description class="truncate">
-                    {selectedTarget?.path ??
-                      "Scan one folder or group multiple folders under one root."}
+                    {selectedTarget ? selectedPaths.join(' · ') :
+                      "Scan one folder, or include a second location."}
                   </Card.Description>
                 </div>
                 <Badge variant="outline" class="capitalize">
@@ -312,7 +328,7 @@
                     Scan root
                   </span>
                   <p class="mt-1 break-all font-mono text-sm">
-                    {selectedTarget.path}
+                    {selectedPaths.join(' · ')}
                   </p>
                 </div>
               </Card.Content>
@@ -320,7 +336,7 @@
 
             <Card.Footer class="justify-between gap-3 border-t bg-muted/20">
               <p class="text-sm text-muted-foreground">
-                Only visible tree slices are loaded, on demand.
+                {selectedPaths.includes('/') && startupDisk ? 'Local metadata only. Cloud storage and network volumes are skipped.' : 'Build a map, find large files and review cleanup.'}
               </p>
               <Button type="button" onclick={scanSelected} disabled={!canScan}>
                 {busy ? "Scanning" : "Scan"}
@@ -340,8 +356,7 @@
                       Building storage map
                     </Card.Title>
                     <Card.Description class="truncate">
-                      {formatBytes(status.bytesScanned)} scanned across {status.entriesScanned}
-                      entries
+                      {#if status.bytesScanned > 0}{formatBytes(status.bytesScanned)} scanned across {status.entriesScanned} entries{:else}Measuring files and folders…{/if}
                     </Card.Description>
                   </div>
                   <Button
@@ -362,7 +377,7 @@
               </Card.Header>
               <Card.Content>
                 <p class="truncate font-mono text-xs text-muted-foreground">
-                  {status.currentPath ?? "Preparing scanner..."}
+                  {status.currentPath ?? status.label ?? "Scanning local files…"}
                 </p>
               </Card.Content>
             </Card.Root>

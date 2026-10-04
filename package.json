@@ -33,7 +33,7 @@
     "lint:host": "yarn workspace @space-lens/host lint",
     "lint:client": "yarn workspace @space-lens/client lint",
     "lint:web-ui": "yarn workspace @space-lens/web-ui lint",
-    "test": "cargo test --workspace && yarn workspace space-lens test && yarn workspace @space-lens/cli test && yarn workspace @space-lens/contract test && yarn workspace @space-lens/host test && yarn workspace @space-lens/client test",
+    "test": "cargo test --workspace && yarn workspace space-lens test && yarn workspace @space-lens/cli test && yarn workspace @space-lens/contract test && yarn workspace @space-lens/host test && yarn workspace @space-lens/client test && yarn workspace @space-lens/web-ui test && yarn workspace @space-lens/web test",
     "tui": "yarn workspace @space-lens/cli dev",
     "typecheck": "run-p typecheck:node typecheck:tui typecheck:contract typecheck:host typecheck:client typecheck:web-ui typecheck:web typecheck:vscode",
     "typecheck:node": "yarn workspace space-lens typecheck",

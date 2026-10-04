@@ -1,4 +1,4 @@
-const UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+const UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
 
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'

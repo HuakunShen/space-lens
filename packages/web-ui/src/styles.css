@@ -12,3 +12,5 @@
 @custom-variant dark (&:is(.dark *));
 
 @import './styles/theme.css';
+
+@import './styles/workbench.css';

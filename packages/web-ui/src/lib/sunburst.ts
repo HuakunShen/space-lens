@@ -1,7 +1,7 @@
 import { hierarchy, partition } from 'd3-hierarchy'
 import { arc } from 'd3-shape'
 import type { HierarchyRectangularNode } from 'd3-hierarchy'
-import { nodeColor, nodeMutedColor } from './colors'
+import { nodeColor, nodeMutedColor } from './colors.ts'
 import type { TreeSliceNode } from '../types'
 
 export interface SunburstSegment {

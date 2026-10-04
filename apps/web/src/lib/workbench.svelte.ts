@@ -97,6 +97,7 @@ export interface WorkbenchState {
   activeScanId: string | null
   slice: TreeSlice | null
   items: TreeNodeSummary[]
+  childrenTotal: number
   hoveredId: string | null
   collector: CollectorEntry[]
   deleting: boolean
@@ -117,6 +118,7 @@ export const workbench = $state<WorkbenchState>({
   activeScanId: null,
   slice: null,
   items: [],
+  childrenTotal: 0,
   hoveredId: null,
   collector: [],
   deleting: false,
@@ -160,9 +162,13 @@ export async function loadRoot(): Promise<void> {
   if (service === null || status === null || status.state !== 'ready' || status.rootIds.length === 0) return
   const rootId = status.rootIds[0]
   const slice = await service.treeSlice({ scanId: status.scanId, nodeId: rootId, depth: 3, maxChildrenPerNode: 50 })
-  workbench.slice = slice
   const page = await service.children({ scanId: status.scanId, nodeId: rootId, offset: 0, limit: 200, sort: 'size' })
+  if (workbench.activeScanId !== status.scanId) return
+  // A delayed root load must not overwrite a folder the user has already opened.
+  if (workbench.slice !== null) return
+  workbench.slice = slice
   workbench.items = page.items
+  workbench.childrenTotal = page.total
 }
 
 export function describeError(error: unknown): string {
