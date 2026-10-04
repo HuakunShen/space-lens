@@ -18,6 +18,8 @@
   import { addSelection, selectedAncestor } from '../lib/selection'
   import { ACTIVE_SCAN_KEY, parseActiveScan } from '../lib/resume'
   import { APPEARANCE_KEY, parseAppearance, resolveStyle } from '../lib/appearance'
+  import { checkForAppUpdate, currentAppVersion, installAppUpdate } from '../lib/updater'
+  import type { UpdateStatus } from '../lib/updater'
   import { ServiceError } from '@space-lens/client'
   import {
     clearToken,
@@ -47,6 +49,9 @@
   let startingScan = $state(false)
   let recentTargets = $state(loadRecentTargets())
   let appearance = $state(parseAppearance(null))
+  let appVersion = $state<string | null>(null)
+  let updateStatus = $state<UpdateStatus>({ state: 'idle' })
+  if (__SPACLENS_DESKTOP__) void currentAppVersion().then(version => (appVersion = version))
   let preferencesReady = $state(false)
   let view = $state<'browse' | DiscoveryKind>('browse')
   let discoveryPage = $state<DiscoveryPage | null>(null)
@@ -574,4 +579,7 @@
 {/if}
 <AppearancePanel open={settingsOpen} style={appearance.style} density={appearance.density} mode={userPrefersMode.current}
   automaticStyle={automaticStyle === 'macos' ? 'macOS on this platform' : automaticStyle === 'windows' ? 'Windows on this platform' : 'Web on this platform'}
-  onClose={() => (settingsOpen = false)} onStyle={style => (appearance.style = style)} onDensity={density => (appearance.density = density)} onMode={setMode} />
+  appVersion={appVersion ?? undefined} update={updateStatus}
+  onClose={() => (settingsOpen = false)} onStyle={style => (appearance.style = style)} onDensity={density => (appearance.density = density)} onMode={setMode}
+  onCheckUpdates={__SPACLENS_DESKTOP__ ? () => void checkForAppUpdate(status => (updateStatus = status)) : undefined}
+  onInstallUpdate={__SPACLENS_DESKTOP__ ? () => void installAppUpdate(status => (updateStatus = status)) : undefined} />

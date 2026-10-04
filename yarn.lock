@@ -3318,6 +3318,8 @@ __metadata:
     "@sveltejs/vite-plugin-svelte": "npm:^7.1.2"
     "@tailwindcss/vite": "npm:^4.3.0"
     "@tauri-apps/api": "npm:^2.11.1"
+    "@tauri-apps/plugin-process": "npm:^2"
+    "@tauri-apps/plugin-updater": "npm:^2"
     mode-watcher: "npm:^1.1.0"
     shadcn-svelte: "npm:^1.3.0"
     svelte: "npm:^5.56.1"
@@ -3606,6 +3608,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@tauri-apps/api@npm:^2.12.0":
+  version: 2.12.1
+  resolution: "@tauri-apps/api@npm:2.12.1"
+  checksum: 10c0/03efa7deb1517e9310367be22b6d980f7bb8e96677d97af868288c322da2e5dc87153e31ef9d585a374b7f6eee584a2dd761328250dd3007d0bbffb8eb597e79
+  languageName: node
+  linkType: hard
+
 "@tauri-apps/cli-darwin-arm64@npm:2.11.5":
   version: 2.11.5
   resolution: "@tauri-apps/cli-darwin-arm64@npm:2.11.5"
@@ -3724,6 +3733,24 @@ __metadata:
   bin:
     tauri: tauri.js
   checksum: 10c0/cea6cb7abaf8f5c79d87677941cebcc9ffba3c4d446e396ce1424353fdf8b5a8e2b8b5f4eca37524eb44d62aff0043de54822c6882da0d14b07a685a675a8a31
+  languageName: node
+  linkType: hard
+
+"@tauri-apps/plugin-process@npm:^2":
+  version: 2.4.0
+  resolution: "@tauri-apps/plugin-process@npm:2.4.0"
+  dependencies:
+    "@tauri-apps/api": "npm:^2.12.0"
+  checksum: 10c0/b76f0918dd8f511083b511e27f26ac9d84bb0ec4db0013b9ebccbe20480ff9aa5ba725867781d334b0f7992349b4d266fecacf179991708d3cbf0eff9532bbb7
+  languageName: node
+  linkType: hard
+
+"@tauri-apps/plugin-updater@npm:^2":
+  version: 2.13.1
+  resolution: "@tauri-apps/plugin-updater@npm:2.13.1"
+  dependencies:
+    "@tauri-apps/api": "npm:^2.12.0"
+  checksum: 10c0/d26ecd56ebfb5accac93fbcad70968b9a59ab7a592a7094dd53034b4228d5e57a154c78b21e8b0fef6f69f8656709d04b8e9eea7c690bffc6df8c6b9726d5f85
   languageName: node
   linkType: hard
 
@@ -7163,9 +7190,23 @@ __metadata:
   languageName: node
   linkType: hard
 
+"space-lens-darwin-arm64@npm:0.3.0":
+  version: 0.3.0
+  resolution: "space-lens-darwin-arm64@npm:0.3.0"
+  conditions: os=darwin & cpu=arm64
+  languageName: node
+  linkType: hard
+
 "space-lens-darwin-x64@npm:0.2.8":
   version: 0.2.8
   resolution: "space-lens-darwin-x64@npm:0.2.8"
+  conditions: os=darwin & cpu=x64
+  languageName: node
+  linkType: hard
+
+"space-lens-darwin-x64@npm:0.3.0":
+  version: 0.3.0
+  resolution: "space-lens-darwin-x64@npm:0.3.0"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
@@ -7177,9 +7218,23 @@ __metadata:
   languageName: node
   linkType: hard
 
+"space-lens-linux-arm64-gnu@npm:0.3.0":
+  version: 0.3.0
+  resolution: "space-lens-linux-arm64-gnu@npm:0.3.0"
+  conditions: os=linux & cpu=arm64 & libc=glibc
+  languageName: node
+  linkType: hard
+
 "space-lens-linux-arm64-musl@npm:0.2.8":
   version: 0.2.8
   resolution: "space-lens-linux-arm64-musl@npm:0.2.8"
+  conditions: os=linux & cpu=arm64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"space-lens-linux-arm64-musl@npm:0.3.0":
+  version: 0.3.0
+  resolution: "space-lens-linux-arm64-musl@npm:0.3.0"
   conditions: os=linux & cpu=arm64 & libc=musl
   languageName: node
   linkType: hard
@@ -7191,9 +7246,23 @@ __metadata:
   languageName: node
   linkType: hard
 
+"space-lens-linux-x64-gnu@npm:0.3.0":
+  version: 0.3.0
+  resolution: "space-lens-linux-x64-gnu@npm:0.3.0"
+  conditions: os=linux & cpu=x64 & libc=glibc
+  languageName: node
+  linkType: hard
+
 "space-lens-linux-x64-musl@npm:0.2.8":
   version: 0.2.8
   resolution: "space-lens-linux-x64-musl@npm:0.2.8"
+  conditions: os=linux & cpu=x64 & libc=musl
+  languageName: node
+  linkType: hard
+
+"space-lens-linux-x64-musl@npm:0.3.0":
+  version: 0.3.0
+  resolution: "space-lens-linux-x64-musl@npm:0.3.0"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
@@ -7232,9 +7301,23 @@ __metadata:
   languageName: node
   linkType: hard
 
+"space-lens-win32-arm64-msvc@npm:0.3.0":
+  version: 0.3.0
+  resolution: "space-lens-win32-arm64-msvc@npm:0.3.0"
+  conditions: os=win32 & cpu=arm64
+  languageName: node
+  linkType: hard
+
 "space-lens-win32-x64-msvc@npm:0.2.8":
   version: 0.2.8
   resolution: "space-lens-win32-x64-msvc@npm:0.2.8"
+  conditions: os=win32 & cpu=x64
+  languageName: node
+  linkType: hard
+
+"space-lens-win32-x64-msvc@npm:0.3.0":
+  version: 0.3.0
+  resolution: "space-lens-win32-x64-msvc@npm:0.3.0"
   conditions: os=win32 & cpu=x64
   languageName: node
   linkType: hard
@@ -7293,8 +7376,33 @@ __metadata:
     npm-run-all2: "npm:^8.0.4"
     oxlint: "npm:^1.14.0"
     prettier: "npm:^3.6.2"
+    space-lens-darwin-arm64: "npm:0.3.0"
+    space-lens-darwin-x64: "npm:0.3.0"
+    space-lens-linux-arm64-gnu: "npm:0.3.0"
+    space-lens-linux-arm64-musl: "npm:0.3.0"
+    space-lens-linux-x64-gnu: "npm:0.3.0"
+    space-lens-linux-x64-musl: "npm:0.3.0"
+    space-lens-win32-arm64-msvc: "npm:0.3.0"
+    space-lens-win32-x64-msvc: "npm:0.3.0"
     tinybench: "npm:^6.0.0"
     typescript: "npm:^6.0.0"
+  dependenciesMeta:
+    space-lens-darwin-arm64:
+      optional: true
+    space-lens-darwin-x64:
+      optional: true
+    space-lens-linux-arm64-gnu:
+      optional: true
+    space-lens-linux-arm64-musl:
+      optional: true
+    space-lens-linux-x64-gnu:
+      optional: true
+    space-lens-linux-x64-musl:
+      optional: true
+    space-lens-win32-arm64-msvc:
+      optional: true
+    space-lens-win32-x64-msvc:
+      optional: true
   bin:
     space-lens: bin/cli.mjs
   languageName: unknown
