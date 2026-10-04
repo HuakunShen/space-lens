@@ -149,4 +149,11 @@ docs
 /apps/web/build-embed
 /apps/desktop/src-tauri/target
 /apps/desktop/src-tauri/gen
+# GPUI shell: standalone workspace, its target/ lives inside apps/gpui
+/apps/gpui/target
 *.vsix
+.cargo-home
+.npm-cache
+# Local toolchain shims (e.g. .local/bin/yarn -> .local/lib): machine-local, never committed
+.local/
+screenshots

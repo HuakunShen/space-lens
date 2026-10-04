@@ -56,29 +56,75 @@ The server is started **read-only**: no cleanup scopes, so the embedded workbenc
 can look but never trash. Deleting from a panel a session opened implicitly should
 never be the easy path.
 
+## Prerequisites
+
+- Node.js 22+ (CI uses Node 24) and Yarn 4.14.1 — the repo pins
+  `packageManager: yarn@4.14.1`, so `corepack enable` then `yarn` gives you
+  the right version.
+- No Rust toolchain needed for the plugin build: `yarn install` pulls the
+  prebuilt `space-lens` engine binaries via its optional platform packages
+  (e.g. `space-lens-darwin-arm64`). Only rebuilding the engine itself
+  (`yarn workspace space-lens build`) needs Rust.
+
+## Building
+
+From the repository root, install dependencies once, then build:
+
+```
+yarn install
+yarn build:dsh
+```
+
+This runs `scripts/build-dsh-plugin.mjs` and produces:
+
+- `apps/dsh/dist/host.js` — the host bundle (ESM, loaded once per Harness
+  process via the package's `.` export),
+- `apps/dsh/dist/client.js` — the client bundle (IIFE registering into the
+  Web shell's module table via the `./client` export),
+- `apps/dsh/dist/web/` — the embedded SPA built for the `/space-lens` mount
+  prefix (`SPACLENS_EMBED_BASE`), without a service worker,
+- `apps/dsh/node_modules/space-lens` — the staged engine for local/link
+  installs, resolved by Node walking up from `dist/host.js`.
+
+`dist/` and the staged `node_modules/space-lens` are gitignored build
+artifacts — they are **not** committed and **not** published. A checkout
+without them (e.g. a fresh `git clone`) shows the plugin in the plugin list
+with its toggle on, but no panel, because there is nothing for the host or
+Web shell to load yet.
+
 ## Installing
 
-From npm (the normal way — the package depends on the published `space-lens`
-engine, so every platform pulls its own binary):
+From npm (the normal way — no build needed; the published package depends
+on the `space-lens` engine from npm, so every platform installs its own
+binary):
 
 ```
-plugin_manager install_bundle dsh-plugin-spacelens
+dsh plugin --profile desktop add dsh-plugin-spacelens
 ```
 
-From this repository (development): build first, then install the directory —
-the build stages this machine's engine at `node_modules/space-lens` inside the
-package, where the host bundle's own resolution finds it:
+From this repository (development — build first, then link the directory;
+`add` symlinks it, so the running Harness reads `dist/` from your checkout):
 
 ```
 yarn build:dsh            # from the repository root
-plugin_manager install_bundle /absolute/path/to/apps/dsh
+dsh plugin --profile desktop add /absolute/path/to/apps/dsh
 ```
 
-Then check the bundle list and enable it explicitly if it is missing:
+(`dsh` here is the Harness CLI, e.g.
+`/Applications/DeepSeek\ Harness.app/Contents/Resources/runtime/cli/bin/dsh`.)
 
-```
-plugin_manager set_bundle  enabled=true  target=dsh-plugin-spacelens
-```
+Then restart the Harness app and check the plugin page. Two caching rules
+make the restart mandatory, not optional:
+
+- The host half is loaded once per Harness process and cached by package
+  name — only a restart picks up a new `dist/host.js`.
+- A bundle that failed to load once (e.g. installed before `dist/` existed)
+  is skipped for the life of the process — a later rebuild alone will not
+  resurrect it. Restart, then reload the page for the client half.
+
+So: yes, publishing the npm package is enough for normal use. Local
+`add <path>` installs are only for developing this plugin, and they require
+`yarn build:dsh` first.
 
 ## Releasing
 
