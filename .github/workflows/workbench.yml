@@ -177,7 +177,13 @@ jobs:
       - name: Attach vsix to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" apps/vscode/space-lens-*.vsix --clobber
+        # The vsix job runs right after js and can beat the bundle jobs that
+        # create the app-v* release; create it on miss so tauri-action's
+        # bundles and this vsix land in the same release.
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" apps/vscode/space-lens-*.vsix --clobber
 
   brew-tap:
     name: Homebrew — render the cask and attach it to the release
