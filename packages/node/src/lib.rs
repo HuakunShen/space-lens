@@ -10,8 +10,8 @@ use space_lens::{
   build_removal_plan as build_core_removal_plan, execute_removal_plan as execute_core_removal_plan,
   find_candidates as find_core_candidates, find_dirty_git_repos as find_core_dirty_git_repos,
   scan_directory as scan_core_directory, CandidateOptions,
-  CleanupCandidate as CoreCleanupCandidate, CleanupPreset, IgnoredMode,
-  DirtyGitRepoOptions as CoreDirtyGitRepoOptions, RemovalEntry as CoreRemovalEntry,
+  CleanupCandidate as CoreCleanupCandidate, CleanupPreset,
+  DirtyGitRepoOptions as CoreDirtyGitRepoOptions, IgnoredMode, RemovalEntry as CoreRemovalEntry,
   RemovalOutcome as CoreRemovalOutcome, RemovalPlan as CoreRemovalPlan, ScanNode, ScanOptions,
 };
 
