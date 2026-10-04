@@ -35,7 +35,7 @@ jobs:
       - run: corepack enable
       - name: Prepare workspace install
         run: node scripts/prepare-ci-install.mjs strip
-      - run: yarn install --immutable
+      - run: yarn install --no-immutable
       - name: Contract artifacts are byte-fresh
         run: yarn workspace @space-lens/contract test
       # host tests import apps/web sources (base-url), whose tsconfig extends
@@ -128,7 +128,7 @@ jobs:
       - run: corepack enable
       - name: Prepare workspace install
         run: node scripts/prepare-ci-install.mjs strip
-      - run: yarn install --immutable
+      - run: yarn install --no-immutable
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.targets }}
@@ -167,7 +167,7 @@ jobs:
       - run: corepack enable
       - name: Prepare workspace install
         run: node scripts/prepare-ci-install.mjs strip
-      - run: yarn install --immutable
+      - run: yarn install --no-immutable
       - name: Stamp the tag version into the manifest
         working-directory: apps/vscode
         run: |
