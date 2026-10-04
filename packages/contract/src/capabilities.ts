@@ -10,6 +10,7 @@ export const CapabilitiesSchema = z.strictObject({
   scan: z.strictObject({
     start: z.boolean(),
     cancel: z.boolean(),
+    discovery: z.boolean().optional(),
     maxConcurrent: UintSchema,
   }),
   cleanup: z.strictObject({

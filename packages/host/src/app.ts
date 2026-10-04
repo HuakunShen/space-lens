@@ -1,11 +1,12 @@
 import { Hono } from 'hono'
 import { basename } from 'node:path'
 
-import type { Capabilities, Health, Session } from '@space-lens/contract'
+import type { Capabilities, DiscoveryRequest, Health, Session } from '@space-lens/contract'
 import {
   ChildrenPageRequestSchema,
   CleanupExecuteRequestSchema,
   CleanupPlanRequestSchema,
+  DiscoveryRequestSchema,
   ScanIdSchema,
   ScanStartRequestSchema,
   SessionExchangeRequestSchema,
@@ -248,6 +249,12 @@ export function buildApp(deps: HostDeps): HonoApp {
       sort: 'size' | 'name' | 'path'
     }>(c, ChildrenPageRequestSchema)
     return c.json(scans.children(request.scanId, request.nodeId, request.offset, request.limit, request.sort))
+  })
+
+  app.post('/api/v1/discovery', async (c) => {
+    ensureScope(c.get('session'), 'scan:read')
+    const request = await parseBody<DiscoveryRequest>(c, DiscoveryRequestSchema)
+    return c.json(await scans.discover(request))
   })
 
   app.post('/api/v1/cleanup/plan', async (c) => {

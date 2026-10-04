@@ -104,6 +104,12 @@ describe('http host', () => {
     const response = await fetch(`${origin}/api/v1/capabilities`)
     expect(response.status).toBe(401)
     expect(((await response.json()) as { problem: { code: string } }).problem.code).toBe('Unauthenticated')
+    const discovery = await fetch(`${origin}/api/v1/discovery`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scanId: 'scan_abcdefgh', kind: 'caches' }),
+    })
+    expect(discovery.status).toBe(401)
   })
 
   it('refuses a wrong Host header and a foreign origin', async () => {
@@ -129,6 +135,7 @@ describe('http host', () => {
   it('exposes capabilities and runs the scan flow end to end', async () => {
     const capabilities = await (await api('/api/v1/capabilities')).json()
     expect((capabilities as { cleanup: { mode: string } }).cleanup.mode).toBe('trash')
+    expect((capabilities as { scan: { discovery: boolean } }).scan.discovery).toBe(true)
 
     const created = await api('/api/v1/scans', {
       method: 'POST',
@@ -146,6 +153,25 @@ describe('http host', () => {
     }
     expect(status.state).toBe('ready')
     expect(status.rootIds.length).toBe(1)
+
+    const discovery = await api('/api/v1/discovery', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scanId: session.scanId, kind: 'large-files', limit: 1 }),
+    })
+    expect(discovery.status).toBe(200)
+    const discovered = (await discovery.json()) as { total: number; offset: number; limit: number; items: unknown[] }
+    expect(discovered.total).toBeGreaterThanOrEqual(1)
+    expect(discovered.offset).toBe(0)
+    expect(discovered.limit).toBe(1)
+    expect(discovered.items).toHaveLength(1)
+    const invalidDiscovery = await api('/api/v1/discovery', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ scanId: session.scanId, kind: 'large-files', limit: 1001 }),
+    })
+    expect(invalidDiscovery.status).toBe(400)
+    expect(((await invalidDiscovery.json()) as { problem: { code: string } }).problem.code).toBe('InvalidRequest')
 
     const sliceResponse = await api('/api/v1/tree/slice', {
       method: 'POST',

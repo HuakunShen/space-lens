@@ -7,16 +7,91 @@ import {
   buildContractArtifacts,
   CleanupExecuteRequestSchema,
   CleanupPlanRequestSchema,
+  DiscoveryRequestSchema,
+  DiscoveryPageSchema,
   EventEnvelopeSchema,
   ProblemSchema,
   ScanStartRequestSchema,
   TreeSliceSchema,
+  LocalScanReportSchema,
+  LocalScanProgressSchema,
+  LocalScanMessageSchema,
 } from '../src/index.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const generatedPath = join(here, '..', 'generated', 'contract.schema.json')
 
+describe('discovery contract', () => {
+  it('defaults paging and rejects open or unbounded requests', () => {
+    expect(DiscoveryRequestSchema.parse({ scanId: 'scan_abcdefgh', kind: 'caches' })).toEqual({
+      scanId: 'scan_abcdefgh',
+      kind: 'caches',
+      minSize: 0,
+      offset: 0,
+      limit: 200,
+    })
+    for (const invalid of [
+      { kind: 'other' },
+      { minSize: -1 },
+      { offset: 0.5 },
+      { limit: 0 },
+      { limit: 1001 },
+      { extra: true },
+    ]) {
+      expect(DiscoveryRequestSchema.safeParse({ scanId: 'scan_abcdefgh', kind: 'caches', ...invalid }).success).toBe(
+        false,
+      )
+    }
+    expect(
+      DiscoveryPageSchema.safeParse({
+        scanId: 'scan_abcdefgh',
+        kind: 'caches',
+        items: [],
+        total: 0,
+        totalSize: 0,
+        offset: 0,
+        limit: 200,
+      }).success,
+    ).toBe(true)
+  })
+})
+
 describe('scan contract', () => {
+  it('validates preorder node frames without permitting nested payload trees', () => {
+    const node = {
+      name: 'local',
+      path: '/tmp/local',
+      size: 4096,
+      children: [],
+      depth: 0,
+      ignored: false,
+      collapsed: false,
+      logicalSize: 1,
+      isDirectory: true,
+      scanState: 'complete',
+      skipReason: null,
+    }
+    expect(LocalScanMessageSchema.safeParse({ type: 'node', node }).success).toBe(true)
+    expect(LocalScanMessageSchema.safeParse({ type: 'node', node: { ...node, children: [node] } }).success).toBe(false)
+  })
+  it('accepts protected requests and validates coverage instead of accepting empty success', () => {
+    expect(ScanStartRequestSchema.parse({ paths: ['/tmp/local'], localOnly: true }).localOnly).toBe(true)
+    expect(
+      LocalScanProgressSchema.safeParse({
+        currentPath: '/tmp/local',
+        bytesScanned: 12,
+        entriesScanned: 2,
+        files: 1,
+        directories: 1,
+        skippedCount: 0,
+        deniedCount: 0,
+        elapsedMs: 10,
+      }).success,
+    ).toBe(true)
+    expect(LocalScanReportSchema.safeParse({ nodes: [], coverage: { mode: 'local-only' }, volumes: [] }).success).toBe(
+      false,
+    )
+  })
   it('fills defaults and accepts a minimal scan start', () => {
     const parsed = ScanStartRequestSchema.parse({ paths: ['/tmp/demo'] })
     expect(parsed).toEqual({

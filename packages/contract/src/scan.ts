@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { LocalNodeMetadataShape, ScanCoverageSchema, ScanVolumeSchema } from './local-scan.ts'
 
 export const IgnoredModeSchema = z.enum(['summarize', 'exclude'])
 export type IgnoredMode = z.infer<typeof IgnoredModeSchema>
@@ -19,6 +20,7 @@ export const ScanStartRequestSchema = z.strictObject({
   respectGitignore: z.boolean().default(true),
   ignoredMode: IgnoredModeSchema.default('summarize'),
   label: z.string().max(200).optional(),
+  localOnly: z.boolean().optional(),
 })
 
 export type ScanStartRequest = z.infer<typeof ScanStartRequestSchema>
@@ -51,6 +53,8 @@ export const ScanStatusSchema = z.strictObject({
   rootIds: z.array(NodeIdSchema),
   label: z.string().nullable(),
   updatedAt: IsoDateTimeSchema,
+  coverage: ScanCoverageSchema.optional(),
+  volumes: z.array(ScanVolumeSchema).optional(),
 })
 
 export type ScanStatus = z.infer<typeof ScanStatusSchema>
@@ -71,6 +75,7 @@ export const TreeNodeSummarySchema = z.strictObject({
   collapsed: z.boolean(),
   hasChildren: z.boolean(),
   childCount: UintSchema,
+  ...LocalNodeMetadataShape,
 })
 
 export type TreeNodeSummary = z.infer<typeof TreeNodeSummarySchema>
@@ -91,6 +96,7 @@ const treeNodeSummaryShape = {
   collapsed: z.boolean(),
   hasChildren: z.boolean(),
   childCount: UintSchema,
+  ...LocalNodeMetadataShape,
 } as const
 
 export const TreeSliceNodeSchema: z.ZodType<TreeSliceNode> = z.strictObject({

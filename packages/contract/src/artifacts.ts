@@ -7,6 +7,16 @@ import {
   CleanupPlanSchema,
 } from './cleanup.ts'
 import { EventEnvelopeSchema } from './events.ts'
+import { DiscoveryKindSchema, DiscoveryRequestSchema, DiscoveryItemSchema, DiscoveryPageSchema } from './discovery.ts'
+import {
+  LocalScanReportSchema,
+  LocalScanNodeSchema,
+  LocalScanProgressSchema,
+  LocalScanMessageSchema,
+  LocalScanStreamNodeSchema,
+  ScanCoverageSchema,
+  ScanVolumeSchema,
+} from './local-scan.ts'
 import { ProblemSchema } from './problem.ts'
 import { ScanStartRequestSchema, ScanStatusSchema, TreeSliceSchema, TreeSliceRequestSchema } from './scan.ts'
 import { SessionExchangeRequestSchema, SessionSchema } from './session.ts'
@@ -23,8 +33,19 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   Capabilities: CapabilitiesSchema,
   ScanStartRequest: ScanStartRequestSchema,
   ScanStatus: ScanStatusSchema,
+  LocalScanReport: LocalScanReportSchema,
+  LocalScanNode: LocalScanNodeSchema,
+  LocalScanStreamNode: LocalScanStreamNodeSchema,
+  LocalScanProgress: LocalScanProgressSchema,
+  LocalScanMessage: LocalScanMessageSchema,
+  ScanCoverage: ScanCoverageSchema,
+  ScanVolume: ScanVolumeSchema,
   TreeSliceRequest: TreeSliceRequestSchema,
   TreeSlice: TreeSliceSchema,
+  DiscoveryKind: DiscoveryKindSchema,
+  DiscoveryRequest: DiscoveryRequestSchema,
+  DiscoveryItem: DiscoveryItemSchema,
+  DiscoveryPage: DiscoveryPageSchema,
   CleanupPlanRequest: CleanupPlanRequestSchema,
   CleanupPlan: CleanupPlanSchema,
   CleanupExecuteRequest: CleanupExecuteRequestSchema,

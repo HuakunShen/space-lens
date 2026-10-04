@@ -77,11 +77,12 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
     cleanupMode: config.allowCleanup ? 'trash' : 'none',
     maxConcurrent: config.maxConcurrentScans,
     maxTotal: config.maxTotalScans,
+    localScanBin: options.localScanBin,
   })
   const capabilities: Capabilities = {
     apiMajor: API_MAJOR,
     contractVersion: CONTRACT_VERSION,
-    scan: { start: true, cancel: true, maxConcurrent: config.maxConcurrentScans },
+    scan: { start: true, cancel: true, discovery: true, maxConcurrent: config.maxConcurrentScans },
     cleanup: { plan: config.allowCleanup, execute: config.allowCleanup, mode: config.allowCleanup ? 'trash' : 'none' },
     host: { folderPicker: false },
     icloud: 'unavailable',
@@ -134,9 +135,7 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
   const stop = async (): Promise<void> => {
     if (stopped) return
     stopped = true
-    for (const status of scans.list()) {
-      if (status.state === 'scanning') scans.cancel(status.scanId)
-    }
+    await scans.close()
     await new Promise<void>((resolve) => {
       server?.close(() => resolve())
       setTimeout(resolve, 2000).unref()

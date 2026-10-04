@@ -39,6 +39,8 @@ export interface ServeOptions {
   maxTotalScans?: number
   /** Trash backend override (embedders and tests); defaults to the OS trash. */
   trash?: TrashPort
+  /** Absolute protected release scanner executable; defaults to env/repository lookup. */
+  localScanBin?: string
   /**
    * `frame-ancestors` sources for served documents. Defaults to `['none']` —
    * the UI frames nobody. An embedder that mounts this host behind its own

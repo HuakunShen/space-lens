@@ -11,6 +11,8 @@ import type {
   TreeSliceRequest,
   ChildrenPage,
   CleanupPlan,
+  DiscoveryRequest,
+  DiscoveryPage,
   TreeSlice,
 } from '@space-lens/contract'
 
@@ -29,11 +31,13 @@ export interface WorkbenchService {
   capabilities(): Promise<Capabilities>
   roots(): Promise<RootsResponse>
   startScan(body: ScanStartRequest): Promise<ScanSession>
+  listScans?(): Promise<ScanStatus[]>
   scanStatus(scanId: string): Promise<ScanStatus>
   cancelScan(scanId: string): Promise<ScanStatus>
   treeSlice(body: TreeSliceRequest): Promise<TreeSlice>
   children(body: ChildrenPageRequest): Promise<ChildrenPage>
-  plan(body: { scanId: string; nodeIds: string[] }): Promise<{ planId: string }>
+  discover?(body: DiscoveryRequest): Promise<DiscoveryPage>
+  plan(body: { scanId: string; nodeIds: string[] }): Promise<CleanupPlan>
   execute(body: CleanupExecuteRequest): Promise<CleanupOutcome>
   /**
    * Opens the host's own folder picker and answers the one absolute path
