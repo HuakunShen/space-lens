@@ -36,10 +36,16 @@ jobs:
       - run: yarn install --immutable
       - name: Contract artifacts are byte-fresh
         run: yarn workspace @space-lens/contract test
-      - name: Unit tests (contract, client, host)
+      # host tests import apps/web sources (base-url), whose tsconfig extends
+      # the generated .svelte-kit/tsconfig.json — sync it before transforming.
+      - name: SvelteKit sync
+        run: yarn workspace @space-lens/web prepare
+      - name: Unit tests (contract, client, host, web-ui, web)
         run: |
           yarn workspace @space-lens/client test
           yarn workspace @space-lens/host test
+          yarn workspace @space-lens/web-ui test
+          yarn workspace @space-lens/web test
       - name: Typecheck every JS workspace
         run: yarn typecheck
       - name: Web build (browser flavor)
