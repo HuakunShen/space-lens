@@ -609,7 +609,7 @@ pub fn sl_events_subscribe(
     .events
     .frames_for(&session_id, &subscription_id, SERVICE_INSTANCE_ID)
     .into_iter()
-    .filter(|frame| after_sequence.map_or(true, |since| frame.event.sequence > since))
+    .filter(|frame| after_sequence.is_none_or(|since| frame.event.sequence > since))
     .collect();
   drop(sessions);
   for frame in frames {
