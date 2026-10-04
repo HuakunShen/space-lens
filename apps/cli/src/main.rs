@@ -6,10 +6,11 @@ use space_lens::cloud::{
 };
 use space_lens::{
   build_removal_plan, execute_removal_plan, find_candidates, find_dirty_git_repos, scan_directory,
-  CandidateOptions, CleanupPreset, DirtyGitRepoOptions, IgnoredMode, RemovalPlan, ScanNode,
+  scan_local_directory_with_progress, CandidateOptions, CleanupPreset, DirtyGitRepoOptions,
+  IgnoredMode, LocalScanCancellation, LocalScanProgress, LocalScanReport, RemovalPlan, ScanNode,
   ScanOptions,
 };
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 #[cfg(feature = "mcp")]
@@ -94,6 +95,15 @@ struct ScanArgs {
   ignored_mode: IgnoredModeArg,
   #[arg(long, help = "Descend into symlinked directories")]
   follow_symlinks: bool,
+  #[arg(
+    long,
+    help = "Protected local scan: skip cloud domains, dataless items, mounts and symlinks"
+  )]
+  local_only: bool,
+  #[arg(long, requires_all = ["local_only", "json"], help = "Emit progress and terminal report as NDJSON")]
+  progress_json: bool,
+  #[arg(long, requires_all = ["local_only", "progress_json"], help = "Emit each node separately before the terminal coverage report")]
+  stream_nodes: bool,
 }
 
 #[derive(Debug, Args)]
@@ -275,14 +285,72 @@ fn confirm_icloud_eviction() -> Result<()> {
 }
 
 fn run_scan(args: ScanArgs) -> Result<()> {
-  let tree = scan_directory(ScanOptions {
+  let options = ScanOptions {
     directories: args.paths,
     ignore_hidden: args.ignore_hidden,
     full_path: args.full_path,
     respect_gitignore: args.respect_gitignore,
     ignored_mode: args.ignored_mode.into(),
     follow_symlinks: args.follow_symlinks,
-  });
+  };
+
+  if args.local_only {
+    let cancellation = LocalScanCancellation::default();
+    let writer = std::sync::Mutex::new(io::BufWriter::new(io::stdout()));
+    let output_error = std::sync::Mutex::new(None::<String>);
+    let report = scan_local_directory_with_progress(options, cancellation.clone(), |progress| {
+      if args.progress_json {
+        if let Err(error) = write_ndjson(
+          &mut *writer.lock().unwrap(),
+          &ProgressFrame {
+            kind: "progress",
+            progress,
+          },
+        ) {
+          *output_error.lock().unwrap() = Some(error.to_string());
+          cancellation.cancel();
+        }
+      }
+    });
+    if let Some(error) = output_error.into_inner().unwrap() {
+      anyhow::bail!("progress output failed: {error}");
+    }
+    let mut report = report?;
+    if args.progress_json {
+      if args.stream_nodes {
+        // Move each subtree through an explicit stack: no tree clone or giant JSON frame.
+        let mut pending = std::mem::take(&mut report.nodes);
+        pending.reverse();
+        while let Some(mut node) = pending.pop() {
+          let children = std::mem::take(&mut node.children);
+          write_ndjson_buffered(
+            &mut *writer.lock().unwrap(),
+            &NodeFrame {
+              kind: "node",
+              node: &node,
+            },
+          )?;
+          pending.extend(children.into_iter().rev());
+        }
+      }
+      write_ndjson(
+        &mut *writer.lock().unwrap(),
+        &DoneFrame {
+          kind: "done",
+          report: &report,
+        },
+      )?;
+    } else if args.json {
+      print_json(&report)?;
+    } else {
+      for node in report.nodes {
+        print_tree(&ScanNode::from(node), 0);
+      }
+      eprintln!("Local-only coverage: {} skipped, {} denied, {} issues. Sizes are allocated blocks, not guaranteed reclaimable space.", report.coverage.skipped_count, report.coverage.denied_count, report.coverage.issue_count);
+    }
+    return Ok(());
+  }
+  let tree = scan_directory(options);
 
   if args.json {
     print_json(&tree)?;
@@ -292,6 +360,39 @@ fn run_scan(args: ScanArgs) -> Result<()> {
     }
   }
 
+  Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct ProgressFrame {
+  #[serde(rename = "type")]
+  kind: &'static str,
+  progress: LocalScanProgress,
+}
+
+#[derive(serde::Serialize)]
+struct DoneFrame<'a> {
+  #[serde(rename = "type")]
+  kind: &'static str,
+  report: &'a LocalScanReport,
+}
+
+#[derive(serde::Serialize)]
+struct NodeFrame<'a> {
+  #[serde(rename = "type")]
+  kind: &'static str,
+  node: &'a space_lens::LocalScanNode,
+}
+
+fn write_ndjson<W: Write, T: serde::Serialize>(writer: &mut W, value: &T) -> Result<()> {
+  write_ndjson_buffered(writer, value)?;
+  writer.flush()?;
+  Ok(())
+}
+
+fn write_ndjson_buffered<W: Write, T: serde::Serialize>(writer: &mut W, value: &T) -> Result<()> {
+  serde_json::to_writer(&mut *writer, value)?;
+  writer.write_all(b"\n")?;
   Ok(())
 }
 
@@ -365,7 +466,11 @@ fn run_dirty_git(args: DirtyGitArgs) -> Result<()> {
     println!("No dirty git repositories found.");
   } else {
     for repo in &repos {
-      println!("{}\t{} changed files", repo.path.display(), repo.dirty_entries);
+      println!(
+        "{}\t{} changed files",
+        repo.path.display(),
+        repo.dirty_entries
+      );
     }
   }
 
@@ -453,6 +558,22 @@ mod tests {
   use super::{format_bytes, Cli, Command, ICloudCommand};
   use clap::Parser;
   use std::path::Path;
+
+  #[test]
+  fn parses_protected_scan_protocol_and_rejects_progress_on_legacy_scans() {
+    assert!(Cli::try_parse_from([
+      "spacelens",
+      "scan",
+      "/tmp/local-fixture",
+      "--local-only",
+      "--json",
+      "--progress-json"
+    ])
+    .is_ok());
+    assert!(
+      Cli::try_parse_from(["spacelens", "scan", "/tmp/local-fixture", "--progress-json"]).is_err()
+    );
+  }
 
   #[test]
   fn formats_bytes_as_human_readable_values() {
