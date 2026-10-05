@@ -814,47 +814,520 @@ button:disabled {
   padding-top: 17px;
   padding-bottom: 17px;
 }
+/* ── Interface styles (macos / windows) ───────────────────────────────
+   Each non-web style declares its own tokens and rewrites a few shared
+   semantic tokens; web stays the theme.css base (data-interface is only
+   written after preferences load, so web gets no dedicated selectors).
+   Every token whose value differs between light and dark MUST be restated
+   in the :root.dark[data-interface='…'] companion block: `.dark` (0,1,0)
+   loses to `:root[data-interface='…']` (0,2,0) on specificity. Geometric
+   tokens and pure var-derivations are declared once — custom properties
+   resolve lazily per element, so a dark-block accent re-declaration
+   re-derives them. ── */
+
+/* ── macOS: vibrancy chrome, accent-tint selection, soft focus halos ── */
 :root[data-interface='macos'] {
   --radius: 0.5rem;
-  --primary: oklch(0.55 0.22 255);
-  --primary-foreground: oklch(0.99 0 0);
+  --primary: #007aff;
+  --primary-foreground: #ffffff;
   font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  --m-radius-control: 6px;
+  --m-radius-card: 10px;
+  --m-radius-window: 12px;
+  --m-accent: #007aff;
+  --m-accent-tint: color-mix(in srgb, var(--m-accent) 13%, var(--m-chrome-bg));
+  --m-accent-tint-hover: color-mix(in srgb, var(--m-accent) 7%, transparent);
+  --m-chrome-bg: rgb(246 246 246 / 72%);
+  --m-content-bg: #ffffff;
+  --m-hairline: rgb(0 0 0 / 12%);
+  --m-shadow-card: 0 1px 3px rgb(0 0 0 / 10%), 0 0 1px rgb(0 0 0 / 8%);
+  --m-shadow-popover: 0 2.7px 10.4px rgb(0 0 0 / 12%), 0 6.5px 25px rgb(0 0 0 / 18%), 0 12.3px 47.1px rgb(0 0 0 / 22%);
+  --m-focus-ring: 0 0 0 3px color-mix(in srgb, var(--m-accent) 45%, transparent);
+  --m-seg-h: 24px;
+  --m-menu-item-h: 26px;
+  --m-ambient:
+    radial-gradient(circle at 18% 0%, oklch(0.94 0.02 250 / 0.8), transparent 40rem),
+    radial-gradient(circle at 85% 5%, oklch(0.95 0.015 165 / 0.5), transparent 38rem),
+    linear-gradient(135deg, oklch(0.985 0 0), oklch(0.975 0.004 260));
+  --kunkun-scrollbar-size: 7px;
+  --kunkun-scrollbar-thumb-shadow: none;
+}
+:root.dark[data-interface='macos'] {
+  --primary: #0a84ff;
+  --primary-foreground: #ffffff;
+  --m-accent: #0a84ff;
+  --m-accent-tint: color-mix(in srgb, var(--m-accent) 16%, var(--m-chrome-bg));
+  --m-chrome-bg: rgb(40 40 42 / 60%);
+  --m-content-bg: #1e1e1e;
+  --m-hairline: rgb(255 255 255 / 12%);
+  --m-ambient:
+    radial-gradient(circle at 18% 0%, oklch(0.3 0.045 250 / 0.46), transparent 31rem),
+    radial-gradient(circle at 88% 8%, oklch(0.28 0.06 165 / 0.32), transparent 30rem),
+    linear-gradient(135deg, oklch(0.13 0 0), oklch(0.17 0.01 260));
+}
+
+/* Material contrast: the workbench ambient gradient is what the blurred
+   chrome samples; the content column stays solid. */
+:root[data-interface='macos'] body {
+  background: var(--m-content-bg);
+}
+:root[data-interface='macos'] .compact-workbench {
+  background: var(--m-ambient);
+}
+:root[data-interface='macos'] .workspace-content {
+  background: var(--background);
+}
+
+/* Vibrancy chrome: translucent toolbar, sidebars and status bar. */
+:root[data-interface='macos'] .lens-toolbar,
+:root[data-interface='macos'] .scan-sidebar,
+:root[data-interface='macos'] .explorer-sidebar,
+:root[data-interface='macos'] .workspace-status {
+  background: var(--m-chrome-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
 }
 :root[data-interface='macos'] .lens-toolbar {
-  background: color-mix(in oklch, var(--muted) 70%, var(--background));
+  border-bottom-color: var(--m-hairline);
+}
+:root[data-interface='macos'] .scan-sidebar {
+  border-right-color: var(--m-hairline);
+}
+:root[data-interface='macos'] .explorer-sidebar {
+  border-left-color: var(--m-hairline);
+}
+:root[data-interface='macos'] .workspace-status {
+  border-top-color: var(--m-hairline);
+}
+@supports not ((backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px))) {
+  :root[data-interface='macos'] .lens-toolbar,
+  :root[data-interface='macos'] .scan-sidebar,
+  :root[data-interface='macos'] .explorer-sidebar,
+  :root[data-interface='macos'] .workspace-status {
+    /* No backdrop support: raise opacity instead of going solid — composed
+       with the opaque content background this still reads translucent. */
+    background: color-mix(in srgb, var(--m-chrome-bg) 85%, var(--m-content-bg));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Sidebar selection: rounded accent tint, regular weight, softer hover.
+   Recent-scan rows carry .selected on the container only (ScanSidebar puts
+   class:selected on .sidebar-recent, not on the inner button), so the
+   container tint is that row's only selection indicator. */
+:root[data-interface='macos'] .sidebar-item {
+  border-radius: var(--m-radius-control);
+}
+:root[data-interface='macos'] .sidebar-item.selected,
+:root[data-interface='macos'] .sidebar-recent.selected {
+  background: var(--m-accent-tint);
 }
 :root[data-interface='macos'] .sidebar-item.selected {
-  background: color-mix(in srgb, var(--primary) 13%, var(--background));
   color: var(--foreground);
+  font-weight: 400;
+}
+:root[data-interface='macos'] .sidebar-item:not(.selected):hover {
+  background: var(--m-accent-tint-hover);
+}
+
+/* Toolbar buttons: borderless icon buttons with neutral hover tints. */
+:root[data-interface='macos'] .toolbar-icon,
+:root[data-interface='macos'] .toolbar-button {
+  border-radius: var(--m-radius-control);
 }
 :root[data-interface='macos'] .toolbar-button {
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.07);
+  border-color: transparent;
+  background: transparent;
 }
+:root[data-interface='macos'] .toolbar-icon:hover,
+:root[data-interface='macos'] .toolbar-button:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+:root[data-interface='macos'] .toolbar-icon:active,
+:root[data-interface='macos'] .toolbar-button:active {
+  background: color-mix(in srgb, var(--foreground) 15%, transparent);
+}
+:root[data-interface='macos'] .toolbar-icon.active {
+  background: color-mix(in srgb, var(--m-accent) 12%, transparent);
+  color: var(--m-accent);
+}
+
+/* Segmented controls: capsule track, selected segment floats on a solid
+   chip; hairline separators hide next to the selected segment. */
+:root[data-interface='macos'] .setting-options {
+  padding: 2px;
+  border: 1px solid var(--m-hairline);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--m-chrome-bg) 60%, transparent);
+  overflow: visible; /* base is hidden; the focus halo and the floating chip draw outside the control box */
+}
+:root[data-interface='macos'] .setting-options button {
+  min-height: var(--m-seg-h);
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px; /* beats the base first/last-child inner-corner calc */
+  background: transparent;
+}
+:root[data-interface='macos'] .setting-options button + button {
+  border-left: 1px solid var(--m-hairline); /* border-only channel: a box-shadow line here would out-rank the generic focus halo on the 2nd+ segment */
+}
+:root[data-interface='macos'] .setting-options button.selected + button,
+:root[data-interface='macos'] .setting-options button:has(+ .selected) {
+  border-left-color: transparent; /* hide the line next to the selected chip; engines without :has degrade to keeping it */
+}
+:root[data-interface='macos'] .setting-options button.selected {
+  background: var(--m-content-bg);
+  color: var(--foreground);
+  box-shadow: 0 1px 2.5px rgb(0 0 0 / 25%);
+}
+
+/* Style cards: soft-shadow cards; selected = tint block, no inset ring. */
+:root[data-interface='macos'] .style-options button {
+  border-color: var(--m-hairline);
+  border-radius: var(--m-radius-card);
+  background: var(--m-content-bg);
+  box-shadow: var(--m-shadow-card);
+}
+:root[data-interface='macos'] .style-options button.selected {
+  background: var(--m-accent-tint);
+  color: var(--foreground);
+  border-color: transparent;
+  box-shadow: none;
+}
+:root[data-interface='macos'] .style-options button:not(.selected):hover {
+  background: var(--m-accent-tint-hover);
+}
+
+/* Context menu: translucent + blur + layered window shadow + hairline. */
+:root[data-interface='macos'] .context-menu {
+  border: 0;
+  border-radius: var(--m-radius-window);
+  background: color-mix(in srgb, var(--m-content-bg) 70%, transparent);
+  -webkit-backdrop-filter: blur(15px);
+  backdrop-filter: blur(15px);
+  box-shadow:
+    var(--m-shadow-popover),
+    inset 0 0 0 1px var(--m-hairline);
+}
+:root.dark[data-interface='macos'] .context-menu {
+  box-shadow:
+    var(--m-shadow-popover),
+    inset 0 0 0 0.9px rgb(0 0 0 / 30%),
+    inset 0 0 0 1.2px rgb(255 255 255 / 30%); /* double inner ring, as dark macOS menus */
+}
+:root[data-interface='macos'] .context-menu button {
+  height: var(--m-menu-item-h);
+  border-radius: 4px;
+  font-weight: 400;
+}
+:root[data-interface='macos'] .context-menu button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: inherit;
+}
+
+/* Side sheets (right instances: settings/collector); bottom sheets keep
+   their borderless slide-up look. */
+:root[data-interface='macos'] [data-slot='sheet-content'][data-side='right'] {
+  background: var(--m-content-bg);
+  border-left: 1px solid var(--m-hairline);
+  box-shadow: var(--m-shadow-popover);
+}
+
+:root[data-interface='macos'] .chart-inspector {
+  border-radius: var(--m-radius-card);
+  box-shadow: var(--m-shadow-card);
+}
+:root[data-interface='macos'] .update-action {
+  border-radius: var(--m-radius-control);
+}
+:root[data-interface='macos'] *::-webkit-scrollbar-thumb,
+:root[data-interface='macos'] [data-slot='scroll-area-thumb'] {
+  border-radius: 999px; /* both scrollbar channels fully round; the Radix slot has no base radius */
+}
+
+/* ≤760px: .scan-sidebar becomes an absolute drawer covering real content —
+   turn the material off there. Same specificity as the material rule above;
+   later source position wins. */
+@media (max-width: 760px) {
+  :root[data-interface='macos'] .scan-sidebar {
+    background: var(--sidebar);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Focus: accent halo hugging the control; SVG arcs (stroke-based focus)
+   are excluded. Last box-shadow declarations in this section — the generic
+   rule is out-ranked by the same-specificity card shadow above, and the
+   (0,4,1) selected decorations always win, so focused selected chips/cards
+   get their own (0,4,1) rule below. Focus replaces decoration by design. */
+:root[data-interface='macos'] :focus-visible:not(svg, svg *) {
+  outline: none;
+  box-shadow: var(--m-focus-ring);
+}
+:root[data-interface='macos'] .setting-options button:focus-visible,
+:root[data-interface='macos'] .style-options button:focus-visible {
+  box-shadow: var(--m-focus-ring); /* (0,4,1), source-order last: beats the selected-chip float shadow and the selected-card box-shadow:none */
+}
+:root[data-interface='macos'] input:focus-visible,
+:root[data-interface='macos'] textarea:focus-visible {
+  border-color: var(--m-accent);
+}
+:root[data-interface='macos'] .search-field:focus-within {
+  outline: none;
+  border-color: var(--m-accent);
+  box-shadow: var(--m-focus-ring);
+}
+:root[data-interface='macos'] .search-field input:focus-visible {
+  box-shadow: none; /* the container already carries the halo */
+}
+
+/* ── Windows: Fluent/WinUI — solid layers, 1px strokes, double focus
+   frame, accent selection bar ── */
 :root[data-interface='windows'] {
   --radius: 0.25rem;
-  --primary: oklch(0.52 0.18 255);
-  --primary-foreground: oklch(0.99 0 0);
-  font-family: 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --w-accent: #0078d4;
+  --w-accent-fill: color-mix(in srgb, var(--w-accent) 92%, black);
+  --primary: var(--w-accent-fill);
+  --primary-foreground: #ffffff;
+  --w-radius-sm: 4px;
+  --w-radius-lg: 8px;
+  --w-layer-bg: #f3f3f3;
+  --w-control-fill: rgb(255 255 255 / 70%);
+  --w-control-stroke: rgb(0 0 0 / 5.9%);
+  --w-control-stroke-strong: rgb(0 0 0 / 16%);
+  --w-subtle-hover: rgb(0 0 0 / 3.5%);
+  --w-subtle-pressed: rgb(0 0 0 / 2.4%);
+  --w-text-primary: rgb(0 0 0 / 89.4%);
+  --w-shadow-2: 0 0 2px rgb(0 0 0 / 12%), 0 1px 2px rgb(0 0 0 / 14%);
+  --w-shadow-4: 0 0 2px rgb(0 0 0 / 12%), 0 2px 4px rgb(0 0 0 / 14%);
+  --w-shadow-16: 0 0 2px rgb(0 0 0 / 12%), 0 8px 16px rgb(0 0 0 / 14%);
+  --w-focus-outer: rgb(0 0 0 / 89.4%);
+  --w-focus-inner: rgb(255 255 255 / 70%);
+  --w-focus-gap: var(--w-layer-bg); /* declared once: re-resolves against the dark inner/outer and the scoped gaps below */
+  --w-focus-box: 0 0 0 3px var(--w-focus-gap), 0 0 0 4px var(--w-focus-inner), 0 0 0 6px var(--w-focus-outer);
+  --kunkun-scrollbar-size: 8px;
+  --kunkun-scrollbar-thumb-shadow: none;
+}
+:root.dark[data-interface='windows'] {
+  --w-accent-fill: color-mix(in srgb, var(--w-accent) 72%, white);
+  --primary: var(--w-accent-fill);
+  --primary-foreground: rgb(0 0 0 / 90%);
+  --w-layer-bg: #202020;
+  --w-control-fill: rgb(255 255 255 / 5.9%);
+  --w-control-stroke: rgb(255 255 255 / 7.1%);
+  --w-control-stroke-strong: rgb(255 255 255 / 9.4%);
+  --w-subtle-hover: rgb(255 255 255 / 5.9%);
+  --w-subtle-pressed: rgb(255 255 255 / 3.9%);
+  --w-text-primary: #ffffff;
+  --w-focus-outer: #ffffff;
+  --w-focus-inner: rgb(0 0 0 / 70%);
+  --w-shadow-2: 0 0 2px rgb(0 0 0 / 24%), 0 1px 2px rgb(0 0 0 / 28%);
+  --w-shadow-4: 0 0 2px rgb(0 0 0 / 24%), 0 2px 4px rgb(0 0 0 / 28%);
+  --w-shadow-16: 0 0 2px rgb(0 0 0 / 24%), 0 8px 16px rgb(0 0 0 / 28%);
+}
+
+/* Chrome: solid layers + 1px low-alpha strokes; no vibrancy. Border rules
+   are color-only — widths stay owned by the base and media rules. */
+:root[data-interface='windows'] body {
+  background: var(--w-layer-bg);
+}
+:root[data-interface='windows'] .lens-toolbar {
+  background: var(--w-layer-bg);
+  border-bottom-color: var(--w-control-stroke);
+  box-shadow: var(--w-shadow-2);
+}
+:root[data-interface='windows'] .scan-sidebar {
+  background: var(--w-layer-bg);
+  border-right-color: var(--w-control-stroke);
+}
+:root[data-interface='windows'] .explorer-sidebar {
+  background: var(--w-layer-bg); /* beats compact's background: var(--background) */
+  border-left-color: var(--w-control-stroke);
+}
+:root[data-interface='windows'] .workspace-status {
+  background: var(--w-layer-bg);
+  border-top-color: var(--w-control-stroke);
+}
+
+/* NavigationView selection: neutral subtle fill + 3×16 accent bar, regular
+   weight. Recent rows carry .selected on the container only, so they get
+   the subtle fill without the bar (the ::before hangs on .sidebar-item). */
+:root[data-interface='windows'] .sidebar-item {
+  border-radius: var(--w-radius-sm);
+}
+:root[data-interface='windows'] .sidebar-item.selected,
+:root[data-interface='windows'] .sidebar-recent.selected {
+  background: var(--w-subtle-hover);
 }
 :root[data-interface='windows'] .sidebar-item.selected {
   position: relative;
+  color: var(--w-text-primary);
+  font-weight: 400;
 }
 :root[data-interface='windows'] .sidebar-item.selected::before {
-  position: absolute;
   content: '';
+  position: absolute;
   left: 0;
+  top: 50%;
+  translate: 0 -50%;
   width: 3px;
   height: 16px;
-  background: var(--primary);
   border-radius: 2px;
+  background: var(--w-accent-fill);
 }
-:root[data-interface='windows'] .lens-toolbar {
-  background: var(--sidebar);
+:root[data-interface='windows'] .sidebar-item:not(.selected):hover {
+  background: var(--w-subtle-hover);
 }
-:root.dark[data-interface='macos'],
-:root.dark[data-interface='windows'] {
-  --primary: oklch(0.72 0.15 250);
-  --primary-foreground: oklch(0.17 0 0);
+:root[data-interface='windows'] .sidebar-item:active:not(:disabled) {
+  background: var(--w-subtle-pressed);
+}
+
+/* Toolbar buttons: standard WinUI button — fill + 1px stroke + 4px corners,
+   no press displacement. */
+:root[data-interface='windows'] .toolbar-button {
+  border: 1px solid var(--w-control-stroke);
+  border-radius: var(--w-radius-sm);
+  background: var(--w-control-fill);
+  box-shadow: none;
+}
+:root[data-interface='windows'] .toolbar-icon {
+  border-radius: var(--w-radius-sm);
+}
+:root[data-interface='windows'] .toolbar-button:hover {
+  background: var(--w-subtle-hover);
+  border-color: var(--w-control-stroke-strong);
+}
+:root[data-interface='windows'] .toolbar-button:active {
+  background: var(--w-subtle-pressed);
+  color: var(--w-text-primary);
+}
+:root[data-interface='windows'] .toolbar-icon:hover,
+:root[data-interface='windows'] .toolbar-icon.active {
+  background: var(--w-subtle-hover);
+}
+
+/* Segmented controls: keep the flat track; selected segment = accent fill
+   (WinUI accent button; dark = light-blue fill with dark text). */
+:root[data-interface='windows'] .setting-options {
+  border-color: var(--w-control-stroke);
+  border-radius: var(--w-radius-sm);
+  overflow: visible; /* base is hidden; corner segments' outer focus ring would be clipped */
+}
+:root[data-interface='windows'] .setting-options button + button {
+  border-left-color: var(--w-control-stroke);
+}
+:root[data-interface='windows'] .setting-options button.selected {
+  background: var(--w-accent-fill);
+  color: var(--primary-foreground);
+  box-shadow: none; /* replaces the base inset ring */
+}
+
+/* Style cards: 4px corners + control fill; selected = subtle fill + 1px
+   accent inner stroke. */
+:root[data-interface='windows'] .style-options button {
+  border-radius: var(--w-radius-sm);
+  background: var(--w-control-fill);
+  border-color: var(--w-control-stroke);
+}
+:root[data-interface='windows'] .style-options button.selected {
+  background: var(--w-subtle-hover);
+  color: var(--w-text-primary);
+  box-shadow: inset 0 0 0 1px var(--w-accent-fill);
+}
+
+/* Context menu: 8px overlay corners, solid layer, 1px stroke, shadow-16. */
+:root[data-interface='windows'] .context-menu {
+  border: 1px solid var(--w-control-stroke);
+  border-radius: var(--w-radius-lg);
+  background: var(--w-layer-bg);
+  box-shadow: var(--w-shadow-16);
+}
+:root[data-interface='windows'] .context-menu button {
+  height: 32px;
+  border-radius: var(--w-radius-sm);
+  font-weight: 400;
+}
+:root[data-interface='windows'] .context-menu button:hover:not(:disabled) {
+  background: var(--w-subtle-hover);
+  color: var(--w-text-primary);
+}
+
+/* Side sheets (right instances). */
+:root[data-interface='windows'] [data-slot='sheet-content'][data-side='right'] {
+  background: var(--w-layer-bg);
+  border-left: 1px solid var(--w-control-stroke);
+  box-shadow: var(--w-shadow-16);
+}
+
+:root[data-interface='windows'] .chart-inspector {
+  border-radius: var(--w-radius-sm);
+  box-shadow: var(--w-shadow-4);
+}
+:root[data-interface='windows'] .update-action {
+  border-radius: var(--w-radius-sm); /* --radius-sm collapses to 0 here; give the real 4px */
+  background: var(--w-control-fill);
+  border-color: var(--w-control-stroke);
+}
+:root[data-interface='windows'] *::-webkit-scrollbar-thumb,
+:root[data-interface='windows'] [data-slot='scroll-area-thumb'] {
+  border-radius: var(--w-radius-sm); /* square-ish 4px thumb on both scrollbar channels (base webkit is 999px, the Radix slot has no base radius) */
+}
+
+/* Focus: double keyboard frame for non-inputs; 2px accent underline for
+   text inputs (keyboard-only via :focus-visible). Last box-shadow
+   declarations in this section — the generic rule is out-ranked by the (0,4,1)
+   selected decorations above, so focused selected segments/cards get their own
+   (0,4,1) rule below. Focus replaces decoration by design. */
+:root[data-interface='windows'] :focus-visible:not(svg, svg *):not(input, textarea, select) {
+  outline: none;
+  box-shadow: var(--w-focus-box); /* 3px isolation ring + 1px inner ring + 2px outer ring */
+}
+:root[data-interface='windows'] .setting-options button:focus-visible,
+:root[data-interface='windows'] .style-options button:focus-visible {
+  box-shadow: var(--w-focus-box); /* (0,4,1), source-order last: beats the selected segment's box-shadow:none and the selected card's inset ring */
+}
+/* The isolation ring resolves to the nearest backing surface through custom
+   property inheritance — no per-surface focus rules needed. The toolbar,
+   sidebars, status bar and the repainted side sheet all sit on --w-layer-bg,
+   so the default gap is already right there; the content column and the chart
+   inspector re-scope it. */
+:root[data-interface='windows'] .workspace-content {
+  --w-focus-gap: var(--background);
+}
+:root[data-interface='windows'] .chart-inspector {
+  --w-focus-gap: var(--card); /* compact paints it with var(--card) */
+}
+:root[data-interface='windows'] .search-field {
+  background: var(--w-control-fill);
+  border-color: var(--w-control-stroke);
+  border-radius: var(--w-radius-sm);
+}
+:root[data-interface='windows'] .search-field:focus-within {
+  outline: none;
+  border-color: var(--w-control-stroke-strong);
+  border-bottom: 2px solid var(--w-accent-fill); /* the 1px height change is absorbed by the 32px flex container */
+}
+:root[data-interface='windows'] [data-slot='input']:focus-visible,
+:root[data-interface='windows'] input:focus-visible,
+:root[data-interface='windows'] textarea:focus-visible {
+  outline: none;
+  /* box-shadow: none clears shadcn Input's focus-visible:ring-3 ring and the
+     UA outline on bare inputs (ConnectionPanel) — otherwise a grey ring and
+     the accent underline would stack. */
+  box-shadow: none;
+  border-color: var(--w-control-stroke-strong);
+  border-bottom: 2px solid var(--w-accent-fill);
+}
+:root[data-interface='windows'] .search-field input:focus-visible {
+  box-shadow: none;
+  border-bottom: 0; /* the container already carries the underline; text inputs match :focus-visible on mouse focus too */
+}
+:root[data-interface='windows'] [data-slot='select-trigger'] {
+  border-color: var(--w-control-stroke);
+  border-radius: var(--w-radius-sm); /* focus uses the double frame above (trigger is a button) */
 }
 @media (max-width: 1000px) {
   .scan-sidebar {
@@ -1036,23 +1509,87 @@ button:disabled {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
-.scan-coverage-strip > span { display: inline-flex; align-items: center; gap: 6px; }
-.scan-coverage-strip > span:first-child { color: var(--foreground); }
-.scan-coverage-panel { width: min(520px, 100vw); max-width: none; }
-.coverage-details { padding: 0 24px 24px; overflow-y: auto; min-height: 0; font-size: 12px; }
-.coverage-details p { color: var(--muted-foreground); line-height: 1.6; margin: 12px 0; }
-.coverage-details h3 { font-size: 13px; font-weight: 600; margin-top: 22px; }
-.coverage-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; padding: 16px 0; border-bottom: 1px solid var(--border); }
-.coverage-metrics > div { display: flex; flex-direction: column; gap: 5px; }
-.coverage-metrics span { color: var(--muted-foreground); }
-.coverage-metrics strong { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.coverage-volume { display: grid; gap: 8px; padding: 12px 0; }
-.coverage-volume span { color: var(--muted-foreground); }
-.coverage-issues li { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--border); }
-.coverage-issues strong { text-transform: capitalize; }
-.coverage-issues span { font-size: 11px; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
-.coverage-issues p { margin: 0; font-size: 11px; }
+.scan-coverage-strip > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.scan-coverage-strip > span:first-child {
+  color: var(--foreground);
+}
+.scan-coverage-panel {
+  width: min(520px, 100vw);
+  max-width: none;
+}
+.coverage-details {
+  padding: 0 24px 24px;
+  overflow-y: auto;
+  min-height: 0;
+  font-size: 12px;
+}
+.coverage-details p {
+  color: var(--muted-foreground);
+  line-height: 1.6;
+  margin: 12px 0;
+}
+.coverage-details h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 22px;
+}
+.coverage-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.coverage-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.coverage-metrics span {
+  color: var(--muted-foreground);
+}
+.coverage-metrics strong {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.coverage-volume {
+  display: grid;
+  gap: 8px;
+  padding: 12px 0;
+}
+.coverage-volume span {
+  color: var(--muted-foreground);
+}
+.coverage-issues li {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.coverage-issues strong {
+  text-transform: capitalize;
+}
+.coverage-issues span {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+}
+.coverage-issues p {
+  margin: 0;
+  font-size: 11px;
+}
 @media (max-width: 600px) {
-  .scan-coverage-strip { gap: 8px; padding-inline: 10px; font-size: 10px; }
-  .coverage-logical { display: none !important; }
+  .scan-coverage-strip {
+    gap: 8px;
+    padding-inline: 10px;
+    font-size: 10px;
+  }
+  .coverage-logical {
+    display: none !important;
+  }
 }

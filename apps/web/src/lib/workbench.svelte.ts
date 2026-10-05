@@ -21,7 +21,6 @@ export function resolveBaseUrl(explicit?: string | null): { url: string; sameOri
   })
 }
 
-
 export function rememberBaseUrl(url: string): void {
   window.localStorage.setItem(BASE_URL_KEY, url.replace(/\/$/, ''))
 }

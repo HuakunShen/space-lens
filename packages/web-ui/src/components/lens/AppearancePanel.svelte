@@ -38,9 +38,9 @@
           <button class:selected={mode === option} type="button" aria-pressed={mode === option} onclick={() => onMode(option === 'light' ? 'light' : option === 'dark' ? 'dark' : 'system')}>{option}</button>
         {/each}
       </div></fieldset>
-      <fieldset><legend>Interface style</legend><p>Automatic follows your platform. Choose any style on any device.</p>
+      <fieldset><legend>Interface style</legend><p>Automatic uses the platform style in the desktop app on Windows and macOS; Web elsewhere.</p>
         <div class="style-options">
-          {#each [{id:'auto',label:'Automatic',detail:automaticStyle}, {id:'web',label:'Web',detail:'Clean and familiar'}, {id:'macos',label:'macOS',detail:'System type · soft controls'}, {id:'windows',label:'Windows',detail:'Segoe type · crisp controls'}] as option}
+          {#each [{id:'auto',label:'Automatic',detail:automaticStyle}, {id:'web',label:'Web',detail:'Clean and familiar'}, {id:'macos',label:'macOS',detail:'System type · translucent chrome'}, {id:'windows',label:'Windows',detail:'Fluent style · accent blue'}] as option}
             <button type="button" class:selected={style === option.id} aria-pressed={style === option.id} onclick={() => onStyle(option.id === 'macos' ? 'macos' : option.id === 'windows' ? 'windows' : option.id === 'web' ? 'web' : 'auto')}><strong>{option.label}</strong><span>{option.detail}</span></button>
           {/each}
         </div>
