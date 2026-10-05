@@ -26,6 +26,32 @@ Cargo workspace; `apps/desktop/src-tauri` is its **own** Cargo workspace.
 - `packages/web-ui` — shared Svelte components (SunburstChart, ChildList,
   StatusBar, ScanPicker, theme).
 
+## Native interface styles
+
+**Updated: 2026-10-05** — shared shadcn-svelte primitives and product components
+use `macos:`, `windows:` and `linux:` Tailwind variants selected by the root
+`data-interface` attribute. `styles/platform.css` contains semantic colors,
+fonts and materials; component utilities own control dimensions and layout.
+Base theme/layout CSS is layered below utilities so native treatments can
+actually override the baseline. Keep future platform rules in the component.
+
+- macOS: compact unified toolbar, source list, horizontal picker labels and
+  file/folder symbols in compact directory rows.
+- Windows: navigation selection bars, separate page heading/command actions,
+  inset content surfaces and Fluent input bottom strokes.
+- Linux: GNOME/libadwaita-inspired centered header title, larger raised controls,
+  solid sidebar and grouped settings rows.
+- Settings persist `auto | web | macos | windows | linux` with independent
+  compact/comfortable density and system/light/dark appearance. Automatic
+  chooses a native style in Tauri and Web in browsers; Android is not GNOME.
+- Startup and workspace share `ScanSidebar` and `LensToolbar`; WinUI commands
+  live in `WorkspaceHeading`. Native OS caption controls remain host-owned.
+- Native graph sizing becomes absolute only at `md` and above; two-column
+  utilities apply only while the map is visible. Both rules preserve narrow
+  windows and the full-width contents-only view.
+
+See `.journal/2026-10-05-1940.md` for rationale and verification scope.
+
 ## Tauri desktop shell
 
 - macOS `invoke` over the custom protocol lost responses after the third

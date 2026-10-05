@@ -15,3 +15,16 @@ test('corrupt or old stored preferences recover to defaults', () => {
     density: 'comfortable',
   })
 })
+
+test('Linux desktop selects GNOME while browsers and Android keep Web', () => {
+  assert.equal(resolveStyle('auto', true, 'Mozilla/5.0 (X11; Linux x86_64)'), 'linux')
+  assert.equal(resolveStyle('auto', false, 'Mozilla/5.0 (X11; Linux x86_64)'), 'web')
+  assert.equal(resolveStyle('auto', true, 'Mozilla/5.0 (Linux; Android 14)'), 'web')
+  assert.equal(resolveStyle('linux', false, 'Windows NT'), 'linux')
+})
+test('GNOME preference survives a reload', () => {
+  assert.deepEqual(parseAppearance('{"style":"linux","density":"comfortable"}'), {
+    style: 'linux',
+    density: 'comfortable',
+  })
+})

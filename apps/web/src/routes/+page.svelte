@@ -10,7 +10,17 @@
     StateBanner,
     StatusBar,
     SunburstChart,
-    LensSelect, LensToolbar, ScanSidebar, DiscoveryList, AppearancePanel, ScanCoveragePanel, Button, Input, formatBytes, formatNodeName,
+    LensSelect,
+    WorkspaceHeading,
+    LensToolbar,
+    ScanSidebar,
+    DiscoveryList,
+    AppearancePanel,
+    ScanCoveragePanel,
+    Button,
+    Input,
+    formatBytes,
+    formatNodeName,
   } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
   import type { CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem } from '@space-lens/contract'
@@ -51,7 +61,7 @@
   let appearance = $state(parseAppearance(null))
   let appVersion = $state<string | null>(null)
   let updateStatus = $state<UpdateStatus>({ state: 'idle' })
-  if (__SPACLENS_DESKTOP__) void currentAppVersion().then(version => (appVersion = version))
+  if (__SPACLENS_DESKTOP__) void currentAppVersion().then((version) => (appVersion = version))
   let preferencesReady = $state(false)
   let view = $state<'browse' | DiscoveryKind>('browse')
   let discoveryPage = $state<DiscoveryPage | null>(null)
@@ -62,26 +72,69 @@
   let discoverySequence = 0
   let browseSearch = $state('')
   let browseSort = $state<'size' | 'name' | 'path'>('size')
-  const sortOptions = [{ value: 'size', label: 'Largest first' }, { value: 'name', label: 'Name' }, { value: 'path', label: 'Path' }]
+  const sortOptions = [
+    { value: 'size', label: 'Largest first' },
+    { value: 'name', label: 'Name' },
+    { value: 'path', label: 'Path' },
+  ]
   const isMacScan = $derived(workbench.status?.coverage?.protection === 'macos-no-materialization')
-  const displayFocus = $derived(workbench.slice ? { ...workbench.slice.focusNode, name: formatNodeName(workbench.slice.focusNode, isMacScan) } : null)
-  const scannedLocationOptions = $derived(workbench.status?.rootIds.map((rootId, index) => ({ value: rootId, label: scannedPaths[index] === '/' ? isMacScan ? 'Macintosh HD' : 'Filesystem' : scannedPaths[index] === '/System/Volumes/Data' ? 'Data' : scannedPaths[index]?.split(/[\\/]/).at(-1) || `Location ${index + 1}` })) ?? [])
+  const displayFocus = $derived(
+    workbench.slice
+      ? { ...workbench.slice.focusNode, name: formatNodeName(workbench.slice.focusNode, isMacScan) }
+      : null,
+  )
+  const scannedLocationOptions = $derived(
+    workbench.status?.rootIds.map((rootId, index) => ({
+      value: rootId,
+      label:
+        scannedPaths[index] === '/'
+          ? isMacScan
+            ? 'Macintosh HD'
+            : 'Filesystem'
+          : scannedPaths[index] === '/System/Volumes/Data'
+            ? 'Data'
+            : scannedPaths[index]?.split(/[\\/]/).at(-1) || `Location ${index + 1}`,
+    })) ?? [],
+  )
   let planning = $state(false)
   let cleanupPlan = $state<CleanupPlan | null>(null)
   let cleanupOutcome = $state<CleanupOutcome | null>(null)
   let cleanupError = $state<string | null>(null)
   let notice = $state<string | null>(null)
   let scannedPaths = $state<string[]>([])
-  const discoveryAvailable = $derived(Boolean(workbench.capabilities?.scan.discovery && workbench.service?.discover && !(__SPACLENS_DESKTOP__ && workbench.status?.coverage)))
-  const gitignoredAvailable = $derived(discoveryAvailable && !(workbench.status?.coverage && scannedPaths.some(path => path === '/' || path === '/System/Volumes/Data')))
-  const selectedItems = $derived(workbench.items.filter(item => item.name.toLowerCase().includes(browseSearch.toLowerCase())))
-  const selectableShown = $derived(selectedItems.filter(item => item.scanState !== 'skipped' && item.scanState !== 'partial'))
-  const coveredIds = $derived(new Set(workbench.items.filter(item => selectedAncestor(workbench.collector, item.path)).map(item => item.id)))
-  const automaticStyle = resolveStyle('auto', __SPACLENS_DESKTOP__, typeof navigator !== 'undefined' ? navigator.userAgent : '')
+  const discoveryAvailable = $derived(
+    Boolean(
+      workbench.capabilities?.scan.discovery &&
+        workbench.service?.discover &&
+        !(__SPACLENS_DESKTOP__ && workbench.status?.coverage),
+    ),
+  )
+  const gitignoredAvailable = $derived(
+    discoveryAvailable &&
+      !(workbench.status?.coverage && scannedPaths.some((path) => path === '/' || path === '/System/Volumes/Data')),
+  )
+  const selectedItems = $derived(
+    workbench.items.filter((item) => item.name.toLowerCase().includes(browseSearch.toLowerCase())),
+  )
+  const selectableShown = $derived(
+    selectedItems.filter((item) => item.scanState !== 'skipped' && item.scanState !== 'partial'),
+  )
+  const coveredIds = $derived(
+    new Set(workbench.items.filter((item) => selectedAncestor(workbench.collector, item.path)).map((item) => item.id)),
+  )
+  const automaticStyle = resolveStyle(
+    'auto',
+    __SPACLENS_DESKTOP__,
+    typeof navigator !== 'undefined' ? navigator.userAgent : '',
+  )
 
   $effect(() => {
     if (!preferencesReady) return
-    document.documentElement.dataset.interface = resolveStyle(appearance.style, __SPACLENS_DESKTOP__, navigator.userAgent)
+    document.documentElement.dataset.interface = resolveStyle(
+      appearance.style,
+      __SPACLENS_DESKTOP__,
+      navigator.userAgent,
+    )
     document.documentElement.dataset.density = appearance.density
     window.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance))
   })
@@ -105,14 +158,27 @@
    * neither exists. Read from the user agent rather than a Tauri OS plugin, so
    * the desktop flavor needs no extra plugin for one padding decision.
    */
+  const onMac = typeof navigator !== 'undefined' && /Macintosh|Mac OS X/i.test(navigator.userAgent)
   const onWindows = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
   function headerInset(): string {
     if (!__SPACLENS_DESKTOP__) return 'px-4'
-    return onWindows ? 'pr-[152px] pl-4' : 'pl-[88px] pr-4'
+    return onWindows ? 'pr-[152px] pl-4' : onMac ? 'pl-[88px] pr-4' : 'px-4'
   }
 
-  const hosted = $derived(workbench.resolvedUrl !== null && !workbench.sameOrigin && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(workbench.resolvedUrl) && workbench.phase !== 'ready')
-  const ancestors = $derived(workbench.slice === null ? [] : [...workbench.slice.ancestors, workbench.slice.focusNode].map(node => ({ ...node, name: formatNodeName(node, isMacScan) })))
+  const hosted = $derived(
+    workbench.resolvedUrl !== null &&
+      !workbench.sameOrigin &&
+      !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(workbench.resolvedUrl) &&
+      workbench.phase !== 'ready',
+  )
+  const ancestors = $derived(
+    workbench.slice === null
+      ? []
+      : [...workbench.slice.ancestors, workbench.slice.focusNode].map((node) => ({
+          ...node,
+          name: formatNodeName(node, isMacScan),
+        })),
+  )
   const collectedIds = $derived(new Set(workbench.collector.map((entry) => entry.nodeId)))
   const collectorTotal = $derived(workbench.collector.reduce((total, entry) => total + entry.size, 0))
   const targets = $derived.by<ScanTarget[]>(() => {
@@ -129,7 +195,9 @@
       removable: true,
       lastScannedAt: entry.lastScannedAt,
     }))
-    return [...current, ...recent].map(target => target.path === '/' && isMacScan ? { ...target, label: 'Macintosh HD' } : target)
+    return [...current, ...recent].map((target) =>
+      target.path === '/' && isMacScan ? { ...target, label: 'Macintosh HD' } : target,
+    )
   })
 
   /**
@@ -170,14 +238,22 @@
       workbench.phase = 'ready'
       startPolling()
       const scans = await service.listScans?.().catch(() => [])
-      const previous = scans?.find(scan => scan.state === 'scanning') ?? scans?.filter(scan => scan.state === 'ready').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+      const previous =
+        scans?.find((scan) => scan.state === 'scanning') ??
+        scans?.filter((scan) => scan.state === 'ready').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
       if (previous) {
         workbench.activeScanId = previous.scanId
         workbench.status = previous
         pickerOpen = false
         if (previous.state === 'ready') {
           await loadRoot()
-          scannedPaths = await Promise.all(previous.rootIds.map(async nodeId => (await service.treeSlice({ scanId: previous.scanId, nodeId, depth: 0, maxChildrenPerNode: 1 })).focusNode.path))
+          scannedPaths = await Promise.all(
+            previous.rootIds.map(
+              async (nodeId) =>
+                (await service.treeSlice({ scanId: previous.scanId, nodeId, depth: 0, maxChildrenPerNode: 1 }))
+                  .focusNode.path,
+            ),
+          )
         }
       }
     } catch (error) {
@@ -275,7 +351,7 @@
         localOnly: true,
         paths: paths.map(expandTilde),
         ignoreHidden: false,
-        respectGitignore: !paths.some(path => path === '/' || path === '/System/Volumes/Data'),
+        respectGitignore: !paths.some((path) => path === '/' || path === '/System/Volumes/Data'),
         ignoredMode: 'summarize',
         label: paths.includes('/') && paths.includes('/System/Volumes/Data') ? 'Macintosh HD' : paths[0],
       })
@@ -296,7 +372,8 @@
       discoveryItems = []
       discoveryPage = null
       workbench.activeScanId = session.scanId
-      if (!__SPACLENS_DESKTOP__) window.sessionStorage.setItem(ACTIVE_SCAN_KEY, JSON.stringify({ scanId: session.scanId, paths: scannedPaths }))
+      if (!__SPACLENS_DESKTOP__)
+        window.sessionStorage.setItem(ACTIVE_SCAN_KEY, JSON.stringify({ scanId: session.scanId, paths: scannedPaths }))
       workbench.status = {
         scanId: session.scanId,
         state: 'scanning',
@@ -319,17 +396,26 @@
       }
     } catch (error) {
       workbench.error = describeError(error)
-    } finally { startingScan = false }
+    } finally {
+      startingScan = false
+    }
   }
 
   async function cancelScan(): Promise<void> {
     const { service, status } = workbench
     if (service === null || status === null) return
-    try { workbench.status = await service.cancelScan(status.scanId) } catch (error) { workbench.error = describeError(error) }
+    try {
+      workbench.status = await service.cancelScan(status.scanId)
+    } catch (error) {
+      workbench.error = describeError(error)
+    }
   }
 
   async function focus(node: TreeNodeSummary): Promise<void> {
-    if (node.scanState === 'skipped') { notice = `Not scanned: ${node.skipReason ?? 'unavailable'}. See scan details for coverage.`; return }
+    if (node.scanState === 'skipped') {
+      notice = `Not scanned: ${node.skipReason ?? 'unavailable'}. See scan details for coverage.`
+      return
+    }
     const { service, status } = workbench
     if (service === null || status === null || status.state !== 'ready') return
     const request = ++navigationRequest
@@ -346,7 +432,11 @@
       workbench.items = page.items
       workbench.childrenTotal = page.total
       browseSearch = ''
-      if (!__SPACLENS_DESKTOP__) window.sessionStorage.setItem(ACTIVE_SCAN_KEY, JSON.stringify({ scanId: status.scanId, paths: scannedPaths, focusNodeId: node.id }))
+      if (!__SPACLENS_DESKTOP__)
+        window.sessionStorage.setItem(
+          ACTIVE_SCAN_KEY,
+          JSON.stringify({ scanId: status.scanId, paths: scannedPaths, focusNodeId: node.id }),
+        )
     } catch (error) {
       if (request === navigationRequest) workbench.error = describeError(error)
     } finally {
@@ -359,16 +449,25 @@
     if (parent) void focus(parent)
   }
 
-  function invalidatePlan(): void { cleanupPlan = null; cleanupError = null }
+  function invalidatePlan(): void {
+    cleanupPlan = null
+    cleanupError = null
+  }
   function collect(node: TreeNodeSummary): void {
     if (workbench.status === null || workbench.deleting || planning) return
     invalidatePlan()
-    workbench.collector = addSelection(workbench.collector, node, workbench.status.scanId, new Date().toISOString(), `col_${crypto.randomUUID().slice(0, 8)}`)
+    workbench.collector = addSelection(
+      workbench.collector,
+      node,
+      workbench.status.scanId,
+      new Date().toISOString(),
+      `col_${crypto.randomUUID().slice(0, 8)}`,
+    )
   }
   function uncollect(node: TreeNodeSummary): void {
     if (workbench.deleting || planning) return
     invalidatePlan()
-    workbench.collector = workbench.collector.filter(entry => entry.nodeId !== node.id)
+    workbench.collector = workbench.collector.filter((entry) => entry.nodeId !== node.id)
   }
   function toggleCollected(node: TreeNodeSummary): void {
     if (collectedIds.has(node.id)) uncollect(node)
@@ -376,7 +475,7 @@
   }
   function removeEntry(id: string): void {
     invalidatePlan()
-    workbench.collector = workbench.collector.filter(entry => entry.id !== id)
+    workbench.collector = workbench.collector.filter((entry) => entry.id !== id)
   }
   function changeView(next: 'browse' | DiscoveryKind): void {
     navigationRequest++
@@ -393,7 +492,10 @@
     const offset = reset ? 0 : discoveryItems.length
     discoveryLoading = true
     discoveryError = null
-    if (reset) { discoveryPage = null; discoveryItems = [] }
+    if (reset) {
+      discoveryPage = null
+      discoveryItems = []
+    }
     try {
       const page = await service.discover({ scanId: status.scanId, kind, minSize: minimumSize, offset, limit: 200 })
       if (request !== discoverySequence || status.scanId !== workbench.activeScanId || view !== kind) return
@@ -411,12 +513,21 @@
     const request = ++navigationRequest
     navigating = true
     try {
-      const page = await service.children({scanId: status.scanId, nodeId: slice.focusNode.id, offset: workbench.items.length, limit: 200, sort: browseSort})
+      const page = await service.children({
+        scanId: status.scanId,
+        nodeId: slice.focusNode.id,
+        offset: workbench.items.length,
+        limit: 200,
+        sort: browseSort,
+      })
       if (request !== navigationRequest || status.scanId !== workbench.activeScanId) return
       workbench.items = [...workbench.items, ...page.items]
       workbench.childrenTotal = page.total
-    } catch (error) { workbench.error = describeError(error) }
-    finally { if (request === navigationRequest) navigating = false }
+    } catch (error) {
+      workbench.error = describeError(error)
+    } finally {
+      if (request === navigationRequest) navigating = false
+    }
   }
   async function focusById(nodeId: string, showBrowse = false): Promise<void> {
     const { service, status } = workbench
@@ -424,12 +535,13 @@
     const request = ++navigationRequest
     const sourceView = view
     try {
-      const slice = await service.treeSlice({scanId: status.scanId, nodeId, depth: 3, maxChildrenPerNode: 50})
+      const slice = await service.treeSlice({ scanId: status.scanId, nodeId, depth: 3, maxChildrenPerNode: 50 })
       if (request !== navigationRequest || status.scanId !== workbench.activeScanId || view !== sourceView) return
       if (showBrowse) changeView('browse')
       await focus(slice.focusNode)
     } catch (error) {
-      if (request === navigationRequest && status.scanId === workbench.activeScanId) workbench.error = describeError(error)
+      if (request === navigationRequest && status.scanId === workbench.activeScanId)
+        workbench.error = describeError(error)
     }
   }
   async function browseDiscovered(item: DiscoveryItem): Promise<void> {
@@ -437,8 +549,12 @@
     if (nodeId) await focusById(nodeId, true)
   }
   async function copyPath(path: string): Promise<void> {
-    try { await navigator.clipboard.writeText(path); notice = 'Path copied' }
-    catch { notice = `Copy this path: ${path}` }
+    try {
+      await navigator.clipboard.writeText(path)
+      notice = 'Path copied'
+    } catch {
+      notice = `Copy this path: ${path}`
+    }
   }
   function newLocation(path = ''): void {
     if (workbench.deleting || planning) return
@@ -448,7 +564,7 @@
     pickerOpen = true
   }
   function forgetRecent(path: string): void {
-    recentTargets = recentTargets.filter(entry => entry.path !== path)
+    recentTargets = recentTargets.filter((entry) => entry.path !== path)
     window.localStorage.setItem('spacelens.recentScans', JSON.stringify(recentTargets))
   }
   async function reviewCleanup(): Promise<void> {
@@ -457,9 +573,13 @@
     planning = true
     cleanupError = null
     cleanupOutcome = null
-    try { cleanupPlan = await service.plan({ scanId: status.scanId, nodeIds: collector.map(entry => entry.nodeId) }) }
-    catch (error) { cleanupError = describeError(error) }
-    finally { planning = false }
+    try {
+      cleanupPlan = await service.plan({ scanId: status.scanId, nodeIds: collector.map((entry) => entry.nodeId) })
+    } catch (error) {
+      cleanupError = describeError(error)
+    } finally {
+      planning = false
+    }
   }
   async function confirmCleanup(): Promise<void> {
     const { service } = workbench
@@ -469,12 +589,16 @@
     cleanupError = null
     try {
       cleanupOutcome = await service.execute({ planId: plan.planId, confirm: true })
-      const trashedPaths = new Set(cleanupOutcome.trashed.map(entry => entry.path))
-      workbench.collector = workbench.collector.filter(entry => !trashedPaths.has(entry.path))
+      const trashedPaths = new Set(cleanupOutcome.trashed.map((entry) => entry.path))
+      workbench.collector = workbench.collector.filter((entry) => !trashedPaths.has(entry.path))
       cleanupPlan = null
       notice = `${cleanupOutcome.trashed.length} items moved to Trash. Rescan to update the storage map.`
-    } catch (error) { cleanupError = describeError(error); cleanupPlan = null }
-    finally { workbench.deleting = false }
+    } catch (error) {
+      cleanupError = describeError(error)
+      cleanupPlan = null
+    } finally {
+      workbench.deleting = false
+    }
   }
 
   onMount(() => {
@@ -506,80 +630,325 @@
   <div data-tauri-drag-region class="fixed top-0 right-0 left-0 z-40 h-10"></div>
   <ConnectionPanel
     phase={workbench.phase === 'failed' ? 'failed' : workbench.phase === 'connecting' ? 'connecting' : 'idle'}
-    resolvedUrl={workbench.resolvedUrl} sameOrigin={workbench.sameOrigin} {hosted}
-    ticket={ticketInput} password={passwordInput} message={workbench.connectMessage}
-    onBaseUrl={url => (explicitUrlInput = url)} onTicket={value => (ticketInput = value)} onPassword={value => (passwordInput = value)} onConnect={() => void connect()}
+    resolvedUrl={workbench.resolvedUrl}
+    sameOrigin={workbench.sameOrigin}
+    {hosted}
+    ticket={ticketInput}
+    password={passwordInput}
+    message={workbench.connectMessage}
+    onBaseUrl={(url) => (explicitUrlInput = url)}
+    onTicket={(value) => (ticketInput = value)}
+    onPassword={(value) => (passwordInput = value)}
+    onConnect={() => void connect()}
   />
 {:else if pickerOpen || workbench.status === null || workbench.status.state !== 'ready'}
-  <ScanPicker {targets} mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
+  <ScanPicker
+    {targets}
+    mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
     folderPicker={workbench.capabilities?.host.folderPicker ?? false}
     onSettings={() => (settingsOpen = true)}
     onPickFolder={() => workbench.service?.pickFolder?.() ?? Promise.resolve(null)}
-    chromeInset={headerInset()} logo={`${base}/logo-mark.png`} initialPath={pickerPath}
-    canClose={workbench.status?.state === 'ready'} busy={startingScan || workbench.status?.state === 'scanning'}
-    error={workbench.error || (workbench.status?.state === 'failed' ? workbench.status.message : workbench.status?.state === 'cancelled' ? 'Scan cancelled. Choose a location to start again.' : null)}
-    status={workbench.status} onScan={paths => void startScan(paths)} onForget={forgetRecent}
-    onCancel={() => { if (workbench.status?.state === 'scanning') void cancelScan(); else pickerOpen = false }}
+    chromeInset={headerInset()}
+    logo={`${base}/logo-mark.png`}
+    initialPath={pickerPath}
+    canClose={workbench.status?.state === 'ready'}
+    busy={startingScan || workbench.status?.state === 'scanning'}
+    error={workbench.error ||
+      (workbench.status?.state === 'failed'
+        ? workbench.status.message
+        : workbench.status?.state === 'cancelled'
+          ? 'Scan cancelled. Choose a location to start again.'
+          : null)}
+    status={workbench.status}
+    onScan={(paths) => void startScan(paths)}
+    onForget={forgetRecent}
+    onCancel={() => {
+      if (workbench.status?.state === 'scanning') void cancelScan()
+      else pickerOpen = false
+    }}
   />
 {:else}
-  <div class="workbench-shell compact-workbench">
-    <LensToolbar title={displayFocus?.name ?? workbench.status.label ?? 'Storage'}
-      mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'} chromeInset={headerInset()} {sidebarVisible} {chartVisible}
-      collectorCount={workbench.collector.length} busy={workbench.deleting || planning}
-      onNewScan={() => newLocation()} onToggleSidebar={() => (sidebarVisible = !sidebarVisible)}
-      onToggleChart={() => { chartVisible = !chartVisible; view = 'browse' }}
-      onOpenCollector={() => (collectorOpen = true)} onOpenSettings={() => (settingsOpen = true)}
+  <div class="workbench-shell compact-workbench windows:bg-sidebar">
+    <LensToolbar
+      title={displayFocus?.name ?? workbench.status.label ?? 'Storage'}
+      mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
+      chromeInset={headerInset()}
+      {sidebarVisible}
+      {chartVisible}
+      collectorCount={workbench.collector.length}
+      busy={workbench.deleting || planning}
+      onNewScan={() => newLocation()}
+      onToggleSidebar={() => (sidebarVisible = !sidebarVisible)}
+      onToggleChart={() => {
+        chartVisible = !chartVisible
+        view = 'browse'
+      }}
+      onOpenCollector={() => (collectorOpen = true)}
+      onOpenSettings={() => (settingsOpen = true)}
     />
     <div class="workspace-body">
       {#if sidebarVisible}
-        <ScanSidebar {targets} {view} {discoveryAvailable} {gitignoredAvailable} selectedPath={ancestors[0]?.path ?? scannedPaths[0] ?? workbench.status.label}
-          busy={workbench.deleting || planning} onView={changeView} onSelect={target => newLocation(target.path)} onCustom={() => newLocation()} onForget={forgetRecent} />
+        <ScanSidebar
+          {targets}
+          {view}
+          {discoveryAvailable}
+          {gitignoredAvailable}
+          selectedPath={ancestors[0]?.path ?? scannedPaths[0] ?? workbench.status.label}
+          busy={workbench.deleting || planning}
+          onView={changeView}
+          onSelect={(target) => newLocation(target.path)}
+          onCustom={() => newLocation()}
+          onForget={forgetRecent}
+          onSettings={() => (settingsOpen = true)}
+        />
       {/if}
-      <div class="workspace-content">
-        {#if workbench.error}<StateBanner state="error" title="Could not complete the request" detail={workbench.error} />{/if}
-        {#if notice}<div class="workspace-notice" role="status"><span>{notice}</span>{#if cleanupOutcome}<button type="button" disabled={workbench.deleting} onclick={() => { cleanupOutcome = null; void startScan(scannedPaths.length ? scannedPaths : [workbench.status?.label ?? '']) }}>Rescan</button>{/if}<button type="button" aria-label="Dismiss notice" onclick={() => (notice = null)}>×</button></div>{/if}
+      <div
+        class="workspace-content windows:mr-3 windows:rounded-tl-lg windows:border windows:border-border windows:bg-background windows:pt-5"
+      >
+        <WorkspaceHeading
+          title={view === 'browse'
+            ? (displayFocus?.name ?? 'Storage')
+            : view === 'large-files'
+              ? 'Large files'
+              : view === 'caches'
+                ? 'Developer cleanup'
+                : 'Gitignored space'}
+          path={displayFocus?.path ?? workbench.status.label ?? undefined}
+          busy={workbench.deleting || planning}
+          collectorCount={workbench.collector.length}
+          {chartVisible}
+          onNewScan={() => newLocation()}
+          onOpenCollector={() => (collectorOpen = true)}
+          onToggleChart={() => {
+            chartVisible = !chartVisible
+            view = 'browse'
+          }}
+        />
+        {#if workbench.error}<StateBanner
+            state="error"
+            title="Could not complete the request"
+            detail={workbench.error}
+          />{/if}
+        {#if notice}<div class="workspace-notice" role="status">
+            <span>{notice}</span>{#if cleanupOutcome}<button
+                type="button"
+                disabled={workbench.deleting}
+                onclick={() => {
+                  cleanupOutcome = null
+                  void startScan(scannedPaths.length ? scannedPaths : [workbench.status?.label ?? ''])
+                }}>Rescan</button
+              >{/if}<button type="button" aria-label="Dismiss notice" onclick={() => (notice = null)}>×</button>
+          </div>{/if}
         <ScanCoveragePanel status={workbench.status} />
         {#if view === 'browse'}
-          <div class="explorer-pathbar">
-            {#if workbench.status.rootIds.length > 1}<LensSelect class="root-select" label="Scanned location" value={ancestors[0]?.id ?? workbench.status.rootIds[0]} options={scannedLocationOptions} onChange={value => void focusById(value)} />{/if}
-            <BreadcrumbBar items={ancestors} onSelect={node => void focus(node)} onBack={goUp} canGoBack={ancestors.length > 1} />
-            <span>{navigating ? 'Opening…' : formatBytes(workbench.slice?.totalSize ?? workbench.status.bytesScanned)}</span>
+          <div
+            class="explorer-pathbar macos:min-h-10 macos:px-4 windows:mx-4 windows:border-b-0 windows:px-2 linux:min-h-12 linux:px-5"
+          >
+            {#if workbench.status.rootIds.length > 1}<LensSelect
+                class="root-select"
+                label="Scanned location"
+                value={ancestors[0]?.id ?? workbench.status.rootIds[0]}
+                options={scannedLocationOptions}
+                onChange={(value) => void focusById(value)}
+              />{/if}
+            <BreadcrumbBar
+              items={ancestors}
+              onSelect={(node) => void focus(node)}
+              onBack={goUp}
+              canGoBack={ancestors.length > 1}
+            />
+            <span
+              >{navigating
+                ? 'Opening…'
+                : formatBytes(workbench.slice?.totalSize ?? workbench.status.bytesScanned)}</span
+            >
           </div>
-          <main class="explorer-layout" class:without-chart={!chartVisible} aria-busy={navigating}>
-            {#if chartVisible}<div class="explorer-chart">
-              <SunburstChart tree={workbench.slice?.tree ?? null} focusNode={displayFocus}
-                hoveredNode={workbench.items.find(item => item.id === workbench.hoveredId) ?? null} onBack={goUp} canGoBack={ancestors.length > 1}
-                hoveredId={workbench.hoveredId} collectedIds={coveredIds} onHover={id => (workbench.hoveredId = id)}
-                onOpen={node => void focus(node)} onContext={toggleCollected} />
-              {#if workbench.slice?.truncated}<p class="chart-summary">{workbench.slice.omittedCount.toLocaleString()} smaller items grouped · open a folder to explore</p>{/if}
-            </div>{/if}
-            <aside class="explorer-sidebar" aria-label="Folder contents">
-              <div class="contents-heading"><div><h2>Folder contents</h2><p>{workbench.childrenTotal.toLocaleString()} item{workbench.childrenTotal === 1 ? '' : 's'} · {workbench.items.length.toLocaleString()} loaded</p></div><div class="browse-sort"><LensSelect value={browseSort} options={sortOptions} label="Sort folder contents" class="w-32" onChange={value => { browseSort = value === 'name' ? 'name' : value === 'path' ? 'path' : 'size'; if (workbench.slice) void focus(workbench.slice.focusNode) }} /></div></div>
-              <label class="search-field browse-search"><Input.Root type="search" bind:value={browseSearch} aria-label="Search folder contents" placeholder="Search loaded items…" /></label>
-              <div class="browse-selection"><button type="button" disabled={workbench.deleting || planning || !selectableShown.length} onclick={() => selectableShown.forEach(collect)}>Select shown ({selectableShown.length})</button>{#if workbench.collector.length}<button type="button" disabled={workbench.deleting || planning} onclick={() => { invalidatePlan(); workbench.collector = [] }}>Clear selection</button>{/if}</div>
-              {#key workbench.slice?.focusNode.id}<ChildList disabled={planning || workbench.deleting} isCovered={node => { const entry = selectedAncestor(workbench.collector, node.path); return Boolean(entry && entry.nodeId !== node.id) }} totalSize={workbench.slice?.focusNode.size ?? 0} items={selectedItems} hoveredId={workbench.hoveredId} collectedIds={coveredIds}
-                onHover={id => (workbench.hoveredId = id)} onOpen={node => void focus(node)} onCollect={collect} onRemove={uncollect} />{/key}
-              {#if workbench.items.length < workbench.childrenTotal}<div class="load-more"><Button.Root variant="ghost" size="sm" disabled={navigating} onclick={() => void loadMoreChildren()}>Load more items</Button.Root></div>{/if}
+          <main
+            class="explorer-layout macos:md:data-[chart-visible=true]:grid-cols-[minmax(0,1.15fr)_minmax(320px,1fr)] windows:md:data-[chart-visible=true]:grid-cols-[minmax(0,1fr)_minmax(340px,1fr)] windows:mx-4 windows:mb-4 windows:gap-3 linux:md:data-[chart-visible=true]:grid-cols-[minmax(0,1.1fr)_minmax(340px,1fr)]"
+            data-chart-visible={chartVisible}
+            class:without-chart={!chartVisible}
+            aria-busy={navigating}
+          >
+            {#if chartVisible}<div
+                class="explorer-chart macos:bg-background macos:p-5 windows:rounded-lg windows:border windows:bg-background windows:p-4 linux:bg-background linux:p-5"
+              >
+                <SunburstChart
+                  tree={workbench.slice?.tree ?? null}
+                  focusNode={displayFocus}
+                  hoveredNode={workbench.items.find((item) => item.id === workbench.hoveredId) ?? null}
+                  onBack={goUp}
+                  canGoBack={ancestors.length > 1}
+                  hoveredId={workbench.hoveredId}
+                  collectedIds={coveredIds}
+                  onHover={(id) => (workbench.hoveredId = id)}
+                  onOpen={(node) => void focus(node)}
+                  onContext={toggleCollected}
+                />
+                {#if workbench.slice?.truncated}<p class="chart-summary">
+                    {workbench.slice.omittedCount.toLocaleString()} smaller items grouped · open a folder to explore
+                  </p>{/if}
+              </div>{/if}
+            <aside
+              class="explorer-sidebar macos:bg-background macos:p-3 windows:rounded-lg windows:border windows:bg-card windows:p-3 linux:bg-card linux:p-4"
+              aria-label="Folder contents"
+            >
+              <div
+                class="contents-heading macos:pb-3 windows:pb-4 linux:pb-4 windows:[&_h2]:text-base windows:[&_p]:text-xs linux:[&_h2]:text-sm linux:[&_p]:text-xs"
+              >
+                <div>
+                  <h2>Folder contents</h2>
+                  <p>
+                    {workbench.childrenTotal.toLocaleString()} item{workbench.childrenTotal === 1 ? '' : 's'} · {workbench.items.length.toLocaleString()}
+                    loaded
+                  </p>
+                </div>
+                <div class="browse-sort">
+                  <LensSelect
+                    value={browseSort}
+                    options={sortOptions}
+                    label="Sort folder contents"
+                    class="w-32"
+                    onChange={(value) => {
+                      browseSort = value === 'name' ? 'name' : value === 'path' ? 'path' : 'size'
+                      if (workbench.slice) void focus(workbench.slice.focusNode)
+                    }}
+                  />
+                </div>
+              </div>
+              <label class="browse-search relative mx-1 mb-2 block"
+                ><Input.Root
+                  type="search"
+                  bind:value={browseSearch}
+                  aria-label="Search folder contents"
+                  placeholder="Search loaded items…"
+                /></label
+              >
+              <div class="browse-selection">
+                <button
+                  type="button"
+                  disabled={workbench.deleting || planning || !selectableShown.length}
+                  onclick={() => selectableShown.forEach(collect)}>Select shown ({selectableShown.length})</button
+                >{#if workbench.collector.length}<button
+                    type="button"
+                    disabled={workbench.deleting || planning}
+                    onclick={() => {
+                      invalidatePlan()
+                      workbench.collector = []
+                    }}>Clear selection</button
+                  >{/if}
+              </div>
+              {#key workbench.slice?.focusNode.id}<ChildList
+                  disabled={planning || workbench.deleting}
+                  isCovered={(node) => {
+                    const entry = selectedAncestor(workbench.collector, node.path)
+                    return Boolean(entry && entry.nodeId !== node.id)
+                  }}
+                  totalSize={workbench.slice?.focusNode.size ?? 0}
+                  items={selectedItems}
+                  hoveredId={workbench.hoveredId}
+                  collectedIds={coveredIds}
+                  onHover={(id) => (workbench.hoveredId = id)}
+                  onOpen={(node) => void focus(node)}
+                  onCollect={collect}
+                  onRemove={uncollect}
+                />{/key}
+              {#if workbench.items.length < workbench.childrenTotal}<div class="load-more">
+                  <Button.Root variant="ghost" size="sm" disabled={navigating} onclick={() => void loadMoreChildren()}
+                    >Load more items</Button.Root
+                  >
+                </div>{/if}
             </aside>
           </main>
         {:else}
-          {#key view}<DiscoveryList kind={view} page={discoveryPage} items={discoveryItems} loading={discoveryLoading} error={discoveryError} minSize={minimumSize}
-            disabled={workbench.deleting || planning} isSelected={node => Boolean(selectedAncestor(workbench.collector, node.path))} isCovered={node => { const entry = selectedAncestor(workbench.collector, node.path); return Boolean(entry && entry.nodeId !== node.id) }}
-            onToggle={toggleCollected} onSelect={nodes => nodes.forEach(collect)} onDeselect={nodes => nodes.forEach(uncollect)}
-            onMinSize={value => (minimumSize = value)} onLoadMore={() => void refreshDiscovery(false)} onRetry={() => void refreshDiscovery(true)}
-            onBrowse={item => void browseDiscovered(item)} onCopy={path => void copyPath(path)} />{/key}
+          {#key view}<DiscoveryList
+              kind={view}
+              page={discoveryPage}
+              items={discoveryItems}
+              loading={discoveryLoading}
+              error={discoveryError}
+              minSize={minimumSize}
+              disabled={workbench.deleting || planning}
+              isSelected={(node) => Boolean(selectedAncestor(workbench.collector, node.path))}
+              isCovered={(node) => {
+                const entry = selectedAncestor(workbench.collector, node.path)
+                return Boolean(entry && entry.nodeId !== node.id)
+              }}
+              onToggle={toggleCollected}
+              onSelect={(nodes) => nodes.forEach(collect)}
+              onDeselect={(nodes) => nodes.forEach(uncollect)}
+              onMinSize={(value) => (minimumSize = value)}
+              onLoadMore={() => void refreshDiscovery(false)}
+              onRetry={() => void refreshDiscovery(true)}
+              onBrowse={(item) => void browseDiscovered(item)}
+              onCopy={(path) => void copyPath(path)}
+            />{/key}
         {/if}
       </div>
     </div>
-    <footer class="workspace-status"><span><i class:reconnecting={!__SPACLENS_DESKTOP__ && workbench.streamState !== 'live'}></i>{formatBytes(workbench.status.bytesScanned)} scanned <span class="status-separator">·</span> {workbench.status.coverage ? 'Read-only local scan' : workbench.capabilities?.cleanup.execute ? 'Local cleanup enabled' : 'Read-only connection'}</span><button type="button" onclick={() => (collectorOpen = true)}><span>{workbench.collector.length} selected</span><strong>{formatBytes(collectorTotal)}</strong><span>Review →</span></button></footer>
-    <CollectorPanel open={collectorOpen} entries={workbench.collector} totalSize={collectorTotal} deleting={workbench.deleting} {planning}
-      plan={cleanupPlan} outcome={cleanupOutcome} error={cleanupError} cleanupAvailable={!workbench.status.coverage && Boolean(workbench.capabilities?.cleanup.execute)}
-      onClose={() => { collectorOpen = false; cleanupPlan = null }} onRemove={removeEntry} onClear={() => { invalidatePlan(); workbench.collector = [] }} onDelete={() => void reviewCleanup()} onConfirm={() => void confirmCleanup()} />
+    <footer
+      class="workspace-status macos:min-h-8 macos:bg-(--chrome) windows:min-h-11 windows:border-t-0 windows:bg-sidebar linux:min-h-10 linux:bg-(--chrome)"
+    >
+      <span
+        ><i class:reconnecting={!__SPACLENS_DESKTOP__ && workbench.streamState !== 'live'}></i>{formatBytes(
+          workbench.status.bytesScanned,
+        )} scanned <span class="status-separator">·</span>
+        {workbench.status.coverage
+          ? 'Read-only local scan'
+          : workbench.capabilities?.cleanup.execute
+            ? 'Local cleanup enabled'
+            : 'Read-only connection'}</span
+      ><Button.Root
+        variant="ghost"
+        size="sm"
+        class="macos:px-1 windows:mr-2 windows:bg-primary windows:px-3 windows:text-primary-foreground windows:hover:bg-primary/80 linux:rounded-lg linux:bg-(--control) linux:px-3"
+        onclick={() => (collectorOpen = true)}
+        ><span>{workbench.collector.length} selected</span><strong>{formatBytes(collectorTotal)}</strong><span
+          >Review →</span
+        ></Button.Root
+      >
+    </footer>
+    <CollectorPanel
+      open={collectorOpen}
+      entries={workbench.collector}
+      totalSize={collectorTotal}
+      deleting={workbench.deleting}
+      {planning}
+      plan={cleanupPlan}
+      outcome={cleanupOutcome}
+      error={cleanupError}
+      cleanupAvailable={!workbench.status.coverage && Boolean(workbench.capabilities?.cleanup.execute)}
+      onClose={() => {
+        collectorOpen = false
+        cleanupPlan = null
+      }}
+      onRemove={removeEntry}
+      onClear={() => {
+        invalidatePlan()
+        workbench.collector = []
+      }}
+      onDelete={() => void reviewCleanup()}
+      onConfirm={() => void confirmCleanup()}
+    />
   </div>
 {/if}
-<AppearancePanel open={settingsOpen} style={appearance.style} density={appearance.density} mode={userPrefersMode.current}
-  automaticStyle={automaticStyle === 'macos' ? 'macOS on this platform' : automaticStyle === 'windows' ? 'Windows on this platform' : 'Web on this platform'}
-  appVersion={appVersion ?? undefined} update={updateStatus}
-  onClose={() => (settingsOpen = false)} onStyle={style => (appearance.style = style)} onDensity={density => (appearance.density = density)} onMode={setMode}
-  onCheckUpdates={__SPACLENS_DESKTOP__ ? () => void checkForAppUpdate(status => (updateStatus = status)) : undefined}
-  onInstallUpdate={__SPACLENS_DESKTOP__ ? () => void installAppUpdate(status => (updateStatus = status)) : undefined} />
+<AppearancePanel
+  open={settingsOpen}
+  style={appearance.style}
+  density={appearance.density}
+  mode={userPrefersMode.current}
+  automaticStyle={automaticStyle === 'macos'
+    ? 'macOS on this platform'
+    : automaticStyle === 'windows'
+      ? 'Windows on this platform'
+      : automaticStyle === 'linux'
+        ? 'Linux (GNOME) on this platform'
+        : 'Web on this platform'}
+  appVersion={appVersion ?? undefined}
+  update={updateStatus}
+  onClose={() => (settingsOpen = false)}
+  onStyle={(style) => (appearance.style = style)}
+  onDensity={(density) => (appearance.density = density)}
+  onMode={setMode}
+  onCheckUpdates={__SPACLENS_DESKTOP__ ? () => void checkForAppUpdate((status) => (updateStatus = status)) : undefined}
+  onInstallUpdate={__SPACLENS_DESKTOP__ ? () => void installAppUpdate((status) => (updateStatus = status)) : undefined}
+/>

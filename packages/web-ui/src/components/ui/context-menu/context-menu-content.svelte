@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { ContextMenu as ContextMenuPrimitive } from "bits-ui";
-  import type { Snippet } from "svelte";
-  import { cn, type WithoutChildrenOrChild } from "../../../lib/utils";
+  import { ContextMenu as ContextMenuPrimitive } from 'bits-ui'
+  import type { Snippet } from 'svelte'
+  import { cn, type WithoutChildrenOrChild } from '../../../lib/utils'
 
   let {
     ref = $bindable(null),
@@ -9,8 +9,8 @@
     children,
     ...restProps
   }: WithoutChildrenOrChild<ContextMenuPrimitive.ContentProps> & {
-    children: Snippet;
-  } = $props();
+    children: Snippet
+  } = $props()
 </script>
 
 <ContextMenuPrimitive.Portal>
@@ -18,7 +18,7 @@
     bind:ref
     data-slot="context-menu-content"
     class={cn(
-      "bg-popover text-popover-foreground data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 z-50 min-w-[8rem] overflow-hidden rounded-md border p-1 text-sm shadow-md",
+      'macos:rounded-lg macos:bg-popover/95 macos:backdrop-blur-xl macos:p-1 macos:shadow-xl windows:rounded-lg windows:border windows:border-border windows:p-1 windows:shadow-lg linux:rounded-xl linux:p-1.5 linux:shadow-xl bg-popover text-popover-foreground data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 z-50 min-w-[8rem] overflow-hidden rounded-md border p-1 text-sm shadow-md',
       className,
     )}
     {...restProps}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronRight, FolderOpen, Minus, Plus } from '@lucide/svelte'
+  import { ChevronRight, FolderOpen, Folder, File, Minus, Plus } from '@lucide/svelte'
   import type { TreeNodeSummary } from '../../types'
   import { nodeColor, nodeMutedColor } from '../../lib/colors'
   import { formatBytes } from '../../lib/format'
@@ -22,7 +22,18 @@
     onRemove: (node: TreeNodeSummary) => void
   }
 
-  let { disabled = false, isCovered = () => false, items, totalSize = 0, hoveredId, collectedIds, onHover, onOpen, onCollect, onRemove }: Props = $props()
+  let {
+    disabled = false,
+    isCovered = () => false,
+    items,
+    totalSize = 0,
+    hoveredId,
+    collectedIds,
+    onHover,
+    onOpen,
+    onCollect,
+    onRemove,
+  }: Props = $props()
 
   // One collector verb per row state: a collected row offers removal, the rest
   // offer collection — the button, the menu item and their labels stay in step.
@@ -47,11 +58,9 @@
             <div
               {...props}
               class={[
-                'child-row group grid min-h-12 cursor-default grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-md border px-2 py-1.5 text-left',
+                'macos:min-h-11 macos:rounded-[4px] macos:border-0 macos:border-b macos:border-border/50 macos:px-1 windows:min-h-14 windows:rounded-[4px] windows:border-0 windows:border-b windows:border-border windows:px-2 linux:min-h-14 linux:rounded-none linux:border-0 linux:border-b linux:border-border linux:px-2 comfortable:min-h-16 child-row group grid min-h-12 cursor-default grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-2 rounded-md border px-2 py-1.5 text-left',
                 hoveredId === item.id ? 'border-primary/30 bg-primary/5' : 'border-border/70',
-                isCollected(item)
-                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-                  : '',
+                isCollected(item) ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300' : '',
               ]}
               role="listitem"
               data-child-row={item.id}
@@ -59,27 +68,50 @@
               onmouseleave={() => onHover(null)}
               onfocusin={() => onHover(item.id)}
               onfocusout={(event) => {
-                if (
-                  !(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))
-                )
+                if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)))
                   onHover(null)
               }}
               title={item.path}
             >
               <span
-                class="size-2.5 rounded-full"
+                class="size-2.5 rounded-full macos:hidden"
                 style={`--node: ${item.ignored ? nodeMutedColor(item.depth) : nodeColor(item.id, item.depth)}; background: var(--node)`}
               ></span>
-              <button class="min-w-0 text-left" type="button" disabled={item.scanState === 'skipped'} onclick={() => onOpen(item)}>
+              <span
+                class="hidden macos:block"
+                style={`color: ${item.ignored ? nodeMutedColor(item.depth) : nodeColor(item.id, item.depth)}`}
+                >{#if item.isDirectory}<Folder size={19} fill="currentColor" fill-opacity="0.15" />{:else}<File
+                    size={18}
+                  />{/if}</span
+              >
+              <button
+                class="min-w-0 text-left macos:[&>span:first-child]:text-[13px] macos:[&>span:nth-child(2)]:text-[11px] windows:[&>span:first-child]:text-sm windows:[&>span:nth-child(2)]:text-xs linux:[&>span:first-child]:text-sm linux:[&>span:nth-child(2)]:text-xs"
+                type="button"
+                disabled={item.scanState === 'skipped'}
+                onclick={() => onOpen(item)}
+              >
                 <span class="block truncate text-sm font-medium">{item.name}</span>
                 <span class="block truncate text-xs text-muted-foreground"
-                  >{item.skipReason === 'duplicate-directory' ? 'Alias · counted elsewhere' : item.scanState === 'skipped' ? `Not scanned · ${item.skipReason ?? 'unavailable'}` : item.scanState === 'partial' ? `${item.childCount.toLocaleString()} items · partial` : item.hasChildren
-                    ? `${item.childCount.toLocaleString()} ${item.childCount === 1 ? 'item' : 'items'}`
-                    : item.collapsed ? 'Summarized folder' : item.isDirectory ? 'Empty folder' : 'File'}</span
+                  >{item.skipReason === 'duplicate-directory'
+                    ? 'Alias · counted elsewhere'
+                    : item.scanState === 'skipped'
+                      ? `Not scanned · ${item.skipReason ?? 'unavailable'}`
+                      : item.scanState === 'partial'
+                        ? `${item.childCount.toLocaleString()} items · partial`
+                        : item.hasChildren
+                          ? `${item.childCount.toLocaleString()} ${item.childCount === 1 ? 'item' : 'items'}`
+                          : item.collapsed
+                            ? 'Summarized folder'
+                            : item.isDirectory
+                              ? 'Empty folder'
+                              : 'File'}</span
                 >
               </button>
-              <div class="child-size">
-                <span title={item.logicalSize === undefined ? undefined : `${formatBytes(item.logicalSize)} logical size`}>{formatNodeSize(item)}</span>
+              <div class="child-size macos:text-[12px] windows:text-[13px] linux:text-[13px]">
+                <span
+                  title={item.logicalSize === undefined ? undefined : `${formatBytes(item.logicalSize)} logical size`}
+                  >{formatNodeSize(item)}</span
+                >
                 {#if totalSize > 0 && item.scanState !== 'skipped'}
                   <div class="child-meter" aria-hidden="true">
                     <span
@@ -89,7 +121,13 @@
                 {/if}
               </div>
               <div class="flex items-center gap-1">
-                <Checkbox checked={isCollected(item)} disabled={disabled || isCovered(item) || item.scanState === 'skipped' || item.scanState === 'partial'} onCheckedChange={() => toggle(item)} aria-label={collectLabel(item)} title={isCovered(item) ? 'Included in a selected parent folder' : collectLabel(item)} />
+                <Checkbox
+                  checked={isCollected(item)}
+                  disabled={disabled || isCovered(item) || item.scanState === 'skipped' || item.scanState === 'partial'}
+                  onCheckedChange={() => toggle(item)}
+                  aria-label={collectLabel(item)}
+                  title={isCovered(item) ? 'Included in a selected parent folder' : collectLabel(item)}
+                />
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -105,7 +143,10 @@
           {/snippet}
         </ContextMenu.Trigger>
         <ContextMenu.Content>
-          <ContextMenu.Item disabled={disabled || isCovered(item) || item.scanState === 'skipped' || item.scanState === 'partial'} onclick={() => toggle(item)}>
+          <ContextMenu.Item
+            disabled={disabled || isCovered(item) || item.scanState === 'skipped' || item.scanState === 'partial'}
+            onclick={() => toggle(item)}
+          >
             {#if isCollected(item)}<Minus />{:else}<Plus />{/if}
             {collectLabel(item)}
           </ContextMenu.Item>
