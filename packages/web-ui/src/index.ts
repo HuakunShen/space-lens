@@ -7,6 +7,7 @@ export { default as StatusBar } from './components/lens/StatusBar.svelte'
 export { default as SunburstChart } from './components/lens/SunburstChart.svelte'
 export { default as LensSelect } from './components/lens/LensSelect.svelte'
 export { default as ScanCoveragePanel } from './components/lens/ScanCoveragePanel.svelte'
+export { default as WorkspaceHeading } from './components/lens/WorkspaceHeading.svelte'
 export { default as LensToolbar } from './components/lens/LensToolbar.svelte'
 export { default as ScanSidebar } from './components/lens/ScanSidebar.svelte'
 

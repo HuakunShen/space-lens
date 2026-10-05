@@ -12,5 +12,7 @@ export function parseActiveScan(raw: string | null): ActiveScan | null {
   try {
     const parsed = ActiveScanSchema.safeParse(JSON.parse(raw))
     return parsed.success ? parsed.data : null
-  } catch { return null }
+  } catch {
+    return null
+  }
 }

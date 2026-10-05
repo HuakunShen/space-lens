@@ -10,7 +10,13 @@
 @import '@fontsource-variable/inter';
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant macos (&:where([data-interface='macos'], [data-interface='macos'] *));
+@custom-variant windows (&:where([data-interface='windows'], [data-interface='windows'] *));
+@custom-variant linux (&:where([data-interface='linux'], [data-interface='linux'] *));
+@custom-variant web (&:where([data-interface='web'], [data-interface='web'] *));
+@custom-variant comfortable (&:where([data-density='comfortable'], [data-density='comfortable'] *));
 
 @import './styles/theme.css';
+@import './styles/platform.css';
 
 @import './styles/workbench.css';

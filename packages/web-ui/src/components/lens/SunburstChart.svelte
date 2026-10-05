@@ -46,10 +46,10 @@
   <div class="chart-toolbar">
     <span class="chart-eyebrow">SPACE DISTRIBUTION</span>
   </div>
-  <div class="chart-stage">
+  <div class="chart-stage macos:md:flex-1 windows:md:flex-1 linux:md:flex-1">
     {#key tree?.id}
       <svg
-        class="sunburst"
+        class="sunburst macos:md:absolute macos:md:inset-0 macos:md:h-full macos:md:max-w-none windows:md:absolute windows:md:inset-0 windows:md:h-full windows:md:max-w-none linux:md:absolute linux:md:inset-0 linux:md:h-full linux:md:max-w-none"
         viewBox={`0 0 ${size} ${size}`}
         role="group"
         aria-label="Sunburst disk usage chart"
@@ -85,7 +85,11 @@
                 if (!segment.isAggregate && segment.node.scanState !== 'skipped') onOpen(segment.node)
               }}
               onkeydown={(event) => {
-                if ((event.key === 'Enter' || event.key === ' ') && !segment.isAggregate && segment.node.scanState !== 'skipped') {
+                if (
+                  (event.key === 'Enter' || event.key === ' ') &&
+                  !segment.isAggregate &&
+                  segment.node.scanState !== 'skipped'
+                ) {
                   event.preventDefault()
                   onOpen(segment.node)
                 }
@@ -96,19 +100,30 @@
               }}
               oncontextmenu={(event) => {
                 event.preventDefault()
-                if (!segment.isAggregate && segment.node.scanState !== 'skipped') onContext(segment.node, event.clientX, event.clientY)
+                if (!segment.isAggregate && segment.node.scanState !== 'skipped')
+                  onContext(segment.node, event.clientX, event.clientY)
               }}
             />
           {/each}
           <text class="center-size" text-anchor="middle" y="-6">{formatNodeSize(inspected)}</text>
           <text class="center-label" text-anchor="middle" y="18"
-            >{inspected?.scanState === 'skipped' ? 'NOT SCANNED' : hoveredId && inspected ? percentageLabel + ' of folder' : 'MEASURED SIZE'}</text
+            >{inspected?.scanState === 'skipped'
+              ? 'NOT SCANNED'
+              : hoveredId && inspected
+                ? percentageLabel + ' of folder'
+                : 'MEASURED SIZE'}</text
           >
         </g>
       </svg>
     {/key}
     {#if segments.length === 0}
-      <div class="chart-empty">{focusNode?.scanState === 'skipped' ? 'This location was not scanned' : focusNode ? 'No child items to display' : 'Choose a folder to explore'}</div>
+      <div class="chart-empty">
+        {focusNode?.scanState === 'skipped'
+          ? 'This location was not scanned'
+          : focusNode
+            ? 'No child items to display'
+            : 'Choose a folder to explore'}
+      </div>
     {/if}
     {#if canGoBack}
       <button class="chart-back" type="button" onclick={onBack} aria-label="Go to parent folder"
@@ -117,24 +132,26 @@
     {/if}
   </div>
   <div
-    class="chart-inspector"
+    class="chart-inspector macos:rounded-md macos:border-0 macos:border-t macos:bg-transparent macos:px-1 macos:pt-3 windows:rounded-lg windows:bg-card linux:rounded-xl linux:bg-card linux:p-4"
     class:inspecting={hoveredId !== null && inspected !== focusNode}
     aria-live="polite"
     aria-atomic="true"
   >
-    <div class="inspector-icon" style={`--node: ${active?.color ?? 'var(--muted-foreground)'}`}>
+    <div
+      class="inspector-icon macos:border-0 macos:bg-transparent macos:p-1 linux:rounded-lg"
+      style={`--node: ${active?.color ?? 'var(--muted-foreground)'}`}
+    >
       {#if inspected?.hasChildren || inspected?.collapsed}<Folder size={19} />{:else}<File size={19} />{/if}
     </div>
     <div class="inspector-content">
       <div class="inspector-heading">
-        <strong>{inspected?.name ?? 'Explore your storage'}</strong><span
-          >{formatNodeSize(inspected)}</span
-        >
+        <strong>{inspected?.name ?? 'Explore your storage'}</strong><span>{formatNodeSize(inspected)}</span>
       </div>
       <p class="inspector-path">{inspected?.path ?? 'Hover or focus a segment to see its full path.'}</p>
       <p class="inspector-hint">
-        {#if inspected?.scanState === 'skipped'}Not scanned · {inspected.skipReason ?? 'unavailable'}{:else if active?.isAggregate}{active.childCount.toLocaleString()} smaller items grouped here · open the parent folder
-          to explore{:else if hoveredId && inspected}{percentageLabel} of this folder · {inspected.hasChildren
+        {#if inspected?.scanState === 'skipped'}Not scanned · {inspected.skipReason ??
+            'unavailable'}{:else if active?.isAggregate}{active.childCount.toLocaleString()} smaller items grouped here ·
+          open the parent folder to explore{:else if hoveredId && inspected}{percentageLabel} of this folder · {inspected.hasChildren
             ? 'Click to explore'
             : 'Click to inspect'}{:else}Hover to inspect · click to explore{/if}
       </p>
