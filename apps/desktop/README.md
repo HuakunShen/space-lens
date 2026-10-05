@@ -53,3 +53,18 @@ Rules that hold for the native shell:
   fingerprint and fails the whole plan closed on any mismatch.
 - Subscriptions are host-minted (`sub_*`) and frames are window-scoped —
   window B cannot drive window A's session.
+
+## Capability notes
+
+- Discovery and cleanup are both available on the desktop, derived only from
+  the local scan report/index: discovery never revisits the filesystem, and
+  cleanup plans from the report with a plan-time fingerprint baseline that
+  execution re-verifies.
+- The declared `scan.maxConcurrent` is 1 on purpose: a single-user desktop
+  runs one engine worker per session and rejects a second scan while one is
+  active (slot semantics locked by
+  `apps/desktop/src-tauri/tests/local_scan.rs::protected_prepare_is_nonblocking_and_cancellation_is_terminal`).
+  The HTTP host defaults are higher (`maxConcurrentScans` 4 / `maxTotalScans`
+  8, `packages/host/src/config.ts`) and are declared from configuration by
+  `packages/host/src/server.ts`; the desktop shell deliberately does not
+  expose a worker pool.

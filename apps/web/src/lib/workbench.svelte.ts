@@ -3,6 +3,7 @@ import type { HttpService } from '@space-lens/client'
 import { connectEventStream } from '@space-lens/client'
 import type { WorkbenchService } from '@space-lens/client'
 import { parseBaseUrl } from './base-url.ts'
+import { reduceScanEvent } from './desktop-events'
 
 export { normalizeBaseUrl } from './base-url.ts'
 
@@ -20,7 +21,6 @@ export function resolveBaseUrl(explicit?: string | null): { url: string; sameOri
     pageOrigin: window.location.origin,
   })
 }
-
 
 export function rememberBaseUrl(url: string): void {
   window.localStorage.setItem(BASE_URL_KEY, url.replace(/\/$/, ''))
@@ -133,6 +133,7 @@ export function startEventStream(): StreamHandle | undefined {
   const service = workbench.service
   if (service === null) return undefined
   workbench.streamState = 'connecting'
+  let watermark = 0
   return connectEventStream({
     baseUrl: service.baseUrl,
     getToken: () => loadToken(),
@@ -146,13 +147,12 @@ export function startEventStream(): StreamHandle | undefined {
       void to
     },
     onEvent: (envelope) => {
-      if (envelope.payload.kind === 'scan.updated' || envelope.payload.kind === 'scan.completed') {
-        if (envelope.payload.status.scanId !== workbench.activeScanId) return
-        workbench.status = envelope.payload.status
-        if (envelope.payload.status.state === 'ready') {
-          void loadRoot()
-        }
-      }
+      // Same rules as the desktop push stream: one pure reducer for both
+      // transports keeps browser SSE and Tauri events behaviorally symmetric.
+      const decision = reduceScanEvent(watermark, workbench.activeScanId, envelope)
+      watermark = decision.watermark
+      if (decision.status) workbench.status = decision.status
+      if (decision.ready) void loadRoot()
     },
   })
 }

@@ -30,7 +30,7 @@ SPACLENS_DEV_API=http://127.0.0.1:9421 yarn dev --host 127.0.0.1 --port 5173
 
 Open the host's pairing URL with its `api` parameter set to `http://127.0.0.1:5173` when using this proxy. Add `--allow-cleanup` to the host only when you intend to enable cleanup.
 
-The workbench requests protected local scans. The HTTP host runs the release Rust scanner and derives discovery from that measured report, without revisiting the filesystem. Tauri uses the protected Rust library; discovery is currently unavailable for native protected scans. Full startup-disk scans disable `.gitignore` content reads, so gitignored discovery is unavailable there; scan a local project folder to classify its ignore rules. Hidden local items are included and symlinks are not followed.
+The workbench requests protected local scans. The HTTP host runs the release Rust scanner and derives discovery from that measured report, without revisiting the filesystem. Tauri uses the same protected Rust library and derives discovery from its indexed report in memory, so the desktop serves the same three views without a rescan. Full startup-disk scans disable `.gitignore` content reads, so gitignored discovery is unavailable there; scan a local project folder to classify its ignore rules. Hidden local items are included and symlinks are not followed.
 
 ## Validation
 
@@ -41,13 +41,13 @@ node --import tsx --test apps/web/test/selection.test.ts apps/web/test/appearanc
 node node_modules/svelte-check/bin/svelte-check --workspace apps/web --tsconfig ./tsconfig.json
 ```
 
-`test/browser-fixture.ts` creates disposable files in a temporary directory and serves the built browser app on port 9423. Its simulated Trash moves files to a separate recovery folder, and `.ruff_cache` deliberately reports a failure for legacy cleanup-flow testing. Protected local scans are read-only. The fixture never uses the OS Trash or scans the user's repository:
+`test/browser-fixture.ts` creates disposable files in a temporary directory and serves the built browser app on port 9423. Its simulated Trash moves files to a separate recovery folder, and `.ruff_cache` deliberately reports a failure for legacy cleanup-flow testing. Protected local scans are read-only on the browser host; the desktop shell plans and executes trash cleanup against the same protected report (plan-time fingerprint baseline, skipped/partial entries rejected). The fixture never uses the OS Trash or scans the user's repository:
 
 ```sh
 yarn workspace @space-lens/web build
 node --import tsx apps/web/test/browser-fixture.ts
 ```
 
-Cloud and full-disk scan boundaries are documented in [CLOUD_SCAN_RESEARCH.md](./CLOUD_SCAN_RESEARCH.md). The new local-only mode disables macOS dataless materialization on every scanning thread, rejects known cloud roots before metadata, and excludes child mounts and symlinks. Coverage reports permission failures and unknown sizes separately. It does not inspect cloud storage or enable cleanup. The legacy generic scanner and GPUI entry point remain outside this protected flow; release optimization alone is not a safety boundary.
+Cloud and full-disk scan boundaries are documented in [CLOUD_SCAN_RESEARCH.md](./CLOUD_SCAN_RESEARCH.md). The new local-only mode disables macOS dataless materialization on every scanning thread, rejects known cloud roots before metadata, and excludes child mounts and symlinks. Coverage reports permission failures and unknown sizes separately. It does not inspect cloud storage; the browser host keeps protected scans read-only, while the desktop shell enables trash cleanup derived from the same report. The legacy generic scanner and GPUI entry point remain outside this protected flow; release optimization alone is not a safety boundary.
 
 The actual Macintosh HD release stress run and memory measurements are recorded in [FULL_DISK_SCAN_REPORT.md](./FULL_DISK_SCAN_REPORT.md). The large report uses per-node NDJSON rather than a single giant JSON message. Disk-size displays use IEC units, and duplicate directory aliases are counted once.

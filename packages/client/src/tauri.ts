@@ -27,6 +27,12 @@ import { ScanListResponseSchema } from '@space-lens/contract'
 export interface TauriPorts {
   invoke(cmd: string, payload?: Record<string, unknown>): Promise<unknown>
   createChannel(onmessage: (message: unknown) => void): unknown
+  /**
+   * Registers a Tauri event listener and resolves with its unlisten function.
+   * Optional: only the desktop event push (apps/web desktop-events.ts) needs
+   * it; adapters without it fall back to polling.
+   */
+  listen?(event: string, handler: (event: unknown) => void): Promise<() => void>
   /** The process home directory, for expanding `~/` in hand-entered paths. */
   homeDir?(): Promise<string>
 }

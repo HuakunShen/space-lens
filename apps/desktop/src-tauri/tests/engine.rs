@@ -6,7 +6,7 @@ fn fixture() -> (tempdir::TempDir, EngineStore) {
   let dir = tempdir::TempDir::new("sl-desktop").unwrap();
   std::fs::create_dir_all(dir.path().join("data")).unwrap();
   std::fs::write(dir.path().join("data").join("f.txt"), "x".repeat(1024)).unwrap();
-  let store = EngineStore::new(vec![dir.path().to_path_buf()], true);
+  let store = EngineStore::new(vec![dir.path().to_path_buf()]);
   (dir, store)
 }
 

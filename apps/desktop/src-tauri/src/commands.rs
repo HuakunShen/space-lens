@@ -14,7 +14,8 @@ use tauri::{AppHandle, Emitter, Manager, State, Window};
 use crate::engine::{
   default_discovery_limit, run_discovery, ChildrenPageRequest, CleanupExecuteRequest,
   CleanupPlanRequest, DiscoveryData, DiscoveryInput, DiscoveryKind, DiscoveryPage,
-  DiscoveryRequest, EngineProblem, EngineStore, LocalScanTask, ScanStartRequest, TreeSliceRequest,
+  DiscoveryRequest, EngineProblem, EngineStore, LocalScanTask, PreparedDiscovery, ScanStartRequest,
+  TreeSliceRequest,
 };
 use crate::events::{EventSink, ScopedEventFrame, SubscriptionAck};
 
@@ -71,7 +72,7 @@ fn connect_window_session(window_label: &str, state: &AppState) -> Value {
       .next_session
       .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
   );
-  let engine = EngineStore::new(state.roots.clone(), true);
+  let engine = EngineStore::new(state.roots.clone());
   sessions.insert(
     session_id.clone(),
     Arc::new(SessionBundle {
@@ -90,6 +91,24 @@ fn session_metadata(session_id: &str) -> Value {
       "serviceInstanceId": SERVICE_INSTANCE_ID,
       "cacheNamespace": format!("native/{SERVICE_INSTANCE_ID}/{session_id}"),
       "backendLabel": "Native host",
+  })
+}
+
+/// Every declared capability must be truly reachable by the engine.
+/// `scan.discovery` derives all three views from protected scan reports and
+/// runs the legacy walk for legacy scans; `cleanup.plan`/`execute` are
+/// trash-only and re-verified. `maxConcurrent: 1` mirrors the engine's
+/// single worker slot — EngineStore rejects a second scan while one is
+/// active or leased; the slot semantics are locked by
+/// `tests/local_scan.rs::protected_prepare_is_nonblocking_and_cancellation_is_terminal`.
+fn capabilities_json() -> Value {
+  json!({
+      "apiMajor": API_MAJOR,
+      "contractVersion": CONTRACT_VERSION,
+      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true },
+      "cleanup": { "plan": true, "execute": true, "mode": "trash" },
+      "host": { "folderPicker": true },
+      "icloud": "unavailable",
   })
 }
 
@@ -303,14 +322,7 @@ pub async fn sl_read(
             "apiMajor": API_MAJOR,
             "contractVersion": CONTRACT_VERSION,
         })),
-        ReadRequest::Capabilities => Ok(json!({
-            "apiMajor": API_MAJOR,
-            "contractVersion": CONTRACT_VERSION,
-            "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true },
-            "cleanup": { "plan": true, "execute": true, "mode": "trash" },
-            "host": { "folderPicker": true },
-            "icloud": "unavailable",
-        })),
+        ReadRequest::Capabilities => Ok(capabilities_json()),
         ReadRequest::Roots => {
           // wrapped to match the HTTP host shape: { roots: ScanTarget[] }
           serde_json::to_value(json!({ "roots": engine.roots() }))
@@ -394,15 +406,33 @@ fn read_discovery(
   // then checks the cache. Neither the engine nor global session lock is
   // held while waiting or walking.
   let _discovery = bundle.discovery.lock().unwrap();
-  // Snapshot inputs while locked, walk without either engine/session lock,
-  // then register the immutable result before replying.
-  let input = bundle.engine.lock().unwrap().discovery_input(request)?;
-  let data = input.map(walk).transpose()?;
-  bundle
-    .engine
-    .lock()
-    .unwrap()
-    .finish_discovery(request, data)
+  // Prepare under a short lock, run any legacy filesystem walk without the
+  // engine lock, then register the immutable result before replying.
+  // Protected scans never reach `walk`: their results were derived in memory
+  // inside `prepare_discovery`, and the Ready/Cached branches here exist so
+  // the compiler keeps that guarantee. The prepared value is bound first so
+  // the prepare lock guard drops before the arms run.
+  let prepared = bundle.engine.lock().unwrap().prepare_discovery(request)?;
+  match prepared {
+    PreparedDiscovery::Cached => bundle
+      .engine
+      .lock()
+      .unwrap()
+      .finish_discovery(request, None),
+    PreparedDiscovery::Ready(data) => bundle
+      .engine
+      .lock()
+      .unwrap()
+      .finish_discovery(request, Some(data)),
+    PreparedDiscovery::Walk(input) => {
+      let data = walk(input)?;
+      bundle
+        .engine
+        .lock()
+        .unwrap()
+        .finish_discovery(request, Some(data))
+    }
+  }
 }
 
 #[tauri::command]
@@ -603,7 +633,11 @@ pub fn sl_events_subscribe(
   let bundle = sessions.get(&session_id).ok_or_else(
     || json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}),
   )?;
-  let (subscription_id, mut ack) = bundle.events.subscribe(after_sequence);
+  // The channel registers before the replay snapshot, so every event
+  // published after this call is queued for the window; the synchronous
+  // replay below overlaps that channel and the client's sequence watermark
+  // deduplicates the overlap.
+  let (subscription_id, mut ack, receiver) = bundle.events.subscribe_channel(after_sequence);
   ack.service_instance_id = SERVICE_INSTANCE_ID.to_string();
   let frames: Vec<ScopedEventFrame> = bundle
     .events
@@ -611,9 +645,40 @@ pub fn sl_events_subscribe(
     .into_iter()
     .filter(|frame| after_sequence.is_none_or(|since| frame.event.sequence > since))
     .collect();
+  let sink = bundle.events.clone();
+  let cleanup_sink = sink.clone();
   drop(sessions);
   for frame in frames {
     let _ = app.emit_to(window.label(), EVENT_NAME, frame);
+  }
+  // Forward live events on a dedicated thread. When the window is gone the
+  // emit fails and the thread unsubscribes itself — dropping the sender ends
+  // the loop — so a closed window never leaks a thread or subscription.
+  let forward_session_id = session_id.clone();
+  let forward_subscription_id = subscription_id.clone();
+  let label = window.label().to_string();
+  let app_handle = app.clone();
+  let forwarder = std::thread::Builder::new()
+    .name(format!("sl-events-{subscription_id}"))
+    .spawn(move || {
+      while let Ok(envelope) = receiver.recv() {
+        let frame = ScopedEventFrame {
+          session_id: forward_session_id.clone(),
+          subscription_id: forward_subscription_id.clone(),
+          service_instance_id: SERVICE_INSTANCE_ID.to_string(),
+          event: envelope,
+        };
+        if app_handle.emit_to(&label, EVENT_NAME, frame).is_err() {
+          sink.unsubscribe(&forward_subscription_id);
+          break;
+        }
+      }
+    });
+  if let Err(error) = forwarder {
+    // No forwarder owns the channel: drop the sender ourselves so the
+    // subscription does not linger until the next publish.
+    cleanup_sink.unsubscribe(&subscription_id);
+    return Err(problem_value("InternalError", error));
   }
   Ok(ack)
 }
@@ -627,9 +692,16 @@ pub fn sl_events_unsubscribe(
   state: State<'_, AppState>,
 ) -> Result<Value, Value> {
   require_owner(&window, &state, &session_id)?;
-  // nothing to release server-side today; the ack confirms the pairing
   let _ = &app;
-  let _ = subscription_id;
+  let bundle = state.sessions.lock().unwrap().get(&session_id).cloned();
+  let Some(bundle) = bundle else {
+    return Err(
+      json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}),
+    );
+  };
+  // Removing the sender ends the forwarding thread's recv loop; the thread
+  // also unsubscribes itself when it observes a dead window.
+  bundle.events.unsubscribe(&subscription_id);
   Ok(json!({ "unsubscribed": true }))
 }
 
@@ -822,12 +894,12 @@ mod tests {
 
   #[cfg(unix)]
   #[test]
-  fn protected_native_worker_finishes_a_local_fixture_and_discovery_cannot_rescan() {
+  fn protected_native_worker_finishes_a_local_fixture_and_derives_discovery_from_the_report() {
     let path = std::env::temp_dir().join(format!("sl-native-worker-{}", std::process::id()));
     std::fs::create_dir_all(&path).unwrap();
     std::fs::write(path.join("file"), vec![b'x'; 8192]).unwrap();
     let path = std::fs::canonicalize(path).unwrap();
-    let mut engine = crate::engine::EngineStore::new(vec![path.clone()], true);
+    let mut engine = crate::engine::EngineStore::new(vec![path.clone()]);
     let request =
       serde_json::from_value(serde_json::json!({ "paths": [path], "localOnly": true })).unwrap();
     let (session, task) = engine.prepare_local_scan(request).unwrap();
@@ -846,7 +918,10 @@ mod tests {
       .unwrap();
     assert_eq!(status.state, "ready");
     assert_eq!(status.coverage.unwrap().logical_bytes, 8192);
-    let error = super::read_discovery(
+    // Discovery for a protected scan is derived from the indexed report; the
+    // panic closure is the sentinel proving the legacy filesystem walk never
+    // runs for one.
+    let page = super::read_discovery(
       &bundle,
       &crate::engine::DiscoveryRequest {
         scan_id: session.scan_id,
@@ -857,8 +932,10 @@ mod tests {
       },
       |_| panic!("protected discovery entered the legacy filesystem walk"),
     )
-    .unwrap_err();
-    assert_eq!(error.code, "Unavailable");
+    .unwrap();
+    assert_eq!(page.total, 1);
+    assert!(page.items[0].node.path.ends_with("/file"));
+    assert_eq!(page.items[0].category, "Large file");
     let (_, replay) = bundle.events.subscribe(None);
     assert_eq!(
       replay
@@ -869,6 +946,19 @@ mod tests {
       1
     );
     std::fs::remove_dir_all(path).unwrap();
+  }
+
+  #[test]
+  fn capabilities_declare_only_reachable_operations() {
+    let capabilities = super::capabilities_json();
+    assert_eq!(capabilities["scan"]["start"], true);
+    assert_eq!(capabilities["scan"]["cancel"], true);
+    assert_eq!(capabilities["scan"]["discovery"], true);
+    assert_eq!(capabilities["scan"]["maxConcurrent"], 1);
+    assert_eq!(capabilities["cleanup"]["plan"], true);
+    assert_eq!(capabilities["cleanup"]["execute"], true);
+    assert_eq!(capabilities["cleanup"]["mode"], "trash");
+    assert_eq!(capabilities["host"]["folderPicker"], true);
   }
 
   #[test]
@@ -900,7 +990,7 @@ mod tests {
     std::fs::create_dir_all(&path).unwrap();
     std::fs::write(path.join("file"), vec![b'x'; 8192]).unwrap();
     let path = std::fs::canonicalize(path).unwrap();
-    let mut engine = crate::engine::EngineStore::new(vec![path.clone()], true);
+    let mut engine = crate::engine::EngineStore::new(vec![path.clone()]);
     let scan = engine
       .start_scan(crate::engine::ScanStartRequest {
         paths: vec![path.to_string_lossy().into_owned()],
@@ -993,7 +1083,7 @@ mod tests {
         .push(serde_json::from_str::<serde_json::Value>(&json).unwrap());
       Ok(())
     });
-    let mut engine = crate::engine::EngineStore::new(Vec::new(), true);
+    let mut engine = crate::engine::EngineStore::new(Vec::new());
     let result = submit_engine_reply(
       &mut engine,
       &crate::events::EventSink::new(),

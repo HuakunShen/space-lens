@@ -1,6 +1,6 @@
 use space_lens_desktop_lib::engine::{
   run_discovery, CleanupPlanRequest, DiscoveryKind, DiscoveryPage, DiscoveryRequest, EngineStore,
-  ScanStartRequest,
+  PreparedDiscovery, ScanStartRequest,
 };
 use std::path::{Path, PathBuf};
 
@@ -23,7 +23,7 @@ impl Fixture {
     full
   }
   fn scan(&self, respect_gitignore: bool) -> (EngineStore, String) {
-    let mut store = EngineStore::new(vec![self.0.clone()], true);
+    let mut store = EngineStore::new(vec![self.0.clone()]);
     let scan = store
       .start_scan(ScanStartRequest {
         paths: vec![self.0.to_string_lossy().into_owned()],
@@ -58,12 +58,11 @@ fn discover(
     offset,
     limit,
   };
-  let data = store
-    .discovery_input(&request)
-    .unwrap()
-    .map(run_discovery)
-    .transpose()
-    .unwrap();
+  let data = match store.prepare_discovery(&request).unwrap() {
+    PreparedDiscovery::Walk(input) => Some(run_discovery(input).unwrap()),
+    PreparedDiscovery::Ready(data) => Some(data),
+    PreparedDiscovery::Cached => None,
+  };
   store.finish_discovery(&request, data).unwrap()
 }
 
@@ -229,16 +228,18 @@ fn discovery_min_size_and_pages_use_filtered_totals_and_cached_results() {
     all.items.iter().map(|item| item.node.size).sum::<u64>()
   );
   std::fs::remove_file(fixture.0.join("largest")).unwrap();
-  assert!(store
-    .discovery_input(&DiscoveryRequest {
-      scan_id,
-      kind: DiscoveryKind::LargeFiles,
-      min_size: 0,
-      offset: 0,
-      limit: 200
-    })
-    .unwrap()
-    .is_none());
+  assert!(matches!(
+    store
+      .prepare_discovery(&DiscoveryRequest {
+        scan_id,
+        kind: DiscoveryKind::LargeFiles,
+        min_size: 0,
+        offset: 0,
+        limit: 200
+      })
+      .unwrap(),
+    PreparedDiscovery::Cached
+  ));
 }
 
 #[test]
@@ -305,7 +306,7 @@ fn discovery_rejects_invalid_limits_and_unknown_scans() {
   let (store, scan_id) = fixture.scan(true);
   for limit in [0, 1001] {
     let error = store
-      .discovery_input(&DiscoveryRequest {
+      .prepare_discovery(&DiscoveryRequest {
         scan_id: scan_id.clone(),
         kind: DiscoveryKind::Caches,
         min_size: 0,
@@ -318,7 +319,7 @@ fn discovery_rejects_invalid_limits_and_unknown_scans() {
   }
   assert_eq!(
     store
-      .discovery_input(&DiscoveryRequest {
+      .prepare_discovery(&DiscoveryRequest {
         scan_id: "unknown".into(),
         kind: DiscoveryKind::Caches,
         min_size: 0,
@@ -361,7 +362,7 @@ fn execution_rejects_symlinked_ancestor_even_when_the_fingerprint_still_matches(
 fn overlapping_scan_roots_do_not_duplicate_discovery_rows_or_total_bytes() {
   let fixture = Fixture::new();
   let file = fixture.file("app/large", 8192);
-  let mut store = EngineStore::new(vec![fixture.0.clone()], true);
+  let mut store = EngineStore::new(vec![fixture.0.clone()]);
   let session = store
     .start_scan(ScanStartRequest {
       paths: vec![
@@ -393,7 +394,7 @@ fn cleanup_rejects_scan_and_configured_roots_but_accepts_descendants() {
   let fixture = Fixture::new();
   fixture.file("protected/file", 8192);
   fixture.file("ordinary/file", 8192);
-  let mut store = EngineStore::new(vec![fixture.0.clone(), fixture.0.join("protected")], true);
+  let mut store = EngineStore::new(vec![fixture.0.clone(), fixture.0.join("protected")]);
   let session = store
     .start_scan(ScanStartRequest {
       paths: vec![fixture.0.to_string_lossy().into_owned()],

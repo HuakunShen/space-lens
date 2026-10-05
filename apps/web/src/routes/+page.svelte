@@ -36,6 +36,12 @@
     ticketFromLocation,
     workbench,
   } from '../lib/workbench.svelte'
+  import {
+    cleanupAvailable as cleanupGate,
+    discoveryAvailable as discoveryGate,
+    gitignoredAvailable as gitignoredGate,
+  } from '../lib/gates'
+  import { startDesktopEventStream } from '../lib/desktop-events'
 
   let ticketInput = $state('')
   let passwordInput = $state('')
@@ -72,8 +78,12 @@
   let cleanupError = $state<string | null>(null)
   let notice = $state<string | null>(null)
   let scannedPaths = $state<string[]>([])
-  const discoveryAvailable = $derived(Boolean(workbench.capabilities?.scan.discovery && workbench.service?.discover && !(__SPACLENS_DESKTOP__ && workbench.status?.coverage)))
-  const gitignoredAvailable = $derived(discoveryAvailable && !(workbench.status?.coverage && scannedPaths.some(path => path === '/' || path === '/System/Volumes/Data')))
+  // Desktop and browser share the same availability gates: both backends
+  // derive discovery from the protected scan report, so coverage no longer
+  // disables the discovery views here.
+  const discoveryAvailable = $derived(discoveryGate({ capabilities: workbench.capabilities, service: workbench.service }))
+  const gitignoredAvailable = $derived(gitignoredGate({ capabilities: workbench.capabilities, service: workbench.service, coverage: workbench.status?.coverage, scannedPaths }))
+  const cleanupAvailable = $derived(cleanupGate({ capabilities: workbench.capabilities, desktop: __SPACLENS_DESKTOP__, coverage: workbench.status?.coverage }))
   const selectedItems = $derived(workbench.items.filter(item => item.name.toLowerCase().includes(browseSearch.toLowerCase())))
   const selectableShown = $derived(selectedItems.filter(item => item.scanState !== 'skipped' && item.scanState !== 'partial'))
   const coveredIds = $derived(new Set(workbench.items.filter(item => selectedAncestor(workbench.collector, item.path)).map(item => item.id)))
@@ -168,6 +178,17 @@
       workbench.targets = Array.isArray(rootsResponse?.roots) ? rootsResponse.roots : []
       workbench.service = service
       workbench.phase = 'ready'
+      // Live push first; if the stream cannot start, the 2s polling below
+      // stays as the fallback for the whole session.
+      try {
+        stream = await startDesktopEventStream(ports, {
+          activeScanId: () => workbench.activeScanId,
+          onStatus: (status) => (workbench.status = status),
+          onReady: () => void loadRoot(),
+        })
+      } catch {
+        stream = null
+      }
       startPolling()
       const scans = await service.listScans?.().catch(() => [])
       const previous = scans?.find(scan => scan.state === 'scanning') ?? scans?.filter(scan => scan.state === 'ready').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
@@ -312,9 +333,16 @@
       workbench.slice = null
       workbench.items = []
       workbench.collector = []
-      // the desktop engine scans synchronously: the session answers ready
+      // The desktop worker answers the session while still scanning; the
+      // event stream (polling fallback) drives the status to ready. This
+      // immediate status call is best-effort — the loadRoot guard ignores it
+      // until the scan actually reaches ready.
       if (__SPACLENS_DESKTOP__ && workbench.service !== null) {
-        workbench.status = await workbench.service.scanStatus(session.scanId)
+        try {
+          workbench.status = await workbench.service.scanStatus(session.scanId)
+        } catch {
+          // keep the optimistic scanning status; the stream will refresh it
+        }
         await loadRoot()
       }
     } catch (error) {
@@ -571,9 +599,9 @@
         {/if}
       </div>
     </div>
-    <footer class="workspace-status"><span><i class:reconnecting={!__SPACLENS_DESKTOP__ && workbench.streamState !== 'live'}></i>{formatBytes(workbench.status.bytesScanned)} scanned <span class="status-separator">·</span> {workbench.status.coverage ? 'Read-only local scan' : workbench.capabilities?.cleanup.execute ? 'Local cleanup enabled' : 'Read-only connection'}</span><button type="button" onclick={() => (collectorOpen = true)}><span>{workbench.collector.length} selected</span><strong>{formatBytes(collectorTotal)}</strong><span>Review →</span></button></footer>
+    <footer class="workspace-status"><span><i class:reconnecting={!__SPACLENS_DESKTOP__ && workbench.streamState !== 'live'}></i>{formatBytes(workbench.status.bytesScanned)} scanned <span class="status-separator">·</span> {workbench.status.coverage ? (__SPACLENS_DESKTOP__ ? 'Local cleanup enabled' : 'Read-only local scan') : workbench.capabilities?.cleanup.execute ? 'Local cleanup enabled' : 'Read-only connection'}</span><button type="button" onclick={() => (collectorOpen = true)}><span>{workbench.collector.length} selected</span><strong>{formatBytes(collectorTotal)}</strong><span>Review →</span></button></footer>
     <CollectorPanel open={collectorOpen} entries={workbench.collector} totalSize={collectorTotal} deleting={workbench.deleting} {planning}
-      plan={cleanupPlan} outcome={cleanupOutcome} error={cleanupError} cleanupAvailable={!workbench.status.coverage && Boolean(workbench.capabilities?.cleanup.execute)}
+      plan={cleanupPlan} outcome={cleanupOutcome} error={cleanupError} {cleanupAvailable}
       onClose={() => { collectorOpen = false; cleanupPlan = null }} onRemove={removeEntry} onClear={() => { invalidatePlan(); workbench.collector = [] }} onDelete={() => void reviewCleanup()} onConfirm={() => void confirmCleanup()} />
   </div>
 {/if}

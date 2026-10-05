@@ -206,6 +206,16 @@ pub struct DiscoveryData {
   items: HashMap<DiscoveryKind, Vec<DiscoveryItem>>,
 }
 
+/// What a discovery request needs before any filesystem work. `Cached` means
+/// the scan already holds results for the kind; `Ready` carries results
+/// derived in memory from an indexed protected scan report (no filesystem
+/// access at all); `Walk` requires the legacy filesystem rescan.
+pub enum PreparedDiscovery {
+  Cached,
+  Ready(DiscoveryData),
+  Walk(DiscoveryInput),
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CleanupPlanRequest {
@@ -410,6 +420,9 @@ struct ScanRecord {
   ignore_hidden: bool,
   discovery: HashMap<DiscoveryKind, Vec<DiscoveryItem>>,
   local_only: bool,
+  // Whether the protected scan read .gitignore content while indexing;
+  // mirrors the host's gitignoreClassified flag for the discovery gate.
+  gitignore_classified: bool,
   // Lease for a prepared/running worker. Cancellation keeps it occupied;
   // only finish_local_scan releases it after the actual walk has returned.
   active_worker: Option<LocalScanCancellation>,
@@ -444,16 +457,14 @@ pub struct EngineStore {
   roots: Vec<PathBuf>,
   scans: HashMap<String, ScanRecord>,
   plans: HashMap<String, (CleanupPlan, std::time::Instant)>,
-  allow_cleanup: bool,
 }
 
 impl EngineStore {
-  pub fn new(roots: Vec<PathBuf>, allow_cleanup: bool) -> Self {
+  pub fn new(roots: Vec<PathBuf>) -> Self {
     Self {
       roots,
       scans: HashMap::new(),
       plans: HashMap::new(),
-      allow_cleanup,
     }
   }
 
@@ -592,6 +603,7 @@ impl EngineStore {
         ignore_hidden: request.ignore_hidden,
         discovery: HashMap::new(),
         local_only: false,
+        gitignore_classified: request.respect_gitignore,
         active_worker: None,
       },
     );
@@ -682,6 +694,7 @@ impl EngineStore {
         ignore_hidden: request.ignore_hidden,
         discovery: HashMap::new(),
         local_only: true,
+        gitignore_classified: request.respect_gitignore,
         active_worker: Some(cancellation.clone()),
       },
     );
@@ -894,38 +907,35 @@ impl EngineStore {
     })
   }
 
-  pub fn discovery_input(
-    &self,
-    request: &DiscoveryRequest,
-  ) -> EngineResult<Option<DiscoveryInput>> {
+  /// Prepares a discovery request. Protected scans derive all three views
+  /// from the already-indexed report in memory (mirroring the host's
+  /// protectedDiscovery); legacy scans snapshot walk inputs for the
+  /// filesystem rescan that happens outside the engine lock.
+  pub fn prepare_discovery(&self, request: &DiscoveryRequest) -> EngineResult<PreparedDiscovery> {
     validate_discovery(request)?;
     let record = self.ready(&request.scan_id)?;
     if record.local_only {
-      return Err(problem(
-        "Unavailable",
-        "Discovery is unavailable for protected local scans; no legacy rescan is performed",
-      ));
+      if request.kind == DiscoveryKind::Gitignored && !record.gitignore_classified {
+        return Err(problem(
+          "UnsupportedOperation",
+          "this protected scan did not classify gitignored paths; scan with respectGitignore enabled",
+        ));
+      }
+      if record.discovery.contains_key(&request.kind) {
+        return Ok(PreparedDiscovery::Cached);
+      }
+      // Pure in-memory classification of the measured report; the derived
+      // items add no index entries, so browse topology stays untouched.
+      let items = protected_discovery_items(&record.index);
+      return Ok(PreparedDiscovery::Ready(DiscoveryData {
+        index: HashMap::new(),
+        items,
+      }));
     }
     if record.discovery.contains_key(&request.kind) {
-      return Ok(None);
+      return Ok(PreparedDiscovery::Cached);
     }
-    let mut roots: Vec<PathBuf> = record
-      .root_ids
-      .iter()
-      .filter_map(|id| record.index.get(id))
-      .map(|entry| PathBuf::from(&entry.path))
-      .collect();
-    roots.sort_by_key(|root| root.components().count());
-    let mut outer = Vec::<PathBuf>::new();
-    for root in roots {
-      if !outer.iter().any(|parent| root.starts_with(parent)) {
-        outer.push(root);
-      }
-    }
-    Ok(Some(DiscoveryInput {
-      roots: outer,
-      ignore_hidden: record.ignore_hidden,
-    }))
+    Ok(PreparedDiscovery::Walk(discovery_walk_input(record)))
   }
 
   pub fn finish_discovery(
@@ -934,16 +944,10 @@ impl EngineStore {
     data: Option<DiscoveryData>,
   ) -> EngineResult<DiscoveryPage> {
     validate_discovery(request)?;
-    if self.ready(&request.scan_id)?.local_only {
-      return Err(problem(
-        "Unavailable",
-        "Discovery is unavailable for protected local scans",
-      ));
-    }
     let record = self
       .scans
       .get_mut(&request.scan_id)
-      .expect("ready scan exists");
+      .ok_or_else(|| problem("NotFound", format!("no scan {}", request.scan_id)))?;
     if let Some(data) = data {
       // Existing browse topology stays unchanged, including summarized
       // directories. New nodes/ancestors make discovery IDs usable by
@@ -987,16 +991,7 @@ impl EngineStore {
   }
 
   pub fn plan(&mut self, request: &CleanupPlanRequest) -> EngineResult<CleanupPlan> {
-    if !self.allow_cleanup {
-      return Err(problem(
-        "UnsupportedOperation",
-        "cleanup is disabled in this desktop build",
-      ));
-    }
     let record = self.ready(request.scan_id.as_str())?;
-    if record.local_only {
-      return Err(problem("Forbidden", "Protected local scans are read-only"));
-    }
     let scan_roots: Vec<PathBuf> = record
       .root_ids
       .iter()
@@ -1011,6 +1006,18 @@ impl EngineStore {
           format!("plan references unknown node {node_id}"),
         )
       })?;
+      // A skipped or partial entry was never fully measured, no matter what
+      // the path looks like now — mirror the UI selection rules and reject
+      // before any metadata probe (which could touch a replaced path).
+      if matches!(entry.scan_state.as_deref(), Some("skipped" | "partial")) {
+        return Err(problem(
+          "InvalidRequest",
+          format!(
+            "path was skipped or partially scanned; cleanup needs a complete entry: {}",
+            entry.path
+          ),
+        ));
+      }
       guard_cleanup_roots(Path::new(&entry.path), &scan_roots, &self.roots)?;
       let snapshot = entry
         .cleanup
@@ -1026,13 +1033,22 @@ impl EngineStore {
         )
       })?;
       let current = fingerprint_of(&metadata);
-      if snapshot.fingerprint.as_ref() != Some(&current) {
-        return Err(problem(
-          "StaleSnapshot",
-          format!("path changed since scanning: {}; scan again", entry.path),
-        ));
-      }
-      selected.push((entry, snapshot, current));
+      // Protected index entries carry no scan-time fingerprint
+      // (walk_local_index never probes the filesystem), so the freshly
+      // measured fingerprint becomes the plan baseline and execute
+      // re-verifies against it. Entries holding a scan-time or
+      // discovery-time fingerprint keep the stricter comparison.
+      let baseline = match snapshot.fingerprint.clone() {
+        Some(fingerprint) if fingerprint != current => {
+          return Err(problem(
+            "StaleSnapshot",
+            format!("path changed since scanning: {}; scan again", entry.path),
+          ));
+        }
+        Some(fingerprint) => fingerprint,
+        None => current,
+      };
+      selected.push((entry, snapshot, baseline));
     }
     selected.sort_by(|a, b| {
       Path::new(&a.0.path)
@@ -1247,6 +1263,176 @@ fn fingerprint_of(metadata: &fs::Metadata) -> EntryFingerprint {
     size: metadata.len(),
     mtime_ms,
   }
+}
+
+/// Snapshots the legacy walk inputs for a ready scan; the caller runs the
+/// actual filesystem walk outside the engine lock.
+fn discovery_walk_input(record: &ScanRecord) -> DiscoveryInput {
+  let mut roots: Vec<PathBuf> = record
+    .root_ids
+    .iter()
+    .filter_map(|id| record.index.get(id))
+    .map(|entry| PathBuf::from(&entry.path))
+    .collect();
+  roots.sort_by_key(|root| root.components().count());
+  let mut outer = Vec::<PathBuf>::new();
+  for root in roots {
+    if !outer.iter().any(|parent| root.starts_with(parent)) {
+      outer.push(root);
+    }
+  }
+  DiscoveryInput {
+    roots: outer,
+    ignore_hidden: record.ignore_hidden,
+  }
+}
+
+/// Classifies an indexed protected scan report into the three discovery views
+/// without touching the filesystem — the desktop twin of the host's
+/// `protectedDiscovery` (packages/host/src/protected-discovery.ts). Derived
+/// results are sorted by the desktop engine's byte order (size descending,
+/// path ascending), unlike the host's localeCompare, to match the legacy
+/// discovery sort used elsewhere in this engine.
+fn protected_discovery_items(
+  index: &HashMap<String, IndexEntry>,
+) -> HashMap<DiscoveryKind, Vec<DiscoveryItem>> {
+  let by_path: HashMap<&str, &IndexEntry> = index
+    .values()
+    .map(|entry| (entry.path.as_str(), entry))
+    .collect();
+  // A marker file counts only when the report measured it as a complete
+  // regular file — the report, never the live filesystem, is the source.
+  let is_local_file = |path: &str| {
+    by_path.get(path).is_some_and(|entry| {
+      entry.is_directory == Some(false) && entry.scan_state.as_deref() == Some("complete")
+    })
+  };
+  let in_environment = |path: &str| -> bool {
+    let mut cursor = Path::new(path);
+    loop {
+      let Some(parent) = cursor.parent() else {
+        return false;
+      };
+      if matches!(
+        parent.file_name().and_then(|name| name.to_str()),
+        Some(".venv" | "venv" | "env")
+      ) {
+        return true;
+      }
+      if let Some(config) = parent.join("pyvenv.cfg").to_str() {
+        if is_local_file(config) {
+          return true;
+        }
+      }
+      cursor = parent;
+    }
+  };
+  let python = [
+    ("__pycache__", "Python bytecode"),
+    (".pytest_cache", "pytest cache"),
+    (".mypy_cache", "mypy cache"),
+    (".ruff_cache", "Ruff cache"),
+  ];
+  let js = [".next", ".nuxt", ".turbo", ".parcel-cache", ".svelte-kit"];
+  let mut items: HashMap<DiscoveryKind, Vec<DiscoveryItem>> = [
+    DiscoveryKind::LargeFiles,
+    DiscoveryKind::Caches,
+    DiscoveryKind::Gitignored,
+  ]
+  .into_iter()
+  .map(|kind| (kind, Vec::new()))
+  .collect();
+  for entry in index.values() {
+    // Roots (no parent) and entries the scanner skipped never qualify.
+    if entry.scan_state.as_deref() == Some("skipped") || entry.parent.is_none() {
+      continue;
+    }
+    let item = |category: &str| DiscoveryItem {
+      node: entry.summary(),
+      parent_id: entry.parent.clone(),
+      category: category.into(),
+      is_directory: entry.is_directory == Some(true),
+    };
+    if entry.ignored {
+      items
+        .get_mut(&DiscoveryKind::Gitignored)
+        .unwrap()
+        .push(item("Gitignored"));
+    }
+    if entry.is_directory == Some(false) {
+      items
+        .get_mut(&DiscoveryKind::LargeFiles)
+        .unwrap()
+        .push(item("Large file"));
+      continue;
+    }
+    let name = Path::new(&entry.path)
+      .file_name()
+      .and_then(|name| name.to_str());
+    let parent = Path::new(&entry.path).parent().map(Path::to_path_buf);
+    let marker = |file: &str| {
+      parent
+        .as_ref()
+        .map(|parent| parent.join(file))
+        .is_some_and(|joined| joined.to_str().is_some_and(is_local_file))
+    };
+    let mut category = name.and_then(|name| {
+      python
+        .iter()
+        .find(|(candidate, _)| *candidate == name)
+        .map(|(_, label)| *label)
+    });
+    if name == Some("node_modules") && marker("package.json") {
+      category = Some("Node dependencies");
+    }
+    if name == Some("target") && marker("Cargo.toml") {
+      category = Some("Rust build output");
+    }
+    if name.is_some_and(|name| js.contains(&name)) && marker("package.json") {
+      category = Some("JavaScript build cache");
+    }
+    if let Some(category) = category {
+      if !in_environment(&entry.path) {
+        items
+          .get_mut(&DiscoveryKind::Caches)
+          .unwrap()
+          .push(item(category));
+      }
+    }
+  }
+  // A nested candidate inside an already-listed directory of the same kind
+  // is redundant; keep only the outermost rows.
+  for kind in [DiscoveryKind::Caches, DiscoveryKind::Gitignored] {
+    let directories: HashSet<String> = items[&kind]
+      .iter()
+      .filter(|item| item.is_directory)
+      .map(|item| item.node.path.clone())
+      .collect();
+    items.get_mut(&kind).unwrap().retain(|item| {
+      let mut cursor: &Path = Path::new(&item.node.path);
+      loop {
+        let Some(parent) = cursor.parent() else {
+          return true;
+        };
+        if parent
+          .to_str()
+          .is_some_and(|text| directories.contains(text))
+        {
+          return false;
+        }
+        cursor = parent;
+      }
+    });
+  }
+  for rows in items.values_mut() {
+    rows.sort_by(|a, b| {
+      b.node
+        .size
+        .cmp(&a.node.size)
+        .then_with(|| a.node.path.cmp(&b.node.path))
+    });
+  }
+  items
 }
 
 /// Build once per scan: a fully enumerated tree for files/cache sizes and
