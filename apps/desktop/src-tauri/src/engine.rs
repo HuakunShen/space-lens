@@ -1536,35 +1536,10 @@ pub fn run_discovery(input: DiscoveryInput) -> EngineResult<DiscoveryData> {
   })
 }
 
+// The catalog lives in the shared headless crate (the CLI's MCP adapter
+// consumes it too); the desktop only keeps its own discovery wiring here.
 fn cache_category(path: &Path, roots: &[PathBuf]) -> Option<&'static str> {
-  let parent = path.parent()?;
-  // Environments contain installed packages, not disposable build caches.
-  if path
-    .ancestors()
-    .take_while(|ancestor| roots.iter().any(|root| ancestor.starts_with(root)))
-    .any(|ancestor| {
-      matches!(
-        ancestor.file_name().and_then(|name| name.to_str()),
-        Some(".venv" | "venv")
-      ) || ancestor.join("pyvenv.cfg").is_file()
-    })
-  {
-    return None;
-  }
-  match path.file_name()?.to_str()? {
-    "node_modules" if parent.join("package.json").is_file() => Some("Node dependencies"),
-    "target" if parent.join("Cargo.toml").is_file() => Some("Rust build output"),
-    "__pycache__" => Some("Python bytecode"),
-    ".pytest_cache" => Some("pytest cache"),
-    ".mypy_cache" => Some("mypy cache"),
-    ".ruff_cache" => Some("Ruff cache"),
-    ".next" | ".nuxt" | ".turbo" | ".parcel-cache" | ".svelte-kit"
-      if parent.join("package.json").is_file() =>
-    {
-      Some("JavaScript build cache")
-    }
-    _ => None,
-  }
+  spacelens_discovery::cache_category(path, roots)
 }
 
 fn prune_discovery_overlap(rows: &mut Vec<DiscoveryItem>) {

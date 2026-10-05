@@ -17,10 +17,10 @@ icloud-cli *args:
     cd apps/icloud-free && swift run icloud-free {{args}}
 
 rust-cli *args:
-    cargo run --release -p space-lens-cli -- {{args}}
+    cargo run --release -p spacelens -- {{args}}
 
 space-lens-mcp:
-    cargo run --release -p space-lens-cli --features mcp -- mcp
+    cargo run --release -p spacelens --features mcp -- mcp
 
 space-lens-mac-test:
     cargo build -p space-lens-ffi

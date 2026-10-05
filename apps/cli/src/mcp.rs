@@ -6,6 +6,7 @@ use space_lens::{
   build_removal_plan, find_candidates, scan_directory, CandidateOptions, CleanupPreset,
   IgnoredMode, PlatformCapabilities, ScanOptions, SnapshotEnvelope,
 };
+use spacelens_discovery::{run_discovery, DiscoveryKind, DiscoveryOptions};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
@@ -71,7 +72,7 @@ fn initialize_result() -> Value {
       "name": "space-lens",
       "version": env!("CARGO_PKG_VERSION")
     },
-    "instructions": "Space Lens MCP is read-only. It can inspect filesystem snapshots, report cleanup candidates, and inspect iCloud eviction plans. It never deletes files, moves items to Trash, requests iCloud downloads, or evicts iCloud local copies through MCP."
+    "instructions": "Space Lens MCP is read-only. It can inspect filesystem snapshots, discover large files, developer caches, and gitignored paths, report cleanup candidates, and inspect iCloud eviction plans. It never deletes files, moves items to Trash, requests iCloud downloads, or evicts iCloud local copies through MCP."
   })
 }
 
@@ -101,6 +102,26 @@ fn tool_definitions() -> Vec<Value> {
         "properties": {
           "path": { "type": "string", "description": "Existing folder path to inspect." },
           "presets": { "type": "array", "items": { "type": "string", "enum": ["node", "rust", "gitignored"] } },
+          "ignoreHidden": { "type": "boolean", "default": false }
+        },
+        "required": ["path"]
+      }
+    }),
+    json!({
+      "name": "space_lens_discovery",
+      "description": "Discover large files, disposable developer caches (node_modules, Cargo target, __pycache__, and similar), and gitignored paths under one explicitly supplied folder. Read-only: it never removes, moves, or trashes anything.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": { "type": "string", "description": "Existing folder path to inspect." },
+          "kinds": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["large-files", "caches", "gitignored"] },
+            "description": "Views to return; defaults to all three."
+          },
+          "minSize": { "type": "integer", "default": 0, "description": "Drop items smaller than this many bytes from every view." },
+          "limit": { "type": "integer", "default": 200, "description": "Maximum items per view, largest first." },
           "ignoreHidden": { "type": "boolean", "default": false }
         },
         "required": ["path"]
@@ -142,6 +163,7 @@ fn call_tool(params: Option<&Value>) -> Value {
   match name {
     "space_lens_scan_snapshot" => scan_snapshot(&arguments),
     "space_lens_cleanup_candidates" => cleanup_candidates(&arguments),
+    "space_lens_discovery" => discovery(&arguments),
     "space_lens_icloud_plan" => icloud_plan(&arguments),
     "space_lens_capabilities" => tool_success(serde_json::to_value(
       PlatformCapabilities::for_current_platform(),
@@ -223,6 +245,57 @@ fn cleanup_candidates(arguments: &Map<String, Value>) -> Value {
     follow_symlinks: false,
   });
   tool_success(serde_json::to_value(build_removal_plan(candidates)))
+}
+
+fn discovery(arguments: &Map<String, Value>) -> Value {
+  let path = match required_path(arguments) {
+    Ok(path) => path,
+    Err(error) => return tool_error(error),
+  };
+  let kinds = match arguments.get("kinds") {
+    None => DiscoveryKind::ALL.to_vec(),
+    Some(Value::Array(values)) => match values
+      .iter()
+      .map(|value| match value.as_str() {
+        Some(id) => DiscoveryKind::parse(id).ok_or_else(|| format!("invalid discovery kind: {id}")),
+        None => Err("discovery kinds must be strings".to_string()),
+      })
+      .collect::<Result<Vec<_>, _>>()
+    {
+      Ok(kinds) if kinds.is_empty() => return tool_error("kinds must not be empty"),
+      Ok(kinds) => kinds,
+      Err(error) => return tool_error(error),
+    },
+    Some(_) => return tool_error("kinds must be an array"),
+  };
+  let min_size = arguments
+    .get("minSize")
+    .and_then(Value::as_u64)
+    .unwrap_or(0);
+  let limit = arguments
+    .get("limit")
+    .and_then(Value::as_u64)
+    .unwrap_or(200) as usize;
+
+  let report = run_discovery(DiscoveryOptions {
+    roots: vec![path],
+    ignore_hidden: arguments
+      .get("ignoreHidden")
+      .and_then(Value::as_bool)
+      .unwrap_or(false),
+    min_size,
+    limit,
+  });
+  match report {
+    // Only the requested views stay in the response.
+    Ok(mut report) => {
+      report
+        .views
+        .retain(|view| kinds.iter().any(|kind| kind.id() == view.kind));
+      tool_success(serde_json::to_value(report))
+    }
+    Err(error) => tool_error(error.to_string()),
+  }
 }
 
 fn icloud_plan(arguments: &Map<String, Value>) -> Value {
@@ -311,6 +384,9 @@ mod tests {
     assert!(tools
       .iter()
       .any(|tool| tool["name"] == "space_lens_scan_snapshot"));
+    assert!(tools
+      .iter()
+      .any(|tool| tool["name"] == "space_lens_discovery"));
     assert!(!tools.iter().any(|tool| tool["name"] == "space_lens_delete"));
     assert!(!tools.iter().any(|tool| tool["name"] == "space_lens_evict"));
   }
@@ -322,5 +398,96 @@ mod tests {
       "method": "notifications/initialized"
     }))
     .is_none());
+  }
+
+  fn fixture_project(tag: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("spacelens-mcp-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("project/node_modules/vendor/node_modules")).unwrap();
+    std::fs::write(root.join("project/package.json"), "{}").unwrap();
+    std::fs::write(root.join("project/node_modules/vendor/package.json"), "{}").unwrap();
+    std::fs::write(root.join("project/.gitignore"), "build\n").unwrap();
+    std::fs::create_dir_all(root.join("project/build")).unwrap();
+    std::fs::write(root.join("project/build/heavy.bin"), [0u8; 2 * 1024 * 1024]).unwrap();
+    root
+  }
+
+  fn discovery_call(path: &PathBuf, arguments: Value) -> Value {
+    let mut arguments = arguments;
+    arguments["path"] = json!(path.to_string_lossy());
+    handle_request(json!({
+      "jsonrpc": "2.0",
+      "id": 7,
+      "method": "tools/call",
+      "params": { "name": "space_lens_discovery", "arguments": arguments }
+    }))
+    .expect("response")["result"]
+      .clone()
+  }
+
+  #[test]
+  fn discovery_returns_caches_and_gitignored_views() {
+    let root = fixture_project("views");
+    let result = discovery_call(&root, json!({}));
+    assert_ne!(result["isError"], true);
+    let views = result["structuredContent"]["views"]
+      .as_array()
+      .expect("views");
+    let caches = views
+      .iter()
+      .find(|view| view["kind"] == "caches")
+      .expect("caches view");
+    assert!(caches["items"]
+      .as_array()
+      .unwrap()
+      .iter()
+      .any(|item| item["path"]
+        .as_str()
+        .unwrap()
+        .ends_with("project/node_modules")));
+    assert!(!caches["items"]
+      .as_array()
+      .unwrap()
+      .iter()
+      .any(|item| item["path"]
+        .as_str()
+        .unwrap()
+        .contains("vendor/node_modules")));
+
+    let gitignored = views
+      .iter()
+      .find(|view| view["kind"] == "gitignored")
+      .expect("gitignored view");
+    assert!(gitignored["items"]
+      .as_array()
+      .unwrap()
+      .iter()
+      .any(|item| item["path"].as_str().unwrap().ends_with("project/build")));
+
+    let large = views
+      .iter()
+      .find(|view| view["kind"] == "large-files")
+      .expect("large-files view");
+    assert!(large["items"]
+      .as_array()
+      .unwrap()
+      .iter()
+      .any(|item| item["path"].as_str().unwrap().ends_with("heavy.bin")));
+    let _ = std::fs::remove_dir_all(&root);
+  }
+
+  #[test]
+  fn discovery_honors_kind_selection_and_rejects_unknown_kinds() {
+    let root = fixture_project("kinds");
+    let result = discovery_call(&root, json!({ "kinds": ["caches"] }));
+    let views = result["structuredContent"]["views"]
+      .as_array()
+      .expect("views");
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0]["kind"], "caches");
+
+    let invalid = discovery_call(&root, json!({ "kinds": ["bogus"] }));
+    assert_eq!(invalid["isError"], true);
+    let _ = std::fs::remove_dir_all(&root);
   }
 }

@@ -52,7 +52,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - name: Build
-        run: cargo build --release -p spacelens --target ${{ matrix.target }}
+        # `mcp` is an opt-in feature in source builds; the prebuilt archives
+        # (brew, cargo-binstall) always carry the read-only MCP adapter.
+        run: cargo build --release -p spacelens --features mcp --target ${{ matrix.target }}
       - name: Package (tar.gz)
         if: runner.os != 'Windows'
         run: |

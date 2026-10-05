@@ -12,8 +12,8 @@ name = "spacelens"
 path = "src/main.rs"
 
 [features]
-default = []
-mcp = []
+default    = []
+mcp        = ["dep:spacelens-discovery"]
 
 [dependencies]
 anyhow     = "1"
@@ -22,6 +22,7 @@ serde      = "1"
 serde_json = "1"
 # Published to crates.io as kuntu-scan; the path keeps local (submodule) builds.
 space-lens = { package = "kuntu-scan", version = "0.3", path = "../../vendors/kuntu/crates/kuntu-scan" }
+spacelens-discovery = { path = "../../crates/discovery", version = "0.3", optional = true }
 
 # cargo-binstall: prebuilt archives from the `cli-v<version>` GitHub release,
 # produced by .github/workflows/cli-release.yml.

@@ -52,6 +52,8 @@ jobs:
         run: cargo clippy --workspace --all-targets
       - name: Cargo test
         run: cargo test --workspace
+      - name: Cargo test (mcp feature)
+        run: cargo test -p spacelens --features mcp
       - name: Build debug binding
         run: yarn workspace space-lens build:debug
       - name: Restore package metadata

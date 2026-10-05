@@ -2,7 +2,7 @@
 # The engine (scan/snapshot/clean/cloud eviction) lives in the vendored Kuntu
 # repo; this workspace builds only the product shells around it.
 # packages/space-lens-ffi rejoins this list when its in-flight work lands.
-members  = ["packages/node", "apps/cli"]
+members  = ["crates/discovery", "packages/node", "apps/cli"]
 resolver = "2"
 
   [workspace.package]
@@ -10,7 +10,7 @@ resolver = "2"
   edition    = "2021"
   license    = "MIT"
   repository = "https://github.com/HuakunShen/space-lens"
-  version    = "0.3.0"
+  version    = "0.3.1"
 
 [profile.release]
 lto   = true

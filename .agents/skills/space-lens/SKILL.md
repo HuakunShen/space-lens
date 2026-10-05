@@ -41,7 +41,7 @@ spacelens clean ~/Dev --preset node        # print removal plan (dry run!)
 spacelens clean ~/Dev --preset node --execute  # actually delete
 spacelens dirty-git ~/Dev                  # git repos with uncommitted changes
 spacelens icloud plan|inspect|evict <path> # iCloud Drive eviction (macOS)
-spacelens mcp                              # MCP server (built with --features mcp)
+spacelens mcp                              # read-only MCP stdio server (opt-in: --features mcp; prebuilt brew/binstall binaries include it; MCP clients: command=spacelens, args=["mcp"])
 ```
 
 - `--preset` accepts `node` (`node_modules`), `rust` (`target`),

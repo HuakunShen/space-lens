@@ -228,7 +228,7 @@ real-folder scan through the separate Rust FFI facade. The scan can be
 exported as the portable JSON snapshot. Normal filesystem cleanup uses an
 explicit review flow that moves selected real nodes to the macOS Trash, so
 they remain recoverable through Finder; it does not permanently delete files.
-The optional MCP adapter is read-only. The macOS app also exposes the Apple-only iCloud Local Copies
+The MCP adapter is read-only. The macOS app also exposes the Apple-only iCloud Local Copies
 capability and its bounded concurrent eviction flow; it never requests
 downloads for cloud-only files.
 
@@ -244,22 +244,26 @@ facade exposes read-only filesystem snapshots plus an opaque macOS-only iCloud
 plan session. The native app can execute that session only after its explicit
 confirmation flow; MCP remains read-only and does not expose the execution API.
 
-### Optional Rust MCP adapter
+### Rust MCP adapter
 
-The CLI has an opt-in, read-only MCP stdio adapter. The default Rust build does
-not compile or expose it; enable the `mcp` feature explicitly:
+The CLI has an opt-in, read-only MCP stdio adapter. Prebuilt installs (brew,
+cargo binstall) carry it out of the box; source builds enable the `mcp`
+feature explicitly:
 
 ```bash
-cargo run --release -p spacelens --features mcp -- mcp
-# or
-just space-lens-mcp
+spacelens mcp                                            # prebuilt binaries
+cargo install spacelens --features mcp                   # from source
+cargo run --release -p spacelens --features mcp -- mcp   # from a checkout
+just space-lens-mcp                                      # from a checkout
 ```
 
-It implements the MCP initialize lifecycle and `tools/list`/`tools/call` for
-filesystem snapshot export, cleanup-candidate inspection, platform
-capabilities, and read-only iCloud plans. It exposes no delete, Trash, cloud
-eviction, or download tool. MCP messages use newline-delimited JSON-RPC on
-stdin/stdout; diagnostics must not be written to stdout.
+Point any MCP client (Claude Desktop, ZCode, Cursor, …) at `spacelens mcp`
+over stdio. It implements the MCP initialize lifecycle and
+`tools/list`/`tools/call` for filesystem snapshot export, discovery of large
+files / developer caches / gitignored paths, cleanup-candidate inspection,
+platform capabilities, and read-only iCloud plans. It exposes no delete,
+Trash, cloud eviction, or download tool. MCP messages use newline-delimited
+JSON-RPC on stdin/stdout; diagnostics must not be written to stdout.
 
 ## Web UI status
 

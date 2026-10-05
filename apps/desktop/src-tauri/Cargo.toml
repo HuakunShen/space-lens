@@ -31,6 +31,9 @@ trash = "5"
 sha1 = "0.10"
 # The engine, vendored at the repo root; aliased under the familiar name.
 space-lens = { package = "kuntu-scan", path = "../../../vendors/kuntu/crates/kuntu-scan" }
+# Shared discovery heuristics (cache categories) — the CLI's MCP adapter
+# consumes the same crate, so the catalogs cannot drift apart.
+spacelens-discovery = { path = "../../../crates/discovery" }
 
 [profile.release]
 opt-level = "s"

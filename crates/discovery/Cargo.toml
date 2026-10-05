@@ -1,0 +1,13 @@
+[package]
+authors.workspace    = true
+description          = "Read-only discovery of large files, developer caches, and gitignored paths."
+edition.workspace    = true
+license.workspace    = true
+name                 = "spacelens-discovery"
+repository.workspace = true
+version.workspace    = true
+
+[dependencies]
+serde      = { version = "1", features = ["derive"] }
+# Published to crates.io as kuntu-scan; the path keeps local (submodule) builds.
+space-lens = { package = "kuntu-scan", version = "0.3", path = "../../vendors/kuntu/crates/kuntu-scan" }

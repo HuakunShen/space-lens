@@ -8,6 +8,7 @@ How every Space Lens artifact gets out the door. Last verified 2026-09-26
 | Artifact | Version lives in | Published to |
 | --- | --- | --- |
 | Engine library `kuntu-scan` | `vendors/kuntu` → `crates/kuntu-scan/Cargo.toml` | crates.io |
+| Discovery library `spacelens-discovery` | `crates/discovery` (workspace version) | crates.io |
 | CLI `spacelens` (bin `spacelens`) | root `Cargo.toml` `[workspace.package] version` | crates.io + GitHub release + Homebrew tap |
 | npm package `space-lens` | `packages/node/package.json` | npm |
 | Desktop app | Tauri config, tagged `app-v*` | GitHub release (dmg) via `workbench.yml` |
@@ -36,9 +37,17 @@ do not use them for the CLI.
 
 ```bash
 # a) bump the workspace version in root Cargo.toml, commit, push
-cargo publish -p spacelens                      # b) crates.io (token via cargo login)
-git tag cli-v0.2.10 && git push origin cli-v0.2.10   # c) CI builds & attaches archives
+cargo publish -p spacelens-discovery            # b) crates.io — only when the crate changed; MUST precede spacelens (optional dep with version pin)
+cargo publish -p spacelens                      # c) crates.io (token via cargo login)
+git tag cli-v0.2.10 && git push origin cli-v0.2.10   # d) CI builds & attaches archives
 ```
+
+The prebuilt release archives (and therefore brew/cargo-binstall installs)
+carry the read-only MCP adapter: cli-release.yml builds with
+`--features mcp`. The `mcp` feature stays opt-in for source builds
+(`cargo install spacelens --features mcp`); `cargo publish` of `spacelens`
+needs `spacelens-discovery` on crates.io first because the optional
+dependency pins a version.
 
 The tag push runs `.github/workflows/cli-release.yml`, which builds
 aarch64/x86_64 macOS (x64 cross-compiled on arm runners), aarch64/x86_64 Linux
