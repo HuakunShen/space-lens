@@ -1,8 +1,10 @@
 //! The explorer panel — the web workbench's chart view (plan §3.1): a
-//! painted sunburst of the focused directory beside its contents list, with
+//! painted chart of the focused directory beside its contents list, with
 //! breadcrumb navigation, a collapsed-entries banner, and the same pastel
-//! palette as the web (`session::sunburst`). Replaces the old children
-//! DataTable: the web UI explores by chart + list, not by a raw table.
+//! palette as the web (`session::sunburst`). Two chart modes share the
+//! panel: the sunburst ring layout and the Burrow-style squarified treemap
+//! (`session::treemap`). Replaces the old children DataTable: the web UI
+//! explores by chart + list, not by a raw table.
 
 use std::{cell::Cell, f32::consts::TAU, rc::Rc};
 
@@ -10,21 +12,58 @@ use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
 use gpui_kit::component::plot::shape::{Arc, ArcData};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _};
+use gpui_kit::component::{
+  h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _,
+};
 use gpui_kit::*;
 
 use crate::session::format::{format_bytes, format_count};
 use crate::session::index::SortMode;
 use crate::session::plan::StagedPath;
 use crate::session::sunburst::{build_sunburst, muted_color, segment_color, SunburstSegment};
+use crate::session::treemap::{build_treemap, TreemapRect, LEVEL_PAD_TOP};
 use crate::store::{ScanStore, StoreEvent};
-use crate::views::theme::{inspector, stripe};
+use crate::views::theme::{inspector, segment_selected, segment_track, stripe};
 
 /// Ring depth of the painted sunburst, exactly the useful range of the web
 /// chart: center, children, grandchildren, one more.
 const MAX_DEPTH: u32 = 4;
 /// Below ~0.6° a wedge is a hairline; prune it and its subtree.
 const MIN_ANGLE: f32 = 0.01;
+/// Tiles narrower than this on either axis are invisible noise; prune them
+/// and their subtrees with them.
+const TREEMAP_MIN_SIDE: f32 = 3.0;
+/// Half the painted gap between treemap tiles; each tile is inset by this
+/// on every side so neighbors never touch.
+const TILE_GAP: f32 = 1.5;
+/// Label ink for treemap tiles: near-black works on every pastel of the
+/// shared palette in both appearances (the sunburst never paints text on
+/// its segments, the treemap does).
+const TILE_LABEL: u32 = 0x23252b;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChartMode {
+  #[default]
+  Sunburst,
+  /// Burrow's flat tile view: one layer — the focused folder's direct
+  /// children, areas comparable at a glance.
+  Flat,
+  /// The webpack-bundle-analyzer form: roomy tiles nest their own children
+  /// one inside the other, so many layers show at once.
+  Nested,
+}
+
+/// The treemap geometry for the focused node, cached between frames: the
+/// layout is rebuilt only when the focus, the flat/nested variant, or the
+/// canvas size changed, so painting, hit-testing, and the label overlays
+/// all read one geometry.
+struct TreemapLayout {
+  center_id: String,
+  nested: bool,
+  width: f32,
+  height: f32,
+  rects: Vec<TreemapRect>,
+}
 
 #[derive(Clone)]
 struct FocusEntry {
@@ -49,7 +88,13 @@ pub struct ExplorerView {
   focus: Option<FocusEntry>,
   rows: Vec<ChildRow>,
   segments: Vec<SunburstSegment>,
+  treemap: Option<TreemapLayout>,
+  mode: ChartMode,
   hovered: Option<String>,
+  /// The chart canvas's last laid-out bounds, recorded by the canvas's
+  /// layout pass every frame; the treemap cache and the mouse listeners
+  /// read the same cell, so a hover can never disagree with the screen.
+  bounds_cell: Rc<Cell<Bounds<Pixels>>>,
   focus_handle: FocusHandle,
   _subscriptions: Vec<Subscription>,
 }
@@ -62,12 +107,24 @@ impl ExplorerView {
       }
     });
 
+    // Screenshot/demo hook (like the picker's `SPACLENS_GPUI_AUTO_SCAN`):
+    // seed the initial chart mode without any interaction. `treemap` is the
+    // legacy spelling of the nested view that hook originally launched.
+    let mode = match std::env::var("SPACLENS_GPUI_CHART").as_deref() {
+      Ok("flat") => ChartMode::Flat,
+      Ok("nested") | Ok("treemap") => ChartMode::Nested,
+      _ => ChartMode::default(),
+    };
+
     let mut this = Self {
       scan_store,
       focus: None,
       rows: Vec::new(),
       segments: Vec::new(),
+      treemap: None,
+      mode,
       hovered: None,
+      bounds_cell: Rc::new(Cell::new(Bounds::default())),
       focus_handle: cx.focus_handle(),
       _subscriptions: vec![subscription],
     };
@@ -93,12 +150,15 @@ impl ExplorerView {
     self.reload(cx);
   }
 
-  /// Rebuilds the row list and the sunburst segments for the focused node —
-  /// both together, so the chart and the list can never disagree.
+  /// Rebuilds the row list and the chart geometry for the focused node —
+  /// both together, so the chart and the list can never disagree. The
+  /// treemap cache is dropped here; [`Self::sync_treemap_layout`] rebuilds
+  /// it against the canvas size during the next render.
   fn reload(&mut self, cx: &mut Context<Self>) {
     let Some(focus) = self.focus.clone() else {
       self.rows = Vec::new();
       self.segments = Vec::new();
+      self.treemap = None;
       cx.notify();
       return;
     };
@@ -125,7 +185,48 @@ impl ExplorerView {
       .index()
       .map(|index| build_sunburst(index, &focus.node_id, MAX_DEPTH, MIN_ANGLE))
       .unwrap_or_default();
+    self.treemap = None;
     cx.notify();
+  }
+
+  /// Rebuilds the cached treemap layout when it is stale — a different
+  /// focus, a flat↔nested switch, or a canvas that changed size. Runs
+  /// during render against the canvas's previous-frame bounds (the same
+  /// frame-lag the sunburst's `bounds_cell` lives with); the surrounding
+  /// notify cascade on focus changes and the per-frame resize renders
+  /// refill it immediately.
+  fn sync_treemap_layout(&mut self, cx: &Context<Self>) {
+    let Some(focus) = self.focus.clone() else {
+      self.treemap = None;
+      return;
+    };
+    let nested = self.mode == ChartMode::Nested;
+    let bounds = self.bounds_cell.get();
+    let (width, height) = (
+      bounds.size.width.as_f32(),
+      bounds.size.height.as_f32(),
+    );
+    if width <= 0.0 || height <= 0.0 {
+      return;
+    }
+    if matches!(&self.treemap, Some(layout)
+      if layout.center_id == focus.node_id
+        && layout.nested == nested
+        && (layout.width - width).abs() < 0.5
+        && (layout.height - height).abs() < 0.5)
+    {
+      return;
+    }
+    // Flat is the Burrow layer view: depth 1, the focused folder's direct
+    // children only. Nested keeps the analyzer-style multi-level inset.
+    let depth = if nested { MAX_DEPTH } else { 1 };
+    self.treemap = self.scan_store.read(cx).index().map(|index| TreemapLayout {
+      center_id: focus.node_id.clone(),
+      nested,
+      width,
+      height,
+      rects: build_treemap(index, &focus.node_id, width, height, depth, TREEMAP_MIN_SIDE),
+    });
   }
 
   fn descend(&mut self, node_id: &str, name: &str, cx: &mut Context<Self>) {
@@ -148,9 +249,9 @@ impl ExplorerView {
       .update(cx, |store, cx| store.stage(entry, cx));
   }
 
-  /// The chart card: sunburst canvas with the total in the hole, hover/click
-  /// hit-testing over the segments, and the summary line under it. The
-  /// canvas's prepaint records its bounds into `bounds_cell`, and the mouse
+  /// The chart card: the current mode's canvas with hover/click hit-testing
+  /// over a shared geometry, and the summary line under it. The canvas's
+  /// layout pass records its bounds into `bounds_cell`, and the mouse
   /// listeners read the same cell — one geometry, shared.
   fn render_chart(&self, focus: &FocusEntry, cx: &Context<Self>) -> Div {
     let total = self
@@ -161,16 +262,71 @@ impl ExplorerView {
       .map(|entry| entry.size)
       .unwrap_or(0);
 
-    let bounds_cell: Rc<Cell<Bounds<Pixels>>> = Rc::new(Cell::new(Bounds::default()));
+    let (chart, summary) = match self.mode {
+      ChartMode::Sunburst => {
+        (self.render_sunburst(focus, total, cx), self.sunburst_summary(total))
+      }
+      ChartMode::Flat | ChartMode::Nested => {
+        (self.render_treemap(cx), self.treemap_summary(total))
+      }
+    };
+    let foreground = cx.theme().foreground;
+    v_flex()
+      .flex_1()
+      .min_w_0()
+      .min_h_0()
+      .gap_2()
+      .child(chart)
+      .child(
+        div()
+          .text_xs()
+          .text_color(foreground.opacity(0.55))
+          .text_center()
+          .h(px(20.))
+          .child(summary),
+      )
+  }
+
+  fn sunburst_summary(&self, total: u64) -> String {
+    match self
+      .hovered
+      .as_deref()
+      .and_then(|id| self.segments.iter().find(|segment| segment.node_id == id))
+    {
+      Some(segment) => summarize(segment.name.clone(), segment.size, total),
+      None => NO_SELECTION_SUMMARY.into(),
+    }
+  }
+
+  fn treemap_summary(&self, total: u64) -> String {
+    match self.hovered.as_deref().and_then(|id| {
+      self
+        .treemap
+        .iter()
+        .flat_map(|layout| &layout.rects)
+        .find(|rect| rect.node_id == id)
+    }) {
+      Some(rect) => summarize(rect.name.clone(), rect.size, total),
+      None => NO_SELECTION_SUMMARY.into(),
+    }
+  }
+
+  /// The sunburst variant: ring canvas with the total in the hole, click a
+  /// wedge to descend.
+  fn render_sunburst(
+    &self,
+    focus: &FocusEntry,
+    total: u64,
+    cx: &Context<Self>,
+  ) -> Stateful<Div> {
     let paint_segments = self.segments.clone();
     let paint_hover = self.hovered.clone();
     let move_segments = self.segments.clone();
-    let move_cell = bounds_cell.clone();
+    let move_cell = self.bounds_cell.clone();
     let click_segments = self.segments.clone();
-    let click_cell = bounds_cell.clone();
+    let click_cell = self.bounds_cell.clone();
 
-    let foreground = cx.theme().foreground;
-    let chart = div()
+    div()
       .relative()
       .flex_1()
       .min_h_0()
@@ -178,7 +334,7 @@ impl ExplorerView {
       .child(
         canvas(
           {
-            let cell = bounds_cell.clone();
+            let cell = self.bounds_cell.clone();
             move |bounds: Bounds<Pixels>, _, _| cell.set(bounds)
           },
           move |bounds: Bounds<Pixels>, _, window: &mut Window, _: &mut App| {
@@ -240,43 +396,191 @@ impl ExplorerView {
         if let Some(segment) = hit {
           this.descend(&segment.node_id, &segment.name, cx);
         }
-      }));
+      }))
+  }
 
-    let summary = match self
-      .hovered
-      .as_deref()
-      .and_then(|id| self.segments.iter().find(|segment| segment.node_id == id))
-    {
-      Some(segment) => {
-        let share = if total > 0 {
-          segment.size as f32 / total as f32 * 100.0
-        } else {
-          0.0
-        };
-        format!(
-          "{} · {} · {:.1}%",
-          segment.name,
-          format_bytes(segment.size),
-          share
-        )
-      }
-      None => "Select a folder to explore its contents.".to_string(),
-    };
+  /// The treemap variant: Burrow-style squarified tiles — children fill the
+  /// whole canvas, roomy tiles show their own children inset inside, hover
+  /// dims the other tiles, click a folder tile to descend. Labels are real
+  /// overlaid elements (free truncation and the shared font stack), built
+  /// from the same cached rects the paint pass and hit-testing read.
+  fn render_treemap(&self, cx: &Context<Self>) -> Stateful<Div> {
+    let rects = self
+      .treemap
+      .as_ref()
+      .map(|layout| layout.rects.clone())
+      .unwrap_or_default();
+    let paint_rects = rects.clone();
+    let paint_hover = self.hovered.clone();
+    let move_rects = rects.clone();
+    let move_cell = self.bounds_cell.clone();
+    let click_rects = rects;
+    let click_cell = self.bounds_cell.clone();
 
-    v_flex()
+    div()
+      .relative()
       .flex_1()
-      .min_w_0()
       .min_h_0()
-      .gap_2()
-      .child(chart)
+      .id("explorer-chart")
       .child(
-        div()
-          .text_xs()
-          .text_color(foreground.opacity(0.55))
-          .text_center()
-          .h(px(20.))
-          .child(summary),
+        canvas(
+          {
+            let cell = self.bounds_cell.clone();
+            move |bounds: Bounds<Pixels>, _, _| cell.set(bounds)
+          },
+          move |bounds: Bounds<Pixels>, _, window: &mut Window, _: &mut App| {
+            paint_treemap(&paint_rects, paint_hover.as_deref(), &bounds, window);
+          },
+        )
+        .size_full(),
       )
+      .children(self.treemap_labels())
+      .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, window, cx| {
+        let bounds = move_cell.get();
+        if bounds.size.width.as_f32() <= 0.0 {
+          return;
+        }
+        let hit = rect_at(&move_rects, &bounds, window.mouse_position())
+          .map(|rect| rect.node_id);
+        if hit != this.hovered {
+          this.hovered = hit;
+          cx.notify();
+        }
+      }))
+      .on_hover(cx.listener(|this, hovering: &bool, _, cx| {
+        if !hovering && this.hovered.take().is_some() {
+          cx.notify();
+        }
+      }))
+      .on_click(cx.listener(move |this, _: &ClickEvent, window, cx| {
+        let bounds = click_cell.get();
+        if bounds.size.width.as_f32() <= 0.0 {
+          return;
+        }
+        if let Some(rect) = rect_at(&click_rects, &bounds, window.mouse_position()) {
+          if rect.has_children {
+            this.descend(&rect.node_id, &rect.name, cx);
+          }
+        }
+      }))
+  }
+
+  /// Labels for the treemap tiles, in one of two shapes. A tile with laid-
+  /// out children (the next rect in the pre-order list is one level deeper)
+  /// is a frame: its name sits alone in the top padding strip, above the
+  /// children. A leaf gets the centered Burrow card — icon, name, size when
+  /// the tile fits all three, a bare name when it fits less. Ignored tiles
+  /// take light ink; the pastel palette takes near-black. Labels live
+  /// inside the chart's listener div, so they never block the hover/click
+  /// hit-testing underneath.
+  fn treemap_labels(&self) -> Vec<Div> {
+    let Some(layout) = &self.treemap else {
+      return Vec::new();
+    };
+    let rects = &layout.rects;
+    let hovered_elsewhere = self.hovered.as_deref();
+    let mut labels = Vec::new();
+    for (ix, rect) in rects.iter().enumerate() {
+      let has_painted_children = rects
+        .get(ix + 1)
+        .is_some_and(|next| next.depth == rect.depth + 1);
+      let mut ink = if rect.ignored {
+        Hsla::from(rgb(0xd6d6dc))
+      } else {
+        Hsla::from(rgb(TILE_LABEL))
+      };
+      if hovered_elsewhere.is_some_and(|id| id != rect.node_id) {
+        ink = ink.opacity(0.45);
+      }
+      if has_painted_children {
+        if rect.w >= 64. && rect.h >= 34. {
+          labels.push(
+            div()
+              .absolute()
+              .left(px(rect.x + 5.))
+              .top(px(rect.y + 2.))
+              .w(px((rect.w - 10.).max(0.)))
+              .h(px(LEVEL_PAD_TOP - 4.))
+              .min_w_0()
+              .overflow_hidden()
+              .child(
+                div()
+                  .truncate()
+                  .text_size(px(10.))
+                  .font_weight(FontWeight::MEDIUM)
+                  .text_color(ink)
+                  .child(format!(
+                    "{} · {:.0}%",
+                    rect.name,
+                    rect.share * 100.0
+                  )),
+              ),
+          );
+        }
+        continue;
+      }
+      if rect.w >= 88. && rect.h >= 54. {
+        labels.push(
+          v_flex()
+            .absolute()
+            .left(px(rect.x + 6.))
+            .top(px(rect.y + 6.))
+            .w(px((rect.w - 12.).max(0.)))
+            .h(px((rect.h - 12.).max(0.)))
+            .min_w_0()
+            .min_h_0()
+            .overflow_hidden()
+            .items_center()
+            .justify_center()
+            .gap(px(2.))
+            .child(Icon::new(IconName::Folder).size(px(13.)).text_color(ink))
+            .child(
+              div()
+                .max_w_full()
+                .truncate()
+                .text_size(px(11.))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(ink)
+                .child(rect.name.clone()),
+            )
+            .child(
+              div()
+                .max_w_full()
+                .truncate()
+                .text_size(px(10.))
+                .text_color(ink.opacity(0.75))
+                .child(format!(
+                  "{} · {:.0}%",
+                  format_bytes(rect.size),
+                  rect.share * 100.0
+                )),
+            ),
+        );
+      } else if rect.w >= 48. && rect.h >= 22. {
+        labels.push(
+          div()
+            .absolute()
+            .left(px(rect.x + 6.))
+            .top(px(rect.y + 6.))
+            .w(px((rect.w - 12.).max(0.)))
+            .h(px((rect.h - 12.).max(0.)))
+            .min_w_0()
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+              div()
+                .max_w_full()
+                .truncate()
+                .text_size(px(11.))
+                .text_color(ink)
+                .child(rect.name.clone()),
+            ),
+        );
+      }
+    }
+    labels
   }
 
   /// The right sidebar: every direct child as a colored row — dot in the
@@ -505,6 +809,46 @@ impl ExplorerView {
       .child(crumbs)
   }
 
+  /// The chart-mode segmented control in the panel header — the same
+  /// track/selected styling as the inspector tabs, text labels like them
+  /// (three icon+label buttons would not fit the header row).
+  fn render_mode_toggle(&self, cx: &Context<Self>) -> Div {
+    let mut toggle = h_flex()
+      .gap(px(1.))
+      .p(px(2.))
+      .rounded(px(6.))
+      .bg(segment_track(cx));
+    for (mode, label) in [
+      (ChartMode::Sunburst, "Sunburst"),
+      (ChartMode::Flat, "Flat"),
+      (ChartMode::Nested, "Nested"),
+    ] {
+      let selected = self.mode == mode;
+      toggle = toggle.child(
+        Button::new(SharedString::from(format!("chart-mode-{label}")))
+          .ghost()
+          .small()
+          .label(label)
+          .selected(selected)
+          .rounded(px(4.))
+          .bg(if selected {
+            segment_selected(cx)
+          } else {
+            segment_track(cx)
+          })
+          .accessibility_label(format!("Show {label} chart"))
+          .on_click(cx.listener(move |this, _, _, cx| {
+            if this.mode != mode {
+              this.mode = mode;
+              this.hovered = None;
+              cx.notify();
+            }
+          })),
+      );
+    }
+    toggle
+  }
+
   fn render_placeholder(&self, cx: &Context<Self>) -> Div {
     div()
       .size_full()
@@ -515,6 +859,20 @@ impl ExplorerView {
       .text_color(cx.theme().foreground.opacity(0.5))
       .child("Run a scan to explore it here.")
   }
+}
+
+/// The summary line under an idle chart.
+const NO_SELECTION_SUMMARY: &str = "Select a folder to explore its contents.";
+
+/// The hover summary shared by both chart modes: name, size, share of the
+/// focused total.
+fn summarize(name: String, size: u64, total: u64) -> String {
+  let share = if total > 0 {
+    size as f32 / total as f32 * 100.0
+  } else {
+    0.0
+  };
+  format!("{} · {} · {:.1}%", name, format_bytes(size), share)
 }
 
 /// Ring geometry for the chart `bounds`: `(hole, band)` — the single source
@@ -540,6 +898,104 @@ mod geometry_tests {
     assert!(band > 0.);
     assert!(hole + MAX_DEPTH as f32 * band <= 50.);
     assert!(hole < 50.);
+  }
+}
+
+/// The tile under `position` (window pixels): the deepest containing rect —
+/// nested tiles sit inside their parents, and parents come first in the
+/// pre-order rect list. None outside the canvas.
+fn rect_at(
+  rects: &[TreemapRect],
+  bounds: &Bounds<Pixels>,
+  position: Point<Pixels>,
+) -> Option<TreemapRect> {
+  let x = position.x.as_f32() - bounds.origin.x.as_f32();
+  let y = position.y.as_f32() - bounds.origin.y.as_f32();
+  let mut best: Option<&TreemapRect> = None;
+  for rect in rects {
+    let inside = rect.x <= x
+      && x < rect.x + rect.w
+      && rect.y <= y
+      && y < rect.y + rect.h;
+    if inside && best.is_none_or(|top| rect.depth >= top.depth) {
+      best = Some(rect);
+    }
+  }
+  best.cloned()
+}
+
+/// Paints every treemap tile: rounded quads inset by a small gap, the web
+/// palette (muted for ignored), and non-hovered tiles dimmed while the
+/// cursor is over one.
+fn paint_treemap(
+  rects: &[TreemapRect],
+  hovered: Option<&str>,
+  bounds: &Bounds<Pixels>,
+  window: &mut Window,
+) {
+  for rect in rects {
+    let color_u32 = if rect.ignored {
+      muted_color(rect.depth)
+    } else {
+      segment_color(&rect.node_id, rect.depth)
+    };
+    let mut color = Hsla::from(rgb(color_u32));
+    if hovered.is_some_and(|id| id != rect.node_id) {
+      color = color.opacity(0.45);
+    }
+    let tile = Bounds::new(
+      point(
+        bounds.origin.x + px(rect.x + TILE_GAP),
+        bounds.origin.y + px(rect.y + TILE_GAP),
+      ),
+      size(
+        px((rect.w - 2.0 * TILE_GAP).max(0.5)),
+        px((rect.h - 2.0 * TILE_GAP).max(0.5)),
+      ),
+    );
+    window.paint_quad(fill(tile, color).corner_radii(px(3.)));
+  }
+}
+
+#[cfg(test)]
+mod treemap_hit_tests {
+  use super::rect_at;
+  use crate::session::treemap::TreemapRect;
+  use gpui_kit::{point, px, size, Bounds};
+
+  fn rect(name: &str, depth: u32, x: f32, y: f32, w: f32, h: f32) -> TreemapRect {
+    TreemapRect {
+      node_id: name.into(),
+      name: name.into(),
+      depth,
+      x,
+      y,
+      w,
+      h,
+      size: 1,
+      share: 0.5,
+      ignored: false,
+      has_children: false,
+    }
+  }
+
+  #[test]
+  fn the_deepest_tile_wins_and_canvas_edges_are_exclusive() {
+    let tiles = vec![
+      rect("parent", 1, 0., 0., 100., 100.),
+      rect("child", 2, 12., 12., 76., 76.),
+    ];
+    let bounds = Bounds::new(point(px(10.), px(10.)), size(px(100.), px(100.)));
+    let at = |x: f32, y: f32| {
+      rect_at(&tiles, &bounds, point(px(x), px(y))).map(|tile| tile.name)
+    };
+    // Window pixels: the canvas sits at (10, 10), so (20, 20) is local (10, 10).
+    assert_eq!(at(20., 20.).as_deref(), Some("parent"));
+    assert_eq!(at(40., 40.).as_deref(), Some("child"));
+    assert_eq!(at(9., 40.), None); // left of the canvas
+    assert_eq!(at(40., 110.), None); // below the canvas
+    // The top-right corner strip belongs to the parent, not the child.
+    assert_eq!(at(105., 15.).as_deref(), Some("parent"));
   }
 }
 
@@ -635,6 +1091,9 @@ impl Render for ExplorerView {
     let Some(focus) = self.focus.clone() else {
       return self.render_placeholder(cx);
     };
+    if matches!(self.mode, ChartMode::Flat | ChartMode::Nested) {
+      self.sync_treemap_layout(cx);
+    }
     let store = self.scan_store.read(cx);
     let total = store
       .index()
@@ -671,7 +1130,9 @@ impl Render for ExplorerView {
                 format_count(self.rows.len()),
                 format_bytes(total)
               ))),
-          ),
+          )
+          .child(div().flex_1())
+          .child(self.render_mode_toggle(cx)),
       )
       .children(has_collapsed.then(|| {
         h_flex()

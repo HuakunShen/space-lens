@@ -6,3 +6,4 @@ pub mod format;
 pub mod index;
 pub mod plan;
 pub mod sunburst;
+pub mod treemap;

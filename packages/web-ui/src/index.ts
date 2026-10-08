@@ -5,6 +5,8 @@ export { default as CollectorPanel } from './components/lens/CollectorPanel.svel
 export { default as ScanPicker } from './components/lens/ScanPicker.svelte'
 export { default as StatusBar } from './components/lens/StatusBar.svelte'
 export { default as SunburstChart } from './components/lens/SunburstChart.svelte'
+export { default as TreemapChart } from './components/lens/TreemapChart.svelte'
+export { default as ChartModeToggle } from './components/lens/ChartModeToggle.svelte'
 export { default as LensSelect } from './components/lens/LensSelect.svelte'
 export { default as ScanCoveragePanel } from './components/lens/ScanCoveragePanel.svelte'
 export { default as WorkspaceHeading } from './components/lens/WorkspaceHeading.svelte'
@@ -37,3 +39,4 @@ export { Badge, Button, Card, ContextMenu, Checkbox, Input, Progress, ScrollArea
 export { formatBytes, formatPercent } from './lib/format.js'
 export { formatNodeName } from './lib/node-size.js'
 export { cn } from './lib/utils.js'
+export type { ChartMode } from './lib/treemap.js'

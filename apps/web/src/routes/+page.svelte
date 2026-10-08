@@ -10,6 +10,7 @@
     StateBanner,
     StatusBar,
     SunburstChart,
+    TreemapChart,
     LensSelect,
     WorkspaceHeading,
     LensToolbar,
@@ -22,12 +23,14 @@
     formatBytes,
     formatNodeName,
   } from '@space-lens/web-ui'
+  import type { ChartMode } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
   import type { CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem } from '@space-lens/contract'
   import { setMode, userPrefersMode } from 'mode-watcher'
   import { addSelection, selectedAncestor } from '../lib/selection'
   import { ACTIVE_SCAN_KEY, parseActiveScan } from '../lib/resume'
   import { APPEARANCE_KEY, parseAppearance, resolveStyle } from '../lib/appearance'
+  import { CHART_MODE_KEY, parseChartMode } from '../lib/chart-mode'
   import { checkForAppUpdate, currentAppVersion, installAppUpdate } from '../lib/updater'
   import type { UpdateStatus } from '../lib/updater'
   import { ServiceError } from '@space-lens/client'
@@ -60,6 +63,11 @@
   let settingsOpen = $state(false)
   let sidebarVisible = $state(true)
   let chartVisible = $state(true)
+  let chartMode = $state<ChartMode>('sunburst')
+  function setChartMode(mode: ChartMode): void {
+    chartMode = mode
+    window.localStorage.setItem(CHART_MODE_KEY, mode)
+  }
   let pickerOpen = $state(false)
   let pickerPath = $state('')
   let startingScan = $state(false)
@@ -637,6 +645,7 @@
 
   onMount(() => {
     appearance = parseAppearance(window.localStorage.getItem(APPEARANCE_KEY))
+    chartMode = parseChartMode(window.localStorage.getItem(CHART_MODE_KEY))
     preferencesReady = true
     if (window.innerWidth < 760) sidebarVisible = false
     if (__SPACLENS_DESKTOP__) {
@@ -806,18 +815,35 @@
             {#if chartVisible}<div
                 class="explorer-chart macos:bg-background macos:p-5 windows:rounded-lg windows:border windows:bg-background windows:p-4 linux:bg-background linux:p-5"
               >
-                <SunburstChart
-                  tree={workbench.slice?.tree ?? null}
-                  focusNode={displayFocus}
-                  hoveredNode={workbench.items.find((item) => item.id === workbench.hoveredId) ?? null}
-                  onBack={goUp}
-                  canGoBack={ancestors.length > 1}
-                  hoveredId={workbench.hoveredId}
-                  collectedIds={coveredIds}
-                  onHover={(id) => (workbench.hoveredId = id)}
-                  onOpen={(node) => void focus(node)}
-                  onContext={toggleCollected}
-                />
+                {#if chartMode === 'sunburst'}<SunburstChart
+                    tree={workbench.slice?.tree ?? null}
+                    focusNode={displayFocus}
+                    mode={chartMode}
+                    onModeChange={setChartMode}
+                    hoveredNode={workbench.items.find((item) => item.id === workbench.hoveredId) ?? null}
+                    onBack={goUp}
+                    canGoBack={ancestors.length > 1}
+                    hoveredId={workbench.hoveredId}
+                    collectedIds={coveredIds}
+                    onHover={(id) => (workbench.hoveredId = id)}
+                    onOpen={(node) => void focus(node)}
+                    onContext={toggleCollected}
+                  />
+                {:else}<TreemapChart
+                    tree={workbench.slice?.tree ?? null}
+                    focusNode={displayFocus}
+                    nested={chartMode === 'nested'}
+                    mode={chartMode}
+                    onModeChange={setChartMode}
+                    hoveredNode={workbench.items.find((item) => item.id === workbench.hoveredId) ?? null}
+                    onBack={goUp}
+                    canGoBack={ancestors.length > 1}
+                    hoveredId={workbench.hoveredId}
+                    collectedIds={coveredIds}
+                    onHover={(id) => (workbench.hoveredId = id)}
+                    onOpen={(node) => void focus(node)}
+                    onContext={toggleCollected}
+                  />{/if}
                 {#if workbench.slice?.truncated}<p class="chart-summary">
                     {workbench.slice.omittedCount.toLocaleString()} smaller items grouped · open a folder to explore
                   </p>{/if}

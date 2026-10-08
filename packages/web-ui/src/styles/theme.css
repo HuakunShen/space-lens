@@ -439,6 +439,64 @@
   .arc[aria-disabled='true'] {
     cursor: default;
   }
+  .chart-mode {
+    display: inline-flex;
+    gap: 1px;
+    padding: 2px;
+    border-radius: 7px;
+    background: color-mix(in oklch, var(--foreground) 7%, transparent);
+  }
+  .chart-mode button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted-foreground);
+    font: inherit;
+    font-size: 0.7rem;
+    line-height: 1;
+    padding: 0.32rem 0.6rem;
+    border-radius: 5px;
+    cursor: pointer;
+    transition:
+      background 140ms,
+      color 140ms;
+  }
+  .chart-mode button:hover {
+    color: var(--foreground);
+  }
+  .chart-mode button.active {
+    background: color-mix(in oklch, var(--background) 92%, var(--foreground) 8%);
+    color: var(--foreground);
+    font-weight: 600;
+  }
+  .treemap {
+    width: min(100%, calc(60dvh * 1.44));
+    min-width: 0;
+    max-width: 680px;
+    border-radius: 8px;
+  }
+  .tile-group {
+    transition: opacity 160ms ease;
+  }
+  .tile-group.dimmed {
+    opacity: 0.35;
+  }
+  .tile-text {
+    pointer-events: none;
+    user-select: none;
+    fill: oklch(0.25 0.02 260);
+    font-size: 11px;
+  }
+  .tile-text.muted-ink {
+    fill: oklch(0.9 0.01 260);
+  }
+  .tile-name {
+    font-weight: 600;
+  }
+  .tile-detail {
+    font-size: 10px;
+    opacity: 0.78;
+  }
   .center-size,
   .center-label {
     pointer-events: none;

@@ -63,7 +63,7 @@ export function buildSunburstSegments(tree: TreeSliceNode, radius: number): Sunb
     })
 }
 
-function withOmittedBuckets(node: TreeSliceNode): TreeSliceNode {
+export function withOmittedBuckets(node: TreeSliceNode): TreeSliceNode {
   const children = node.children.map(withOmittedBuckets)
   // Both hosts report subtree-wide omission totals. Descendant omissions already
   // belong to their own rings; adding them here again inflates every ancestor.

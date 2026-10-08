@@ -4,12 +4,16 @@
   import { Folder, File, ArrowUpLeft } from '@lucide/svelte'
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
   import { buildSunburstSegments } from '../../lib/sunburst'
+  import type { ChartMode } from '../../lib/treemap'
   import { formatBytes } from '../../lib/format'
   import { formatNodeSize } from '../../lib/node-size'
+  import ChartModeToggle from './ChartModeToggle.svelte'
 
   interface Props {
     tree: TreeSliceNode | null
     focusNode: TreeNodeSummary | null
+    mode: ChartMode
+    onModeChange: (mode: ChartMode) => void
     hoveredId: string | null
     hoveredNode?: TreeNodeSummary | null
     collectedIds: Set<string>
@@ -23,6 +27,8 @@
   let {
     tree,
     focusNode,
+    mode,
+    onModeChange,
     hoveredId,
     hoveredNode = null,
     collectedIds,
@@ -45,6 +51,7 @@
 <section class="chart-wrap" aria-label="Disk usage chart">
   <div class="chart-toolbar">
     <span class="chart-eyebrow">SPACE DISTRIBUTION</span>
+    <ChartModeToggle {mode} onModeChange={onModeChange} />
   </div>
   <div class="chart-stage macos:md:flex-1 windows:md:flex-1 linux:md:flex-1">
     {#key tree?.id}

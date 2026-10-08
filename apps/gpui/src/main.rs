@@ -17,6 +17,19 @@ use views::theme::apply_macos_theme;
 
 actions!(spacelens, [Quit]);
 
+/// The `SPACLENS_GPUI_THEME` override, read once at startup: appearance
+/// events re-sync the theme from the system, and without this the env hook
+/// would lose to the first synchronous appearance callback.
+static THEME_OVERRIDE: std::sync::OnceLock<ThemeMode> = std::sync::OnceLock::new();
+
+fn startup_theme_override() -> Option<ThemeMode> {
+  match std::env::var("SPACLENS_GPUI_THEME").as_deref() {
+    Ok("dark") => Some(ThemeMode::Dark),
+    Ok("light") => Some(ThemeMode::Light),
+    _ => None,
+  }
+}
+
 fn main() {
   application().with_assets(app_assets()).run(|cx| {
     init(cx);
@@ -42,16 +55,18 @@ fn main() {
     open_window(options, cx, |window, cx| {
       window.set_rem_size(px(14.));
       Theme::sync_system_appearance(Some(window), cx);
-      let mode = match std::env::var("SPACLENS_GPUI_THEME").as_deref() {
-        Ok("dark") => ThemeMode::Dark,
-        Ok("light") => ThemeMode::Light,
-        _ => cx.theme().mode,
-      };
-      apply_macos_theme(mode, cx);
+      let mode = startup_theme_override();
+      if let Some(mode) = mode {
+        let _ = THEME_OVERRIDE.set(mode);
+      }
+      apply_macos_theme(mode.unwrap_or_else(|| cx.theme().mode), cx);
       window
         .observe_window_appearance(|window, cx| {
           Theme::sync_system_appearance(Some(window), cx);
-          apply_macos_theme(cx.theme().mode, cx);
+          apply_macos_theme(
+            THEME_OVERRIDE.get().copied().unwrap_or_else(|| cx.theme().mode),
+            cx,
+          );
         })
         .detach();
       cx.new(|cx| AppState::new(window, cx))

@@ -17,7 +17,7 @@ path = "src/main.rs"
 # syntax-highlighting features, a disk tool pulls no parsers.
 gpui-kit = "0.7"
 # Published to crates.io as kuntu-scan; the path keeps local (submodule) builds.
-space-lens = { package = "kuntu-scan", version = "0.2", path = "../../vendors/kuntu/crates/kuntu-scan" }
+space-lens = { package = "kuntu-scan", version = "0.3", path = "../../vendors/kuntu/crates/kuntu-scan" }
 smol       = "2"
 rfd        = "0.15"
 serde      = { version = "1", features = ["derive"] }
