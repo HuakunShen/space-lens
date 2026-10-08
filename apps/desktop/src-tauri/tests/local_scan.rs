@@ -409,6 +409,10 @@ fn protected_scan_without_gitignore_classification_rejects_gitignored_discovery(
   assert_eq!(error.code, "UnsupportedOperation");
 }
 
+// The pinned local traversal backend is unix-only (kuntu NativeBackend
+// answers Unsupported elsewhere), so its cleanup flow can only be exercised
+// on unix — same gate as local_only_scan_reports_coverage… above.
+#[cfg(unix)]
 #[test]
 fn protected_cleanup_fails_closed_when_paths_change_between_plan_and_execute() {
   let fixture = Fixture::new();
@@ -473,6 +477,7 @@ fn protected_cleanup_fails_closed_when_paths_change_between_plan_and_execute() {
   );
 }
 
+#[cfg(unix)]
 #[test]
 fn protected_cleanup_executes_through_trash_or_reports_a_typed_failure() {
   let fixture = Fixture::new();
@@ -532,10 +537,12 @@ fn legacy_discovery_still_walks_the_filesystem_outside_protected_scans() {
     PreparedDiscovery::Walk(input) => {
       let data = run_discovery(input).unwrap();
       let page = store.finish_discovery(&request, Some(data)).unwrap();
+      // Component-wise match: the wire path is a String and its separator
+      // differs per platform.
       assert!(page
         .items
         .iter()
-        .any(|item| item.node.path.ends_with("data/file")));
+        .any(|item| Path::new(&item.node.path).ends_with("data/file")));
     }
     _ => panic!("legacy scans still discover through the filesystem walk"),
   }
