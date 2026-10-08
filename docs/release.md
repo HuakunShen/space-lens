@@ -1,7 +1,27 @@
 # Release Process
 
-How every Space Lens artifact gets out the door. Last verified 2026-09-26
-(spacelens 0.2.9 / kuntu-scan 0.2.0).
+How every Space Lens artifact gets out the door. Last verified 2026-10-09
+(spacelens 0.3.2 / desktop app 0.3.0).
+
+## `releases/latest` must point at the `app-v*` release — always
+
+The desktop updater endpoint and the Homebrew cask livecheck both read
+`https://github.com/HuakunShen/space-lens/releases/latest`:
+
+- Tauri updater: `releases/latest/download/latest.json` (uploaded by
+  tauri-action only to `app-v*` releases).
+- Cask `space-lens` livecheck: `releases/latest` tag name minus `app-v`.
+
+Publishing a `cli-v*` release **steals the latest marker** (newest published
+release wins by default), which silently 404s the updater and blanks the cask
+livecheck — exactly what happened between cli-v0.3.1 (2026-10-05) and
+app-v0.3.0. After publishing any release, finish with:
+
+```bash
+gh release edit app-v<version> --latest   # pin latest back to the desktop app
+```
+
+Verify: `curl -sIL https://github.com/HuakunShen/space-lens/releases/latest/download/latest.json -o /dev/null -w '%{http_code}\n'` → 200.
 
 ## Version layout
 
@@ -11,7 +31,7 @@ How every Space Lens artifact gets out the door. Last verified 2026-09-26
 | Discovery library `spacelens-discovery` | `crates/discovery` (workspace version) | crates.io |
 | CLI `spacelens` (bin `spacelens`) | root `Cargo.toml` `[workspace.package] version` | crates.io + GitHub release + Homebrew tap |
 | npm package `space-lens` | `packages/node/package.json` | npm |
-| Desktop app | Tauri config, tagged `app-v*` | GitHub release (dmg) via `workbench.yml` |
+| Desktop app | Tauri config, tagged `app-v*` | GitHub release (dmg + cask + updater `latest.json`) via `workbench.yml` |
 
 The workspace Cargo version and the npm package.json version are **independent
 files** — bump the one you are releasing. Note the tag prefixes are
@@ -75,6 +95,21 @@ cd "$TAP_CLONE" && git commit -am "spacelens <version>" && git push
 
 Verify locally: `brew reinstall HuakunShen/homebrew-tap/spacelens && spacelens --version`.
 (`brew audit` is nice but optional.)
+
+## 2b. Desktop app (`app-v*`) release
+
+1. Bump `apps/desktop/src-tauri/tauri.conf.json` `version`, commit, push.
+2. `git tag app-v<version> && git push origin app-v<version>` — workbench.yml
+   runs the js/desktop-test gates, then tauri-action bundles dmg/deb/AppImage/
+   NSIS **plus the updater artifacts (`latest.json` + `.sig`)**, attaches the
+   vsix, and renders the Homebrew cask (`scripts/render-cask.py` →
+   `space-lens.rb` on the release). Requires the `TAURI_SIGNING_PRIVATE_KEY`
+   secrets — without them the updater artifacts are silently skipped.
+3. Pin latest (see the top of this file): `gh release edit app-v<version> --latest`.
+4. Copy the rendered cask into the tap and push:
+   `gh release download app-v<version> -p space-lens.rb -O "$TAP_CLONE/Casks/space-lens.rb"`.
+5. Verify the in-app updater sees it:
+   `curl -sL …/releases/latest/download/latest.json | jq -r .version`.
 
 ## 3. npm release
 
