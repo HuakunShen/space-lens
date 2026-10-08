@@ -18,7 +18,7 @@
 class Spacelens < Formula
   desc "Scan disk usage and find cleanup candidates for development projects"
   homepage "https://github.com/HuakunShen/space-lens"
-  version "0.3.1"
+  version "0.3.2"
   license "MIT"
 
   livecheck do
@@ -34,20 +34,20 @@ class Spacelens < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/HuakunShen/space-lens/releases/download/cli-v#{version}/spacelens-aarch64-apple-darwin-v#{version}.tar.gz"
-      sha256 "cb75016cfef1e4b88df0375e2ec46a9deb0f8daabc9d0d0e380b0b2377204ead"
+      sha256 "815b84093759f3ab6425269c389ff6b283b6dcc67cfcfdbde36fa1c00978cfac"
     else
       url "https://github.com/HuakunShen/space-lens/releases/download/cli-v#{version}/spacelens-x86_64-apple-darwin-v#{version}.tar.gz"
-      sha256 "c7e1091a4b9d3303070f2f7bc9edbcf650aa32f73d69b39d5f3c976d734addd9"
+      sha256 "21d01210efc73ed657da050e5260b8c311a8e37e1dc2e2ca34570b6bfe78c1a2"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/HuakunShen/space-lens/releases/download/cli-v#{version}/spacelens-aarch64-unknown-linux-musl-v#{version}.tar.gz"
-      sha256 "94b027b1be790d5e6380fa48393cb34d74da3f8bf3a021435b53d208004ba29d"
+      sha256 "50bd967e13bfda0d5b8134e04a6df57b4ddcc4c5a0f33a16731f2adbccfe41d9"
     else
       url "https://github.com/HuakunShen/space-lens/releases/download/cli-v#{version}/spacelens-x86_64-unknown-linux-musl-v#{version}.tar.gz"
-      sha256 "0fc37a2bb92facdbf9a250fb4ed1404acb82be8a5ce2610084e7d65090b299f1"
+      sha256 "8ae7d653d4c56424504edbdf0dc54a03c6c6a460130fc3dd128a15c5e585409e"
     end
   end
 
