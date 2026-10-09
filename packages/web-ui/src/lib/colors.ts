@@ -1,60 +1,33 @@
 import type { HierarchyNode } from 'd3-hierarchy'
 import type { TreeSliceNode } from '../types'
+import { CONCEPT_PALETTE, namedConceptFamily } from './concept-palette.ts'
 
 /**
- * Hue families, in degrees. One branch of the tree draws from a single
+ * Color families sampled from the concept images. One branch of the tree draws from a single
  * family, so a folder and its contents read as a set of tints rather than a
  * scatter of unrelated colors — the difference between "these belong
  * together" and "these are nine arbitrary pastels".
  */
-const HUE_FAMILIES = [212, 268, 148, 32, 336, 186, 46, 240, 88, 6]
+const COLOR_FAMILIES = CONCEPT_PALETTE.filter((family) => family.name !== 'gray')
 
-/** The original sunburst palette; no text is painted on these light segments. */
-const SUNBURST_PALETTE = [
-  '#f8d66d',
-  '#d8f96a',
-  '#a7f06b',
-  '#6ee7a8',
-  '#5eead4',
-  '#67e8f9',
-  '#93c5fd',
-  '#c4b5fd',
-  '#f0abfc',
-]
-
-export function sunburstColor(id: string, depth: number): string {
-  return SUNBURST_PALETTE[Math.abs(hash(id) + depth * 17) % SUNBURST_PALETTE.length] ?? SUNBURST_PALETTE[0]
+/** All chart families share the same folder identity color. */
+export function sunburstColor(id: string, depth: number, familySeed: string = id, familyName?: string): string {
+  return nodeColor(id, depth, familySeed, familyName)
 }
-
-/**
- * Lightness and saturation per level. Depth then reads off the chart
- * without a legend: children are a step lighter or deeper than their
- * parent, and the cycle is short enough that no level collides with the
- * one directly above it.
- */
-const LEVEL_TINTS = [
-  { lightness: 54, saturation: 80 },
-  { lightness: 62, saturation: 76 },
-  { lightness: 48, saturation: 82 },
-  { lightness: 66, saturation: 70 },
-]
 
 /**
  * The color for one node.
  *
  * `familySeed` is the id of the branch's top-level ancestor; it owns the
- * hue. The node's own id nudges the hue a few degrees inside the family so
- * siblings stay apart, and `depth` picks the tint. It defaults to coloring
- * by the node's own id, which is what a caller with no ancestry to offer (a
- * flat list row, a legend swatch) wants.
+ * color. Known disk categories use the artwork's assignment; other branches
+ * use a stable ID hash. Depth never changes the hue when switching charts.
  */
-export function nodeColor(id: string, depth: number, familySeed: string = id): string {
-  const level = Math.max(1, depth)
-  const family = HUE_FAMILIES[Math.abs(hash(familySeed)) % HUE_FAMILIES.length] ?? HUE_FAMILIES[0]
-  const offset = (Math.abs(hash(id)) % 23) - 11
-  const hue = (((family + offset + (level - 1) * 5) % 360) + 360) % 360
-  const tint = LEVEL_TINTS[(level - 1) % LEVEL_TINTS.length] ?? LEVEL_TINTS[0]
-  return `hsl(${hue}, ${tint.saturation}%, ${tint.lightness}%)`
+export function nodeColor(id: string, _depth: number, familySeed: string = id, familyName?: string): string {
+  const family =
+    namedConceptFamily(familyName ?? '') ??
+    COLOR_FAMILIES[Math.abs(hash(familySeed)) % COLOR_FAMILIES.length] ??
+    COLOR_FAMILIES[0]
+  return family.treemap[0]
 }
 
 /**
@@ -69,15 +42,15 @@ export function nodeMutedColor(depth: number): string {
 /**
  * The color for one laid-out hierarchy node. Every chart builder funnels
  * through here, so the sunburst, treemap, icicle, bubbles, and strips agree
- * on a node's color and drilling into a folder never re-hues it.
+ * on a node's color within the same focused folder.
  */
 export function branchColor(node: HierarchyNode<TreeSliceNode>): string {
   if (node.data.ignored) return nodeMutedColor(node.data.depth)
   // `ancestors()` runs self-first, root-last, so the depth-1 node is second
   // from the end. A depth-1 node is its own family, and the root has no
   // family to borrow, so both fall back to the node's own id.
-  const family = node.ancestors().at(-2)?.data.id ?? node.data.id
-  return nodeColor(node.data.id, node.data.depth, family)
+  const family = node.ancestors().at(-2)?.data ?? node.data
+  return nodeColor(node.data.id, node.data.depth, family.id, family.name)
 }
 
 function hash(input: string): number {

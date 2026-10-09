@@ -104,7 +104,7 @@ export function buildStripRows(tree: TreeSliceNode): StripRow[] {
               depth: node.depth,
               childCount: node.childCount,
               share: leafValue(node) / rowTotal,
-              color: segmentColor(node, child.id),
+              color: segmentColor(node, child.id, child.name),
               isAggregate: node.id === `${child.id}:omitted`,
               ignored: node.ignored,
               hasChildren: node.hasChildren,
@@ -172,9 +172,9 @@ function byMeasuredSizeDesc(left: TreeSliceNode, right: TreeSliceNode): number {
  * segment inherits the family its parent row established.
  */
 function rowColor(node: TreeSliceNode): string {
-  return node.ignored ? nodeMutedColor(node.depth) : nodeColor(node.id, node.depth, node.id)
+  return node.ignored ? nodeMutedColor(node.depth) : nodeColor(node.id, node.depth, node.id, node.name)
 }
 
-function segmentColor(node: TreeSliceNode, family: string): string {
-  return node.ignored ? nodeMutedColor(node.depth) : nodeColor(node.id, node.depth, family)
+function segmentColor(node: TreeSliceNode, family: string, familyName: string): string {
+  return node.ignored ? nodeMutedColor(node.depth) : nodeColor(node.id, node.depth, family, familyName)
 }

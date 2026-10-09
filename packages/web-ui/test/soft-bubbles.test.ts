@@ -5,8 +5,11 @@ import { buildBubbleCircles, type BubbleCircle } from '../src/lib/bubbles.ts'
 import { area, centroid, circlePoints, inside, nearest, reach, resample } from '../src/lib/soft-bubbles/geometry.ts'
 import {
   MAX_MEMBRANES,
+  PARENT_VERTEX_COUNT,
+  CHILD_VERTEX_COUNT,
   MIN_MEMBRANE_RADIUS,
   SoftBubbleWorld,
+  bubbleAtPoint,
   type SoftBubbleSnapshot,
 } from '../src/lib/soft-bubbles/world.ts'
 import type { TreeSliceNode } from '../src/types.ts'
@@ -91,20 +94,42 @@ for (const [name, fixture] of [
   ['ordinary 6 × 4 tree', ordinary],
   ['300-grandchild node_modules tree', largeDirectory],
 ] satisfies [string, () => BubbleCircle[]][]) {
-  test(`${name}: initial contours exactly match ECharts circles and sleeping steps never drift`, () => {
+  test(`${name}: initial contours retain canonical POC particles and sleeping steps never drift`, () => {
     const circles = fixture()
     const world = new SoftBubbleWorld(circles, 6)
     const seed = world.snapshot()
     assert.equal(seed.length, circles.length)
     for (const body of seed)
-      assert.deepEqual(body.points, circlePoints(body.circle.x + 6, body.circle.y + 6, body.r, 64))
+      assert.deepEqual(
+        body.points,
+        resample(
+          circlePoints(
+            body.circle.x + 6,
+            body.circle.y + 6,
+            body.r,
+            body.kind === 'passenger' ? 64 : body.parentId ? CHILD_VERTEX_COUNT : PARENT_VERTEX_COUNT,
+          ),
+          64,
+        ),
+      )
     for (let step = 0; step < 300; step += 1) world.step()
     assert.deepEqual(world.snapshot(), seed)
     assert.equal(world.isAtRest(), true)
     assertState(seed)
     for (const body of world.snapshot(128)) {
       assert.equal(body.points.length, 128)
-      assert.deepEqual(body.points, circlePoints(body.circle.x + 6, body.circle.y + 6, body.r, 128))
+      assert.deepEqual(
+        body.points,
+        resample(
+          circlePoints(
+            body.circle.x + 6,
+            body.circle.y + 6,
+            body.r,
+            body.kind === 'passenger' ? 128 : body.parentId ? CHILD_VERTEX_COUNT : PARENT_VERTEX_COUNT,
+          ),
+          128,
+        ),
+      )
     }
   })
 }
@@ -210,15 +235,18 @@ test('a drag released before the first animation frame still deforms and rebound
   assert.equal(world.isAtRest(), true)
 })
 
-test('compressed equilibrium stays deformed while sleeping and is the rebound destination', () => {
+test('compressed equilibrium preserves an exact handoff and sleeps in its actual settled pose', () => {
   const circles = ordinary()
   const settled = new SoftBubbleWorld(circles, 6).compressedRest(0.55)
   assertState(settled)
   const parents = settled.filter((body) => !body.parentId)
-  assert.ok(parents.some((body) => {
-    const radii = body.points.map((p) => Math.hypot(p.x - body.cx, p.y - body.cy))
-    return Math.max(...radii) - Math.min(...radii) > 4
-  }), 'contact should visibly flatten a resting parent, not just move a circle')
+  assert.ok(
+    parents.some((body) => {
+      const radii = body.points.map((p) => Math.hypot(p.x - body.cx, p.y - body.cy))
+      return Math.max(...radii) - Math.min(...radii) > 4
+    }),
+    'contact should visibly flatten a resting parent, not just move a circle',
+  )
   const world = new SoftBubbleWorld(circles, 6, settled)
   assert.deepEqual(world.snapshot(), settled, 'static-to-Canvas handoff is exact')
   for (let i = 0; i < 300; i++) world.step()
@@ -229,5 +257,61 @@ test('compressed equilibrium stays deformed while sleeping and is the rebound de
   world.release()
   for (let i = 0; i < 600 && !world.isAtRest(); i++) world.step()
   assert.equal(world.isAtRest(), true)
-  assert.deepEqual(world.snapshot(), settled, 'release returns to the compressed contour')
+  const final = world.snapshot()
+  for (let i = 0; i < 300; i++) world.step()
+  assert.deepEqual(world.snapshot(), final, 'settled contours never shimmer or run idle physics')
+  assert.deepEqual(
+    new SoftBubbleWorld(circles, 6, final).snapshot(),
+    final,
+    'next gesture keeps the same canonical particle state',
+  )
+})
+
+function touchingPair(): BubbleCircle[] {
+  return [200, 365].map((x, i) => ({
+    id: `pair-${i}`,
+    name: `pair-${i}`,
+    path: `/pair-${i}`,
+    size: 100,
+    depth: 1,
+    childCount: 0,
+    share: 0.5,
+    color: '#6e40b8',
+    x,
+    y: 200,
+    r: 80,
+    labelVisible: true,
+    isAggregate: false,
+    hasChildren: false,
+    node: node(`pair-${i}`),
+  }))
+}
+function radialVariation(body: SoftBubbleSnapshot): number {
+  const radii = body.points.map((point) => Math.hypot(point.x - body.cx, point.y - body.cy))
+  return Math.max(...radii) - Math.min(...radii)
+}
+
+test('a squeezed bubble rounds out when pulled clear of its neighbor, like the POC membrane', () => {
+  const circles = touchingPair()
+  const resting = new SoftBubbleWorld(circles).compressedRest()
+  const initial = resting[0]
+  assert.ok(radialVariation(initial) > 6)
+  const world = new SoftBubbleWorld(circles, 0, resting)
+  world.drag(initial.id, { x: initial.cx - 160, y: initial.cy })
+  for (let step = 0; step < 180; step++) world.step()
+  const pulled = world.snapshot()[0]
+  assert.ok(Math.abs(pulled.cx - initial.cx) > 100)
+  assert.ok(
+    radialVariation(pulled) < radialVariation(initial) / 3,
+    'a contact patch must relax in free space instead of being baked into the spring shape',
+  )
+})
+
+test('the first pointer press targets the visible child; Alt targets its parent without an ECharts mouse event', () => {
+  const scene = new SoftBubbleWorld(ordinary(), 6).compressedRest()
+  const child = getBody(scene, 'p0/c0')
+  const point = { x: child.cx, y: child.cy }
+  assert.equal(bubbleAtPoint(scene, point)?.id, child.id)
+  assert.equal(bubbleAtPoint(scene, point, true)?.id, 'p0')
+  assert.equal(bubbleAtPoint(scene, { x: -500, y: -500 }), undefined)
 })

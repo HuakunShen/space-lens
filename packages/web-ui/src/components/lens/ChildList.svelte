@@ -38,7 +38,7 @@
   }: Props = $props()
 
   function itemColor(item: TreeNodeSummary): string {
-    return item.ignored ? nodeMutedColor(item.depth) : colorMode === 'sunburst' ? sunburstColor(item.id, item.depth) : nodeColor(item.id, item.depth)
+    return item.ignored ? nodeMutedColor(item.depth) : colorMode === 'sunburst' ? sunburstColor(item.id, item.depth, item.id, item.name) : nodeColor(item.id, item.depth, item.id, item.name)
   }
 
   // One collector verb per row state: a collected row offers removal, the rest

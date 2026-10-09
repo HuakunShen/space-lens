@@ -1,3 +1,5 @@
+import { conceptFamily } from './concept-palette.ts'
+
 /** Keep hue families while guaranteeing readable white text on every surface. */
 export function chartSurfaceColor(source: string): string {
   const hsl = /^hsl\(([\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)$/.exec(source)
@@ -32,7 +34,9 @@ export function chartSurfaceColor(source: string): string {
   return hex(rgb)
 }
 
-export function chartMaterial(source: string) {
+export function chartMaterial(source: string, mode: 'treemap' | 'icicle' | 'strips' | 'sunburst' = 'treemap') {
+  const family = conceptFamily(source)
+  if (family) return sampledMaterial(family[mode === 'sunburst' ? 'treemap' : mode])
   const color = chartSurfaceColor(source)
   const darker = hex([1, 3, 5].map((start) => Number.parseInt(color.slice(start, start + 2), 16) * 0.83))
   return {
@@ -48,21 +52,50 @@ export function chartMaterial(source: string) {
   }
 }
 
-/** Keep a visible hue in the membrane, with lighter contents in the same family. */
-export function bubbleMaterial(source: string, parent: boolean, theme: 'dark' | 'light' = 'dark') {
-  const color = chartSurfaceColor(source)
-  const rgb = [1, 3, 5].map((start) => Number.parseInt(color.slice(start, start + 2), 16))
-  const tint = parent ? (theme === 'dark' ? 0.88 : 1) : (theme === 'dark' ? 0.9 : 0.8)
-  const blend = parent ? 26 : 255
-  return chartMaterial(hex(rgb.map((channel) => channel * tint + blend * (1 - tint))))
+export const BUBBLE_TEXT_COLOR = '#ffffff'
+export const BUBBLE_TEXT_SHADOW = 'rgba(18,42,70,0.45)'
+/** Exact sampled bubble stops; theme changes do not desaturate the artwork. */
+export function bubbleMaterial(source: string, _parent: boolean, _theme: 'dark' | 'light' = 'dark') {
+  const family = conceptFamily(source)
+  return family ? sampledMaterial(family.bubbles) : chartMaterial(source)
 }
 
-/** Resting bubbles have no outline; focus and selection remain identifiable. */
-export function bubbleStyle(source: string, parent: boolean, selected: boolean, highlighted = false, theme: 'dark' | 'light' = 'dark') {
+function sampledMaterial(colors: readonly string[]) {
   return {
-    fill: bubbleMaterial(source, parent, theme),
-    stroke: highlighted ? 'rgba(255,255,255,0.9)' : selected ? '#fff' : 'transparent',
-    lineWidth: highlighted ? 1.5 : selected ? 2 : 0,
+    type: 'linear' as const,
+    x: 0,
+    y: 0,
+    x2: 0.8,
+    y2: 1,
+    colorStops: colors.map((color, index) => ({ offset: index / (colors.length - 1), color })),
+  }
+}
+
+/** Bubble feedback stays in the material, without outlining moving membranes. */
+export function bubbleStyle(
+  source: string,
+  parent: boolean,
+  selected: boolean,
+  highlighted = false,
+  theme: 'dark' | 'light' = 'dark',
+) {
+  const material = bubbleMaterial(source, parent, theme)
+  const lift = selected ? 0.18 : highlighted ? 0.1 : 0
+  const fill = lift
+    ? {
+        ...material,
+        colorStops: material.colorStops.map((stop) => ({
+          ...stop,
+          color: hex(
+            [1, 3, 5].map((start) => Number.parseInt(stop.color.slice(start, start + 2), 16) * (1 - lift) + 255 * lift),
+          ),
+        })),
+      }
+    : material
+  return {
+    fill,
+    stroke: 'transparent',
+    lineWidth: 0,
   }
 }
 

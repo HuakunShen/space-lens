@@ -24,7 +24,6 @@ interface MembraneBody extends BodyBase {
   points: Point[]
   previous: Point[]
   seedPoints: Point[]
-  originalPoints: Point[]
   gradients: Point[]
   area: number
   edge: number[]
@@ -44,9 +43,24 @@ export interface SoftBubbleSnapshot {
   parentId: string | null
   circle: BubbleCircle
   points: Point[]
+  /** Canonical solver vertices (40/24), separate from the 64 display samples. */
+  vertices: Point[]
+  pressure: number
   cx: number
   cy: number
   r: number
+}
+
+/** Pick the actually painted layer directly from a PointerEvent's chart position. */
+export function bubbleAtPoint(
+  scene: readonly SoftBubbleSnapshot[],
+  point: Point,
+  parent = false,
+): SoftBubbleSnapshot | undefined {
+  const hit =
+    scene.find((body) => body.parentId !== null && inside(point, body.points)) ??
+    scene.find((body) => body.parentId === null && inside(point, body.points))
+  return parent && hit?.parentId ? scene.find((body) => body.id === hit.parentId) : hit
 }
 
 function clamp(value: number, low: number, high: number): number {
@@ -66,7 +80,6 @@ function createMembrane(circle: BubbleCircle, offset: number, count: number): Me
     points,
     previous: points.map((point) => ({ ...point })),
     seedPoints: points.map((point) => ({ ...point })),
-    originalPoints: points.map((point) => ({ ...point })),
     gradients: points.map(() => ({ x: 0, y: 0 })),
     area: area(points),
     edge: points.map(() => 2 * circle.r * Math.sin(Math.PI / count)),
@@ -86,12 +99,12 @@ export class SoftBubbleWorld {
   private active = false
   private releaseSteps = 0
   private pendingDragStep = false
+  private pressure = 0
+  private quietSteps = 0
 
   private compression: Map<string, Point> | null = null
-  private readonly offset: number
 
   constructor(circles: readonly BubbleCircle[], offset = 0, rest: readonly SoftBubbleSnapshot[] = []) {
-    this.offset = offset
     const restById = new Map(rest.map((body) => [body.id, body]))
     const parentCircles = new Map<string, BubbleCircle>()
     const circleById = new Map(circles.map((circle) => [circle.id, circle]))
@@ -137,21 +150,12 @@ export class SoftBubbleWorld {
           }
       const baseline = restById.get(circle.id)
       if (baseline) {
-        body.seed = { x: baseline.cx, y: baseline.cy }
-        body.center = { ...body.seed }
+        body.center = { x: baseline.cx, y: baseline.cy }
         if (body.kind === 'membrane') {
-          body.points = baseline.points.map((point) => ({ ...point }))
-          body.previous = baseline.points.map((point) => ({ ...point }))
-          body.seedPoints = baseline.points.map((point) => ({ ...point }))
-          body.originalPoints = circlePoints(circle.x + offset, circle.y + offset, circle.r, body.points.length)
-          body.gradients = body.points.map(() => ({ x: 0, y: 0 }))
-          body.area = area(body.points)
-          const lengths = (skip: number) => body.points.map((p, i) => {
-            const q = body.points[(i + skip) % body.points.length]
-            return Math.hypot(p.x - q.x, p.y - q.y)
-          })
-          body.edge = lengths(1)
-          body.bend = lengths(3)
+          // Display samples must not become a new elastic rest shape. Keep
+          // POC's circular lengths/area and its canonical 40/24 particles.
+          body.points = baseline.vertices.map((point) => ({ ...point }))
+          body.previous = baseline.vertices.map((point) => ({ ...point }))
         }
       }
       this.bodies.push(body)
@@ -169,23 +173,37 @@ export class SoftBubbleWorld {
         else parent.passengers.push(body)
       } else if (body.kind === 'membrane') this.parents.push(body)
     }
+    if (rest.length) this.setPressure(rest[0].pressure)
+  }
+
+  private setPressure(pressure: number): void {
+    this.pressure = clamp(pressure, 0, 1)
+    const center = centroid(this.parents.map((body) => body.seed))
+    const factor = 1 - this.pressure * 0.25
+    this.compression =
+      this.pressure > 0
+        ? new Map(
+            this.parents.map((body) => [
+              body.circle.id,
+              {
+                x: center.x + (body.seed.x - center.x) * factor,
+                y: center.y + (body.seed.y - center.y) * factor,
+              },
+            ]),
+          )
+        : null
   }
 
   /** Solve POC-style pressure once; ECharts holds these contours without an idle RAF. */
   compressedRest(pressure = 0.55): SoftBubbleSnapshot[] {
     if (!this.parents.length || pressure <= 0) return this.snapshot()
-    const center = centroid(this.parents.map((body) => body.seed))
-    const factor = 1 - clamp(pressure, 0, 1) * 0.25
-    this.compression = new Map(this.parents.map((body) => [body.circle.id, {
-      x: center.x + (body.seed.x - center.x) * factor,
-      y: center.y + (body.seed.y - center.y) * factor,
-    }]))
+    this.setPressure(pressure)
     // Start at the compressed anchors so even a dense view gets contact
     // deformation in its first step. Warm-up has a small UI-thread budget;
     // dragging still uses the full solver and its frame-time downgrade.
     for (const body of this.bodies) {
       const parent = body.parentBody ?? (body.kind === 'membrane' ? body : null)
-      const target = parent ? this.compression.get(parent.circle.id) : undefined
+      const target = parent ? this.compression?.get(parent.circle.id) : undefined
       if (!parent || !target) continue
       const dx = target.x - parent.seed.x
       const dy = target.y - parent.seed.y
@@ -204,7 +222,6 @@ export class SoftBubbleWorld {
       this.step()
       if (performance.now() >= deadline) break
     }
-    this.compression = null
     this.active = false
     return this.snapshot()
   }
@@ -217,6 +234,7 @@ export class SoftBubbleWorld {
     this.dragging = { body, point: { ...point } }
     this.active = true
     this.releaseSteps = 0
+    this.quietSteps = 0
     this.pendingDragStep = true
     return true
   }
@@ -241,8 +259,11 @@ export class SoftBubbleWorld {
         dragging && this.dragging
           ? this.dragging.point
           : body.parentBody
-            ? { x: body.parentBody.center.x + body.local.x, y: body.parentBody.center.y + body.local.y }
-            : this.compression?.get(body.circle.id) ?? body.seed
+            ? {
+                x: centroid(body.parentBody.points).x + body.local.x,
+                y: centroid(body.parentBody.points).y + body.local.y,
+              }
+            : (this.compression?.get(body.circle.id) ?? body.seed)
       const pull = dragging ? (body.parentBody ? 0.02 : 0.016) : body.parentBody ? 0.006 : 0.0045
       this.integrate(body, target, pull, timeScale)
     }
@@ -272,10 +293,32 @@ export class SoftBubbleWorld {
     }
     for (const body of this.membranes) body.center = centroid(body.points)
     for (const parent of this.membranes) this.positionPassengers(parent)
-    if (!this.dragging && !this.compression && this.isAtRest()) this.resetToSeed()
+    if (!this.dragging) {
+      if (!this.compression) {
+        if (this.matchesSeed()) this.resetToSeed()
+      } else {
+        // Like the POC, freeze the actual settled pose, not an interpolated
+        // copy of the opening layout. The renderer receives this same pose.
+        let energy = 0
+        let count = 0
+        for (const body of this.membranes) {
+          for (let i = 0; i < body.points.length; i++) {
+            energy += (body.points[i].x - body.previous[i].x) ** 2 + (body.points[i].y - body.previous[i].y) ** 2
+            count++
+          }
+        }
+        this.quietSteps = energy / Math.max(count, 1) < 0.001 ? this.quietSteps + timeScale : 0
+        this.releaseSteps += timeScale
+        if (this.quietSteps >= 90 || this.releaseSteps >= 420) this.active = false
+      }
+    }
   }
 
   isAtRest(): boolean {
+    return !this.active
+  }
+
+  private matchesSeed(): boolean {
     if (this.dragging) return false
     for (const body of this.membranes) {
       for (let index = 0; index < body.points.length; index += 1) {
@@ -298,26 +341,19 @@ export class SoftBubbleWorld {
 
   snapshot(sampleCount = 64): SoftBubbleSnapshot[] {
     return this.bodies.map((body) => {
-      let points = circlePoints(body.circle.x + this.offset, body.circle.y + this.offset, body.circle.r, sampleCount)
-      if (body.kind === 'membrane') {
-        const displacements = resample(
-          body.points.map((point, index) => ({
-            x: point.x - body.originalPoints[index].x,
-            y: point.y - body.originalPoints[index].y,
-          })),
-          sampleCount,
-        )
-        points = points.map((point, index) => ({
-          x: point.x + displacements[index].x,
-          y: point.y + displacements[index].y,
-        }))
-      } else points = circlePoints(body.center.x, body.center.y, body.circle.r, sampleCount)
+      const vertices =
+        body.kind === 'membrane'
+          ? body.points.map((point) => ({ ...point }))
+          : circlePoints(body.center.x, body.center.y, body.circle.r, sampleCount)
+      const points = resample(vertices, sampleCount)
       return {
         id: body.circle.id,
         kind: body.kind,
         parentId: body.parentBody?.circle.id ?? null,
         circle: body.circle,
         points,
+        vertices,
+        pressure: this.pressure,
         cx: body.center.x,
         cy: body.center.y,
         r: body.circle.r,
@@ -348,14 +384,8 @@ export class SoftBubbleWorld {
       const x = point.x
       const y = point.y
       const seed = body.seedPoints[index]
-      point.x +=
-        clamp((x - previous.x) * 0.88 ** timeScale, -4, 4) +
-        ax +
-        (center.x + seed.x - body.seed.x - x) * 0.001
-      point.y +=
-        clamp((y - previous.y) * 0.88 ** timeScale, -4, 4) +
-        ay +
-        (center.y + seed.y - body.seed.y - y) * 0.001
+      point.x += clamp((x - previous.x) * 0.88 ** timeScale, -4, 4) + ax + (center.x + seed.x - body.seed.x - x) * 0.001
+      point.y += clamp((y - previous.y) * 0.88 ** timeScale, -4, 4) + ay + (center.y + seed.y - body.seed.y - y) * 0.001
       previous.x = x
       previous.y = y
     }
@@ -376,8 +406,10 @@ export class SoftBubbleWorld {
 
   private constrain(body: MembraneBody): void {
     const count = body.points.length
-    for (let index = 0; index < count; index += 1) this.distance(body, index, (index + 1) % count, body.edge[index], 0.78)
-    for (let index = 0; index < count; index += 1) this.distance(body, index, (index + 3) % count, body.bend[index], 0.055)
+    for (let index = 0; index < count; index += 1)
+      this.distance(body, index, (index + 1) % count, body.edge[index], 0.78)
+    for (let index = 0; index < count; index += 1)
+      this.distance(body, index, (index + 3) % count, body.bend[index], 0.055)
     let norm = 0
     for (let index = 0; index < count; index += 1) {
       const previous = body.points[(index + count - 1) % count]

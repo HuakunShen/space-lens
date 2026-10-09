@@ -1,6 +1,6 @@
 /** Paint the temporary soft-body layer using the static ECharts materials and seed labels. */
 import { BUBBLE_FONT, type BubbleLabel } from '../bubble-label.ts'
-import { bubbleStyle, gradientInBounds } from '../chart-material.ts'
+import { BUBBLE_TEXT_COLOR, BUBBLE_TEXT_SHADOW, bubbleStyle, gradientInBounds } from '../chart-material.ts'
 import type { Point } from './geometry.ts'
 import type { SoftBubbleSnapshot } from './world.ts'
 
@@ -33,6 +33,9 @@ export function paintSoftBubbles(
   bodies: readonly SoftBubbleSnapshot[],
   options: PaintOptions,
 ): void {
+  context.save()
+  context.shadowBlur = 0
+  context.shadowOffsetY = 0
   context.clearRect(0, 0, options.width, options.height)
   // ECharts uses z2=0 for parents and z2=2 for children; their labels sit above all paths.
   for (const childLayer of [false, true]) {
@@ -68,14 +71,14 @@ export function paintSoftBubbles(
       outline(context, body.points)
       context.fillStyle = gradient
       context.fill()
-      context.strokeStyle = style.stroke
-      context.lineWidth = style.lineWidth
-      context.stroke()
     }
   }
   context.textAlign = 'center'
   context.textBaseline = 'middle'
-  context.fillStyle = '#fff'
+  context.fillStyle = BUBBLE_TEXT_COLOR
+  context.shadowColor = BUBBLE_TEXT_SHADOW
+  context.shadowBlur = 3
+  context.shadowOffsetY = 1
   for (const body of bodies) {
     const label = options.labels.get(body.id)
     if (!label?.text) continue
@@ -88,4 +91,5 @@ export function paintSoftBubbles(
       if (line) context.fillText(line, x, y + (index - (lines.length - 1) / 2) * label.lineHeight)
     }
   }
+  context.restore()
 }

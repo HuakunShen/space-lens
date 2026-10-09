@@ -51,10 +51,18 @@ const BUBBLE_PADDING = 5
  * Depth 0 is kept so the caller can paint it as one faint backdrop, the way
  * a pack reads as a single body rather than a scattered field.
  */
-export function buildBubbleCircles(tree: TreeSliceNode, width: number, height: number): BubbleCircle[] {
+export function buildBubbleCircles(
+  tree: TreeSliceNode,
+  width: number,
+  height: number,
+  maxDepth: 1 | 2 = BUBBLE_MAX_DEPTH,
+): BubbleCircle[] {
   if (width <= 0 || height <= 0) return []
-  const root = hierarchy(withOmittedBuckets(tree))
-    .sum((node) => (node.children.length > 0 ? 0 : Math.max(1, node.size)))
+  const data = withOmittedBuckets(tree)
+  const root = hierarchy(data, (node) => (maxDepth === 1 && node !== data ? undefined : node.children))
+    .sum((node) =>
+      maxDepth === 1 && node !== data ? Math.max(1, node.size) : node.children.length > 0 ? 0 : Math.max(1, node.size),
+    )
     .sort((left, right) => (right.value ?? 0) - (left.value ?? 0))
 
   const packed = pack<TreeSliceNode>().size([width, height]).padding(BUBBLE_PADDING)(root)
@@ -77,7 +85,7 @@ export function buildBubbleCircles(tree: TreeSliceNode, width: number, height: n
 
   return packed
     .descendants()
-    .filter((node) => node.depth <= BUBBLE_MAX_DEPTH && node.r >= MIN_RADIUS && (node.depth > 0 || hasNested))
+    .filter((node) => node.depth <= maxDepth && node.r >= MIN_RADIUS && (node.depth > 0 || hasNested))
     .map((node) => ({
       id: node.data.id,
       name: node.data.name,

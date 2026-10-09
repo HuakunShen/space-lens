@@ -7,8 +7,8 @@ import { buildBubbleLabels, BUBBLE_FONT } from './bubble-label.ts'
 import { buildIcicleSegments, clipIcicleName } from './icicle.ts'
 import { buildStripRows } from './strips.ts'
 import { withOmittedBuckets } from './sunburst.ts'
-import { nodeColor, nodeMutedColor, sunburstColor } from './colors.ts'
-import { bubbleStyle, chartMaterial, chartSurfaceColor } from './chart-material.ts'
+import { nodeColor, nodeMutedColor } from './colors.ts'
+import { BUBBLE_TEXT_COLOR, BUBBLE_TEXT_SHADOW, bubbleStyle, chartMaterial } from './chart-material.ts'
 import { SoftBubbleWorld, type SoftBubbleSnapshot } from './soft-bubbles/world.ts'
 import { bubblePath } from './soft-bubbles/geometry.ts'
 import { formatNodeSize } from './node-size.ts'
@@ -31,6 +31,7 @@ interface DiskChartInput {
   collectedIds?: Set<string>
   textColor?: string
   theme?: 'dark' | 'light'
+  bubbleRest?: SoftBubbleSnapshot[]
 }
 
 export interface DiskChartModel {
@@ -42,7 +43,10 @@ export interface DiskChartModel {
 
 export const BUBBLE_CANVAS_INSET = 6
 
-const bubbleLayouts = new WeakMap<TreeSliceNode, { width: number; height: number; layout: NonNullable<DiskChartModel['bubbles']> }>()
+const bubbleLayouts = new WeakMap<
+  TreeSliceNode,
+  { width: number; height: number; layout: NonNullable<DiskChartModel['bubbles']> }
+>()
 
 const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 const EDGE = 'rgba(255,255,255,0.15)'
@@ -73,17 +77,16 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
   }
   const textColor = input.textColor ?? '#e8e8e8'
   const root = withOmittedBuckets(tree)
+  const familyNames = new Map(root.children.map((child) => [child.id, child.name]))
   const sourceColors = new Map<string, string>()
   function register(node: TreeSliceNode, parentId: string, family: string, dataIndex: number) {
     const color = node.ignored
       ? nodeMutedColor(node.depth)
-      : mode === 'sunburst'
-        ? sunburstColor(node.id, node.depth)
-        : nodeColor(node.id, node.depth, family)
+      : nodeColor(node.id, node.depth, family, familyNames.get(family) ?? node.name)
     sourceColors.set(node.id, color)
     nodes.set(node.id, {
       node,
-      color: mode === 'sunburst' ? color : chartSurfaceColor(color),
+      color,
       isAggregate: node.id === `${parentId}:omitted`,
       childCount: node.childCount,
       dataIndex,
@@ -110,7 +113,7 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
       const source = sourceColors.get(node.id) ?? ''
       const parentTile = mode === 'treemap' && children.length > 0
       const borderColor = parentTile
-        ? chartSurfaceColor(source)
+        ? chartMaterial(source).colorStops[0].color
         : mode === 'sunburst' && !collectedIds.has(node.id)
           ? '#101010'
           : selectedEdge(node.id)
@@ -121,7 +124,7 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
         value: leafValue(node),
         ...(children.length > 0 ? { children } : {}),
         itemStyle: {
-          color: mode === 'sunburst' ? source : chartMaterial(source),
+          color: chartMaterial(source),
           borderColor,
           borderWidth: parentTile ? 4 : selectedWidth(node.id),
           borderRadius: mode === 'treemap' ? 7 : 0,
@@ -129,9 +132,18 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
         label: {
           show: mode !== 'sunburst',
           color: '#fff',
+          textShadowColor: BUBBLE_TEXT_SHADOW,
+          textShadowBlur: 3,
+          textShadowOffsetY: 1,
           formatter: () => (mode === 'treemap' ? `${name}\n${formatNodeSize(node)}` : name),
         },
-        upperLabel: { color: '#fff', formatter: () => `${name}   ${formatNodeSize(node)}` },
+        upperLabel: {
+          color: '#fff',
+          textShadowColor: BUBBLE_TEXT_SHADOW,
+          textShadowBlur: 3,
+          textShadowOffsetY: 1,
+          formatter: () => `${name}   ${formatNodeSize(node)}`,
+        },
         emphasis: {
           itemStyle: { borderColor: parentTile ? borderColor : EMPHASIS_EDGE, borderWidth: parentTile ? 4 : 2 },
           label: { show: mode !== 'sunburst', color: '#fff' },
@@ -217,18 +229,31 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
       render: () => CustomSeriesRenderItemReturn
     }[] = []
     function style(id: string, color: string) {
-      return { fill: chartMaterial(color), stroke: selectedEdge(id), lineWidth: selectedWidth(id) }
+      return {
+        fill: chartMaterial(color, mode === 'icicle' ? 'icicle' : 'strips'),
+        stroke: selectedEdge(id),
+        lineWidth: selectedWidth(id),
+      }
     }
     const emphasis = { style: { stroke: EMPHASIS_EDGE, lineWidth: 2 } }
     if (mode === 'bubbles') {
       const offset = BUBBLE_CANVAS_INSET
       let cached = bubbleLayouts.get(tree)
       if (!cached || cached.width !== width || cached.height !== height) {
-        const circles = buildBubbleCircles(tree, width - offset * 2, height - offset * 2).filter((circle) => circle.id !== root.id)
-        cached = { width, height, layout: { circles, offset, rest: new SoftBubbleWorld(circles, offset).compressedRest() } }
+        const circles = buildBubbleCircles(tree, width - offset * 2, height - offset * 2, 1).filter(
+          (circle) => circle.id !== root.id,
+        )
+        cached = {
+          width,
+          height,
+          layout: { circles, offset, rest: new SoftBubbleWorld(circles, offset).compressedRest() },
+        }
         bubbleLayouts.set(tree, cached)
       }
-      bubbles = cached.layout
+      bubbles =
+        input.bubbleRest?.length === cached.layout.rest.length
+          ? { ...cached.layout, rest: input.bubbleRest }
+          : cached.layout
       const { circles, rest } = bubbles
       const restById = new Map(rest.map((body) => [body.id, body]))
       const labels = buildBubbleLabels(circles)
@@ -241,7 +266,13 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
         if (!label) continue
         const contour = restById.get(circle.id)!
         const layer = parentByChild.get(circle.id) === root.id ? 0 : 2
-        const normalStyle = bubbleStyle(circle.color, label.hasVisibleChildren, collectedIds.has(circle.id), false, input.theme)
+        const normalStyle = bubbleStyle(
+          circle.color,
+          label.hasVisibleChildren,
+          collectedIds.has(circle.id),
+          false,
+          input.theme,
+        )
         shapes.push({
           node: circle.node,
           parentId: parentByChild.get(circle.id) ?? root.id,
@@ -255,7 +286,13 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
             style: normalStyle,
             emphasis: {
               z2: layer,
-              style: bubbleStyle(circle.color, label.hasVisibleChildren, collectedIds.has(circle.id), true, input.theme),
+              style: bubbleStyle(
+                circle.color,
+                label.hasVisibleChildren,
+                collectedIds.has(circle.id),
+                true,
+                input.theme,
+              ),
             },
             textContent: {
               type: 'text',
@@ -263,7 +300,10 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
                 text: label.text,
                 x: label.x + contour.cx - circle.x,
                 y: label.y + contour.cy - circle.y,
-                fill: '#fff',
+                fill: BUBBLE_TEXT_COLOR,
+                textShadowColor: BUBBLE_TEXT_SHADOW,
+                textShadowBlur: 3,
+                textShadowOffsetY: 1,
                 fontFamily: BUBBLE_FONT,
                 fontSize: label.fontSize,
                 fontWeight: label.fontWeight,
@@ -301,7 +341,17 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
             emphasis,
             textContent: {
               type: 'text',
-              style: { text: label, fill: '#fff', fontFamily: FONT, fontSize: 12, fontWeight: 500, lineHeight: 19 },
+              style: {
+                text: label,
+                fill: '#fff',
+                textShadowColor: BUBBLE_TEXT_SHADOW,
+                textShadowBlur: 3,
+                textShadowOffsetY: 1,
+                fontFamily: FONT,
+                fontSize: 12,
+                fontWeight: 500,
+                lineHeight: 19,
+              },
             },
             textConfig: { position: 'insideLeft', distance: 10, inside: true },
           }),
@@ -394,6 +444,9 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
                   style: {
                     text: segmentWidth > 80 && h >= 27 ? clipIcicleName(segment.name, segmentWidth) : '',
                     fill: '#fff',
+                    textShadowColor: BUBBLE_TEXT_SHADOW,
+                    textShadowBlur: 3,
+                    textShadowOffsetY: 1,
                     fontFamily: FONT,
                     fontSize: 11,
                   },

@@ -5,7 +5,7 @@ import { CustomChart, SunburstChart, TreemapChart } from 'echarts/charts'
 import { SVGRenderer } from 'echarts/renderers'
 import { UniversalTransition, LabelLayout } from 'echarts/features'
 import { buildDiskChartModel } from '../src/lib/echarts-model.ts'
-import { bubbleMaterial, chartMaterial, chartSurfaceColor } from '../src/lib/chart-material.ts'
+import { BUBBLE_TEXT_COLOR, chartSurfaceColor } from '../src/lib/chart-material.ts'
 import { nodeColor, nodeMutedColor } from '../src/lib/colors.ts'
 import { CHART_MODES } from '../src/lib/chart-mode.ts'
 import type { ChartMode } from '../src/lib/chart-mode.ts'
@@ -44,6 +44,33 @@ const tree = node(
 const model = (mode: ChartMode, input: TreeSliceNode = tree) =>
   buildDiskChartModel({ tree: input, width: 720, height: 480, mode, density: 'nested', reducedMotion: true })
 
+test('all charts share folder color identities and render the actual concept-image samples', () => {
+  const input = node('root', 100, [node('opaque-id', 100, [], { name: 'Users' })])
+  const sampledStops: Record<ChartMode, string[]> = {
+    sunburst: ['#3f9af9', '#3088eb'],
+    treemap: ['#3f9af9', '#3088eb'],
+    icicle: ['#1a87fd', '#1476f2'],
+    bubbles: ['#56c1fd', '#2798fd', '#1289f9'],
+    strips: ['#1a8df6', '#2c69a4'],
+  }
+  for (const mode of CHART_MODES) {
+    const result = model(mode, input)
+    assert.equal(
+      result.nodes.get('opaque-id')?.color,
+      '#3f9af9',
+      `${mode} keeps Users blue, irrespective of opaque IDs`,
+    )
+    const chart = init(null, undefined, { renderer: 'svg', ssr: true, width: 720, height: 480 })
+    try {
+      chart.setOption(result.option)
+      const svg = chart.renderToSVGString()
+      for (const color of sampledStops[mode]) assert.ok(svg.includes(color), `${mode} paints sampled ${color}`)
+    } finally {
+      chart.dispose()
+    }
+  }
+})
+
 function whiteContrast(hex: string): number {
   const channels = [1, 3, 5]
     .map((start) => Number.parseInt(hex.slice(start, start + 2), 16) / 255)
@@ -52,16 +79,11 @@ function whiteContrast(hex: string): number {
   return 1.05 / (luminance + 0.05)
 }
 
-test('material guarantees white-label contrast at both stops across all hue families and depths', () => {
+test('legacy surface fallback guarantees white-label contrast across hue families and depths', () => {
   for (let index = 0; index < 200; index++) {
     for (let depth = 1; depth <= 8; depth++) {
       for (const source of [nodeColor(`node-${index}`, depth), nodeMutedColor(depth)]) {
-        const materials = [chartMaterial(source)]
-        for (const theme of ['dark', 'light'] as const)
-          for (const parent of [true, false]) materials.push(bubbleMaterial(source, parent, theme))
-        for (const material of materials)
-          for (const stop of material.colorStops)
-            assert.ok(whiteContrast(stop.color) >= 4.5, `${source} -> ${stop.color}`)
+        assert.ok(whiteContrast(chartSurfaceColor(source)) >= 4.5, source)
       }
     }
   }
@@ -69,8 +91,8 @@ test('material guarantees white-label contrast at both stops across all hue fami
 })
 
 test('all layouts retain shared series and node identities for universal transitions', () => {
-  const expected = ['file', 'folder', 'inner', 'other']
   for (const mode of CHART_MODES) {
+    const expected = mode === 'bubbles' ? ['file', 'folder'] : ['file', 'folder', 'inner', 'other']
     const result = model(mode)
     assert.deepEqual([...result.nodes.keys()].sort(), expected, mode)
     assert.deepEqual([...result.navigableIds].sort(), expected, mode)
@@ -105,7 +127,7 @@ test('native tree data indexes account for the virtual root and custom indexes s
   for (const mode of ['bubbles', 'strips', 'icicle'] satisfies ChartMode[]) {
     assert.deepEqual(
       [...model(mode).nodes.values()].map((entry) => entry.dataIndex),
-      [0, 1, 2, 3],
+      mode === 'bubbles' ? [0, 1] : [0, 1, 2, 3],
     )
   }
 })
@@ -122,7 +144,7 @@ test('omitted buckets appear once and cannot enter keyboard open targets', () =>
     const aggregates = [...result.nodes.values()].filter((entry) => entry.isAggregate)
     assert.deepEqual(
       aggregates.map((entry) => [entry.node.id, entry.node.size]),
-      [['folder:omitted', 70]],
+      mode === 'bubbles' ? [] : [['folder:omitted', 70]],
       mode,
     )
     assert.ok(!result.navigableIds.includes('folder:omitted'))
@@ -173,7 +195,7 @@ test('all five options render actual ECharts SVG shapes with safe text and no in
       if (mode === 'sunburst') assert.equal(/<text\b/.test(svg), false)
       else {
         assert.match(svg, /folder/, mode)
-        assert.match(svg, /#fff/, mode)
+        assert.ok(svg.includes(mode === 'bubbles' ? BUBBLE_TEXT_COLOR : '#fff'), mode)
       }
     } finally {
       chart.dispose()
@@ -195,7 +217,7 @@ test('nested treemap caps visible depth while preserving deeper measured weights
   assert.equal(series.levels?.[0]?.upperLabel?.show, false)
 })
 
-test('treemap parent headers retain contrast and family fill during collection and hover', () => {
+test('treemap parent headers retain sampled family fill during collection and hover', () => {
   const result = buildDiskChartModel({
     tree,
     width: 720,
@@ -211,7 +233,7 @@ test('treemap parent headers retain contrast and family fill during collection a
   const parent = series.data?.[0]
   const header = parent?.itemStyle?.borderColor
   assert.equal(typeof header, 'string')
-  assert.ok(typeof header === 'string' && whiteContrast(header) >= 4.5)
+  assert.equal(header, result.nodes.get('folder')?.color)
   assert.equal(parent?.emphasis?.itemStyle?.borderColor, header)
   assert.equal(parent?.emphasis?.itemStyle?.borderWidth, parent?.itemStyle?.borderWidth)
   const chart = init(null, undefined, { renderer: 'svg', ssr: true, width: 720, height: 480 })
@@ -224,7 +246,7 @@ test('treemap parent headers retain contrast and family fill during collection a
   }
 })
 
-test('highlighting a compressed parent never paints it over its child contours', () => {
+test('bubble emphasis keeps both current-level folders visible', () => {
   const chart = init(null, undefined, { renderer: 'svg', ssr: true, width: 720, height: 480 })
   try {
     const result = model('bubbles')
@@ -233,19 +255,21 @@ test('highlighting a compressed parent never paints it over its child contours',
       .getZr()
       .storage.getDisplayList(true)
       .filter((element) => element.type === 'path')
-    const [parent, , ...children] = circles
-    assert.ok(parent)
-    assert.equal(children.length, 2)
+    assert.equal(circles.length, 2)
     chart.dispatchAction({ type: 'highlight', seriesId: 'disk', dataIndex: result.nodes.get('folder')?.dataIndex })
     chart.getZr().animation.update()
-    const highlighted = chart.getZr().storage.getDisplayList(true)
-    for (const child of children) {
-      assert.ok(highlighted.indexOf(parent) < highlighted.indexOf(child), 'parent must remain behind children on hover')
-    }
+    const highlighted = chart
+      .getZr()
+      .storage.getDisplayList(true)
+      .filter((element) => element.type === 'path')
+    assert.equal(highlighted.length, 2)
     chart.dispatchAction({ type: 'downplay', seriesId: 'disk' })
     chart.getZr().animation.update()
-    const restored = chart.getZr().storage.getDisplayList(true)
-    for (const child of children) assert.ok(restored.indexOf(parent) < restored.indexOf(child))
+    const restored = chart
+      .getZr()
+      .storage.getDisplayList(true)
+      .filter((element) => element.type === 'path')
+    assert.equal(restored.length, 2)
   } finally {
     chart.dispose()
   }

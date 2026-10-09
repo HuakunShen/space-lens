@@ -9,6 +9,7 @@
   import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
   import { buildDiskChartModel } from '../../lib/echarts-model'
   import { chartEmptyMessage } from '../../lib/chart-empty'
+  import type { SoftBubbleSnapshot } from '../../lib/soft-bubbles/world'
   import { formatNodeSize } from '../../lib/node-size'
   import SoftBubblesOverlay from './SoftBubblesOverlay.svelte'
   import ChartModeToggle from './ChartModeToggle.svelte'
@@ -38,19 +39,17 @@
   let { softBubbles = true, tree, focusNode, mode, onModeChange, density, onDensityChange, hoveredId,
     hoveredNode = null, collectedIds, onHover, onOpen, onContext, onBack, canGoBack = false }: Props = $props()
   let host = $state<HTMLDivElement>()
-  let softOverlay = $state<{ arm(id: string, event: PointerEvent): void; cancel(): void }>()
+  let softOverlay = $state<{ begin(event: PointerEvent): void; cancel(): void }>()
   let softActive = $state(false)
-  let pointerDown: PointerEvent | null = null
+  let transitionReady = $state(true)
   let suppressClick = false
-  const softEnabled = $derived(softBubbles && mode === 'bubbles' && !prefersReducedMotion.current)
+  const softEnabled = $derived(softBubbles && mode === 'bubbles' && transitionReady && !prefersReducedMotion.current)
 
-  function rememberPointer(event: PointerEvent): void {
+  function beginPointer(event: PointerEvent): void {
     suppressClick = false
-    pointerDown = softEnabled && event.button === 0 && event.isPrimary ? event : null
+    if (softEnabled) softOverlay?.begin(event)
   }
-  function releaseGesture(): void {
-    pointerDown = null
-  }
+  let bubblePose = $state.raw<{ tree: TreeSliceNode; width: number; height: number; rest: SoftBubbleSnapshot[] } | null>(null)
   let chart = $state.raw<EChartsType>()
   let size = $state({ width: 620, height: 430 })
   const rendered: { width: number; height: number; tree: TreeSliceNode | null; mode: ChartMode | null; density: TreemapDensity | null } = {
@@ -68,7 +67,8 @@
     return () => observer.disconnect()
   })
   let model = $derived(tree ? buildDiskChartModel({ tree, ...size, mode, density,
-    reducedMotion: prefersReducedMotion.current, collectedIds, textColor, theme }) : null)
+    reducedMotion: prefersReducedMotion.current, collectedIds, textColor, theme,
+    bubbleRest: bubblePose?.tree === tree && bubblePose.width === size.width && bubblePose.height === size.height ? bubblePose.rest : undefined }) : null)
   let active = $derived(hoveredId ? model?.nodes.get(hoveredId) : undefined)
   let inspected = $derived(active?.node ?? hoveredNode ?? focusNode)
   let percentage = $derived(focusNode?.size && inspected ? inspected.size / focusNode.size * 100 : 0)
@@ -92,12 +92,9 @@
     if (!host) return
     const instance = init(host, undefined, { renderer: 'svg' })
     chart = instance
+    instance.on('finished', () => { transitionReady = true })
     instance.on('mouseover', (event) => { if (!softActive) onHover(eventId(event.data)) })
     instance.on('globalout', () => { if (!softActive) onHover(null) })
-    instance.on('mousedown', (event) => {
-      const id = eventId(event.data)
-      if (softEnabled && id && pointerDown) softOverlay?.arm(id, pointerDown)
-    })
     instance.on('click', (event) => {
       if (suppressClick || softActive) { suppressClick = false; return }
       openNode(eventId(event.data))
@@ -115,12 +112,15 @@
   })
   $effect(() => {
     if (!chart) return
-    if (!model) { chart.clear(); return }
+    if (!model) { transitionReady = true; chart.clear(); return }
     const resized = rendered.width !== size.width || rendered.height !== size.height
     const changedGeometry = rendered.tree !== tree || rendered.mode !== mode || rendered.density !== density
     if (resized || changedGeometry) untrack(() => softOverlay?.cancel())
     if (resized) chart.resize({ width: size.width, height: size.height, silent: true })
-    chart.setOption({ ...model.option, animation: changedGeometry && !prefersReducedMotion.current }, { notMerge: true })
+    const animation = changedGeometry && !prefersReducedMotion.current
+    // Match the POC: don't pick final contours while morphing intermediate ones.
+    transitionReady = !animation || mode !== 'bubbles'
+    chart.setOption({ ...model.option, animation }, { notMerge: true })
     Object.assign(rendered, { ...size, tree, mode, density })
     // Selection and theme changes keep the keyboard target and inspector.
     untrack(() => { if (hoveredId && !model?.nodes.has(hoveredId)) onHover(null) })
@@ -160,14 +160,14 @@
   <ChartStage class="disk-chart-stage" label={`${mode} disk usage chart`} empty={!model?.nodes.size ? chartEmptyMessage(focusNode) : null} {canGoBack} {onBack} bind:size>
     <!-- The visualization is a bounded keyboard application; its arrow/Enter controls are described below. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-    <div class="disk-chart" class:soft-enabled={softEnabled} style:opacity={softActive ? 0 : 1} onpointerdown={rememberPointer} bind:this={host} role="application" tabindex="0"
+    <div class="disk-chart" class:soft-enabled={softEnabled} style:opacity={softActive ? 0 : 1} onpointerdowncapture={beginPointer} bind:this={host} role="application" tabindex="0"
       aria-label={`${mode} disk usage visualization`} aria-describedby={helpId}
       onkeydown={keyboard} oncontextmenu={(event) => event.preventDefault()}
       onfocus={() => { if (!hoveredId) onHover(model?.navigableIds[0] ?? null) }} onblur={() => onHover(null)}></div>
     {#if mode === 'bubbles' && model?.bubbles}
       <SoftBubblesOverlay bind:this={softOverlay} circles={model.bubbles.circles} offset={model.bubbles.offset} rest={model.bubbles.rest} {theme} {size}
         enabled={softEnabled} {collectedIds} onActiveChange={(value) => { softActive = value }}
-        onDragChange={(id) => onHover(id)} onActivated={() => { suppressClick = true }} onReleased={releaseGesture} />
+        onDragChange={(id) => onHover(id)} onActivated={() => { suppressClick = true }} onRestChange={(rest) => { if (tree) bubblePose = { tree, ...size, rest } }} />
     {/if}
     {#if mode === 'sunburst' && model?.nodes.size}
       <div class="sunburst-center" aria-hidden="true" style={`--well-width: ${Math.max(0, (Math.min(size.width, size.height) / 2 - 10) * 0.48 - 12)}px`}>
