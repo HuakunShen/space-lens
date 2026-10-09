@@ -21,7 +21,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "~2.12.1", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
@@ -37,6 +37,12 @@ space-lens = { package = "kuntu-scan", path = "../../../vendors/kuntu/crates/kun
 # Shared discovery heuristics (cache categories) — the CLI's MCP adapter
 # consumes the same crate, so the catalogs cannot drift apart.
 spacelens-discovery = { path = "../../../crates/discovery" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSApplication", "NSAppearance", "NSColor", "NSColorSpace", "NSView", "NSVisualEffectView", "NSWindow"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSArray", "NSString", "NSProcessInfo", "NSGeometry", "NSNotification", "NSOperation", "NSDistributedNotificationCenter"] }
+block2 = "0.6.2"
 
 [profile.release]
 opt-level = "s"

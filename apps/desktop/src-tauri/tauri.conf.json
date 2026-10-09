@@ -10,6 +10,8 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
+        "visible": false,
         "title": "Space Lens",
         "width": 1280,
         "height": 860,
@@ -17,13 +19,7 @@
         "minHeight": 640,
         "zoomHotkeysEnabled": true,
         "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "windowEffects": {
-          "effects": [
-            "underWindowBackground"
-          ],
-          "state": "followsWindowActiveState"
-        }
+        "hiddenTitle": true
       }
     ],
     "security": {

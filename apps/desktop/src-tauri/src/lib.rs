@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod engine;
 pub mod events;
+mod native_material;
 
 use std::path::PathBuf;
 use tauri::Manager;
@@ -13,7 +14,12 @@ pub fn run() {
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_process::init())
     .manage(commands::AppState::new(roots))
+    .setup(|app| {
+      native_material::create_main_window(app)?;
+      Ok(())
+    })
     .on_window_event(|window, event| {
+      native_material::on_window_event(window, event);
       if matches!(event, tauri::WindowEvent::Destroyed) {
         let app = window.app_handle().clone();
         let label = window.label().to_string();

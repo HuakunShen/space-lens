@@ -288,15 +288,7 @@
     const interfaceStyle = resolveStyle(appearance.style, __SPACLENS_DESKTOP__, navigator.userAgent)
     document.documentElement.dataset.interface = interfaceStyle
     document.documentElement.dataset.density = appearance.density
-    // The desktop shell puts a native NSVisualEffectView behind the webview
-    // (tauri windowEffects), so macOS may go translucent all the way down to
-    // the window material. The attribute gates it: a plain browser or a
-    // non-macOS treatment keeps opaque surfaces.
-    if (__SPACLENS_DESKTOP__ && interfaceStyle === 'macos') {
-      document.documentElement.dataset.backdrop = 'vibrancy'
-    } else {
-      delete document.documentElement.dataset.backdrop
-    }
+    // Material capability and native OS/accent attributes are supplied by the host.
     window.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance))
   })
   $effect(() => {

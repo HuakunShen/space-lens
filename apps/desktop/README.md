@@ -33,6 +33,35 @@ Or run both with the orchestrator:
 node scripts/build-desktop.ts
 ```
 
+For an unbundled local launch after building the desktop frontend:
+
+```bash
+cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --bin space-lens-desktop
+```
+
+The macOS host uses public `NSGlassEffectView.contentView` on macOS 26 and
+newer, falling back to `NSVisualEffectView` with `underWindowBackground` on
+older releases. It wraps the existing Tauri content container so WebView,
+resize, keyboard and drag handles stay intact. Native objects remain on the
+main thread and their parent views retain them; notification observers are
+removed when the window closes.
+
+WebKit transparency still requires the private `_setDrawsBackground:` setter.
+The host checks the selector before calling it and leaves the window opaque
+if it is unavailable. The page receives the actual installed capability in
+`backdrop`/`data-backdrop`, plus `macos`, `dark` and
+`--color-system-accent`. Its document-start contract begins with `none` and
+updates after native installation while the window is hidden. Appearance and
+accent notifications refresh the contract; the web layer decides how much of
+the material to reveal while keeping content legible.
+
+Validate the bootstrap's document-start timing and live state transitions:
+
+```bash
+node --test apps/desktop/src-tauri/src/native_material.test.mjs
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+```
+
 ## IPC transport (resolved)
 
 macOS delivers `invoke` over a custom-protocol fetch (`http://ipc.localhost`),
