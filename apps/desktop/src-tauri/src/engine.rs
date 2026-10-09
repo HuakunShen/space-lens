@@ -309,6 +309,7 @@ pub struct ScanTarget {
 /// Block size is `f_frsize` alone. APFS reports `f_bsize` as the *optimal
 /// transfer size* (1 MiB), not the block size — taking the max of the two
 /// inflated every capacity by 256×.
+#[cfg(unix)]
 pub fn volume_capacity(path: &Path) -> Option<(u64, u64)> {
   use std::ffi::CString;
   use std::os::unix::ffi::OsStrExt;
@@ -324,6 +325,35 @@ pub fn volume_capacity(path: &Path) -> Option<(u64, u64)> {
   let total = (stats.f_blocks as u64).saturating_mul(block);
   let free = (stats.f_bfree as u64).saturating_mul(block);
   if total == 0 {
+    return None;
+  }
+  Some((total.saturating_sub(free), total))
+}
+
+/// Windows reports capacity through a UTF-16 directory path, not statvfs.
+#[cfg(windows)]
+pub fn volume_capacity(path: &Path) -> Option<(u64, u64)> {
+  use std::os::windows::ffi::OsStrExt;
+  use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+  let mut directory: Vec<u16> = path.as_os_str().encode_wide().collect();
+  if directory.contains(&0) {
+    return None;
+  }
+  directory.push(0);
+  let mut total = 0;
+  let mut free = 0;
+  // SAFETY: the directory is terminated and lives through the call; both
+  // output pointers refer to writable u64 values. Both values use the caller's
+  // quota: disk-wide free space must not be subtracted from quota-limited total.
+  let ok = unsafe {
+    GetDiskFreeSpaceExW(
+      directory.as_ptr(),
+      &mut free,
+      &mut total,
+      std::ptr::null_mut(),
+    )
+  };
+  if ok == 0 || total == 0 {
     return None;
   }
   Some((total.saturating_sub(free), total))
@@ -509,7 +539,9 @@ impl EngineStore {
         // Capacity is read live per root so the picker can show used/free
         // before any scan runs. A root the OS cannot stat keeps `size` 0 and
         // no `used`, which the UI renders as "unknown".
-        let (size, used) = volume_capacity(root).map(|(used, total)| (total, Some(used))).unwrap_or((0, None));
+        let (size, used) = volume_capacity(root)
+          .map(|(used, total)| (total, Some(used)))
+          .unwrap_or((0, None));
         ScanTarget {
           id: format!("root_{index}"),
           label: root
@@ -534,7 +566,17 @@ impl EngineStore {
   /// mount points; anything statvfs cannot report is skipped, never
   /// fabricated.
   pub fn volumes(&self) -> Vec<ScanVolume> {
+    #[cfg(unix)]
     let mut mounts = vec![PathBuf::from("/")];
+    #[cfg(windows)]
+    let mounts: Vec<PathBuf> = {
+      // SAFETY: GetLogicalDrives has no arguments or borrowed memory.
+      let drives = unsafe { windows_sys::Win32::Storage::FileSystem::GetLogicalDrives() };
+      (0..26)
+        .filter(|index| drives & (1 << index) != 0)
+        .map(|index| PathBuf::from(format!("{}:\\", char::from(b'A' + index))))
+        .collect()
+    };
     #[cfg(target_os = "macos")]
     if let Ok(entries) = fs::read_dir("/Volumes") {
       mounts.extend(
@@ -546,7 +588,10 @@ impl EngineStore {
           // partitions with no user data to browse.
           .filter(|path| {
             path.file_name().map_or(true, |name| {
-              !matches!(name.to_string_lossy().as_ref(), "Macintosh HD" | "Recovery" | "Preboot" | "VM" | "Boot" | "Home")
+              !matches!(
+                name.to_string_lossy().as_ref(),
+                "Macintosh HD" | "Recovery" | "Preboot" | "VM" | "Boot" | "Home"
+              )
             })
           })
           .filter(|path| path.is_dir()),

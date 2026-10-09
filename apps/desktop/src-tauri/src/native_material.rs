@@ -2,7 +2,9 @@
 //! turn CSS blur into Liquid Glass: only a successfully installed AppKit view
 //! publishes `glass` or `vibrancy` to the document.
 
-use tauri::{Manager, WebviewWindowBuilder};
+#[cfg(target_os = "macos")]
+use tauri::Manager;
+use tauri::WebviewWindowBuilder;
 
 const BOOTSTRAP: &str = include_str!("native_material.js");
 
@@ -70,8 +72,8 @@ mod macos {
     sel, ClassType, MainThreadMarker,
   };
   use objc2_app_kit::{
-    NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication,
-    NSColor, NSColorSpace, NSView, NSVisualEffectView, NSWindow,
+    NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSColor, NSColorSpace, NSView,
+    NSVisualEffectView, NSWindow,
   };
   use objc2_foundation::{
     NSArray, NSDistributedNotificationCenter, NSNotification, NSNotificationCenter,
@@ -79,7 +81,10 @@ mod macos {
   };
   use std::{cell::RefCell, ptr::NonNull};
   use tauri::Manager;
-  use window_vibrancy::{apply_liquid_glass, apply_vibrancy, LiquidGlassOptions, NSGlassEffectViewStyle, NSVisualEffectMaterial};
+  use window_vibrancy::{
+    apply_liquid_glass, apply_vibrancy, LiquidGlassOptions, NSGlassEffectViewStyle,
+    NSVisualEffectMaterial,
+  };
 
   struct Observer {
     center: Retained<NSNotificationCenter>,
@@ -149,8 +154,18 @@ mod macos {
     let view = &*platform.inner().cast::<NSView>();
     let installed = apply_liquid_glass(
       host,
-      LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular).radius(0.0).content_view(view),
-    ).or_else(|_| apply_vibrancy(host, NSVisualEffectMaterial::UnderWindowBackground, None, None));
+      LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular)
+        .radius(0.0)
+        .content_view(view),
+    )
+    .or_else(|_| {
+      apply_vibrancy(
+        host,
+        NSVisualEffectMaterial::UnderWindowBackground,
+        None,
+        None,
+      )
+    });
     if installed.is_err() {
       push(webview, &window, false);
       return;

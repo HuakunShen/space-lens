@@ -86,7 +86,9 @@ mod tests {
   fn macos_default_roots_serve_home_and_mounted_volumes() {
     let roots = default_roots();
     assert!(roots.iter().any(|root| root == &dirs_home()));
-    assert!(roots.iter().any(|root| root == std::path::Path::new("/Volumes")));
+    assert!(roots
+      .iter()
+      .any(|root| root == std::path::Path::new("/Volumes")));
   }
 
   #[cfg(target_os = "linux")]
@@ -94,6 +96,8 @@ mod tests {
   fn linux_default_roots_serve_home_and_mount_roots() {
     let roots = default_roots();
     assert!(roots.iter().any(|root| root == &dirs_home()));
-    assert!(roots.iter().any(|root| root == std::path::Path::new("/media")));
+    assert!(roots
+      .iter()
+      .any(|root| root == std::path::Path::new("/media")));
   }
 }

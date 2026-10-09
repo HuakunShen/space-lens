@@ -200,11 +200,24 @@ fn roots_carry_live_capacity() {
 
 #[test]
 fn roots_without_capacity_stay_unknown() {
-  let store = EngineStore::new(vec![std::path::PathBuf::from("/definitely/not/here-9f8e7d6c")]);
+  let store = EngineStore::new(vec![std::path::PathBuf::from(
+    "/definitely/not/here-9f8e7d6c",
+  )]);
   let roots = store.roots();
   assert_eq!(roots.len(), 1);
   assert_eq!(roots[0].size, 0);
-  assert_eq!(roots[0].used, None, "unstatable roots must be unknown, not zero");
+  assert_eq!(
+    roots[0].used, None,
+    "unstatable roots must be unknown, not zero"
+  );
+}
+
+#[test]
+fn capacity_rejects_paths_with_embedded_nul() {
+  assert_eq!(
+    space_lens_desktop_lib::engine::volume_capacity(std::path::Path::new("/\0invalid")),
+    None
+  );
 }
 
 #[test]
@@ -212,7 +225,17 @@ fn volumes_lists_a_usable_startup_volume() {
   let (_dir, store) = fixture();
   let volumes = store.volumes();
   assert!(!volumes.is_empty(), "at least the startup volume must list");
-  let root = volumes.iter().find(|v| v.path == std::path::Path::new("/")).expect("startup volume / must list");
+  #[cfg(unix)]
+  let startup = std::path::PathBuf::from("/");
+  #[cfg(windows)]
+  let startup = std::path::PathBuf::from(format!(
+    "{}\\",
+    std::env::var("SystemDrive").expect("Windows system drive")
+  ));
+  let root = volumes
+    .iter()
+    .find(|v| v.path == startup)
+    .expect("startup volume must list");
   assert!(root.total_bytes > 0);
   assert!(root.free_bytes <= root.total_bytes);
   assert!(root.available_bytes <= root.total_bytes);
