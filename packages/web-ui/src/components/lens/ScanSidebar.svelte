@@ -13,6 +13,7 @@
   } from '@lucide/svelte'
   import type { ScanTarget, ScanVolume } from '../../types'
   import { formatBytes } from '../../lib/format'
+  import { scanVolumeLabel, volumeCapacity } from '../../lib/scan-volume'
 
   interface Props {
     targets: ScanTarget[]
@@ -60,20 +61,15 @@
     onRescan,
   }: Props = $props()
 
-  /** Free space, preferring the host's `freeBytes` and falling back to what
-   * the filesystem reports as available when a host cannot fill in both. */
-  let free = $derived(volume ? (volume.freeBytes || volume.availableBytes) : 0)
-  let used = $derived(volume ? Math.max(0, volume.totalBytes - free) : 0)
-  let usedFraction = $derived(volume && volume.totalBytes > 0 ? (used / volume.totalBytes) * 100 : 0)
+  let capacity = $derived(volumeCapacity(volume))
+  let driveName = $derived(volume ? scanVolumeLabel(volume, targets) : '')
   let capacityLabel = $derived(
-    volume
-      ? `${scanLabel ?? 'This scan'} volume: ${formatBytes(used)} used of ${formatBytes(volume.totalBytes)}, ${formatBytes(free)} free`
-      : '',
+    capacity
+      ? `${driveName}: ${formatBytes(capacity.used)} used of ${formatBytes(capacity.total)}, ${formatBytes(capacity.free)} free`
+      : `${driveName}: capacity unavailable`,
   )
-  const itemClass =
-    'sidebar-item relative macos:h-8 macos:rounded-md macos:text-[13px] macos:font-normal macos:text-foreground windows:h-10 windows:rounded-[4px] windows:text-sm windows:text-foreground windows:font-normal windows:pl-4 windows:data-[selected=true]:before:absolute windows:data-[selected=true]:before:left-0 windows:data-[selected=true]:before:h-4 windows:data-[selected=true]:before:w-[3px] windows:data-[selected=true]:before:rounded-full windows:data-[selected=true]:before:bg-primary linux:h-10 linux:rounded-lg linux:text-sm linux:text-foreground linux:font-medium comfortable:h-11 focus-visible:ring-2 focus-visible:ring-ring'
-  const headingClass =
-    'macos:text-[11px] macos:mt-5 macos:mb-1 windows:text-xs windows:mt-6 windows:mb-2 linux:text-xs linux:mt-6 linux:mb-2'
+  const itemClass = 'sidebar-item'
+  const headingClass = 'sidebar-heading'
   let forgetting = $state<string | null>(null)
   let recent = $derived(targets.filter((target) => target.source === 'recent'))
   let locations = $derived(targets.filter((target) => target.source !== 'recent'))
@@ -89,13 +85,7 @@
   }
 </script>
 
-<aside
-  class={[
-    'scan-sidebar macos:w-52 macos:bg-sidebar/95 macos:backdrop-blur-xl windows:w-56 windows:border-r-0 windows:bg-sidebar windows:p-3 linux:w-56 linux:bg-sidebar linux:p-3',
-    className,
-  ]}
-  aria-label="Scan locations"
->
+<aside class={['scan-sidebar', className]} aria-label="Scan locations">
   <div class="sidebar-scroll">
     {#if onView}
       <h2 class={headingClass}>Workspace</h2>
@@ -140,10 +130,7 @@
         onclick={() => onSelect(target)}
         title={target.path}
       >
-        {#if target.kind === 'volume'}<HardDrive class="macos:text-primary" size={16} />{:else}<Folder
-            class="macos:text-primary"
-            size={16}
-          />{/if}
+        {#if target.kind === 'volume'}<HardDrive size={16} />{:else}<Folder size={16} />{/if}
         <span>{target.label}</span>
       </button>
     {/each}
@@ -162,7 +149,7 @@
       <h2 class={headingClass}>Recent scans</h2>
       {#each recent as target (target.id)}
         <div
-          class="sidebar-recent macos:rounded-md windows:rounded-[4px] linux:rounded-lg"
+          class="sidebar-recent"
           class:selected={!customSelected && selectedPath === target.path}
         >
           <button
@@ -173,7 +160,7 @@
             onclick={() => onSelect(target)}
             title={target.path}
             aria-pressed={!customSelected && selectedPath === target.path}
-            ><Folder class="macos:text-primary" size={16} /><span>{target.label}</span></button
+            ><Folder size={16} /><span>{target.label}</span></button
           >
           {#if onForget}
             <button
@@ -193,25 +180,28 @@
       ><Settings size={16} /><span>Settings</span></button
     >{/if}
   {#if volume}
-    <section class="drive-card" aria-label="Disk capacity">
+    <section class="drive-card" aria-label="Disk capacity" title={volume.path}>
       <div class="drive-head">
         <HardDrive size={17} />
         <div>
-          <strong>{scanLabel ?? 'Current scan'}</strong>
-          <span>{formatBytes(volume.totalBytes)} total</span>
+          <strong>{driveName}</strong>
+          <span>{capacity ? `${formatBytes(capacity.total)} total` : 'Capacity unavailable'}</span>
         </div>
       </div>
-      <div class="drive-bar" role="img" aria-label={capacityLabel}>
-        <span style={`width: ${usedFraction.toFixed(2)}%`}></span>
-      </div>
-      <dl class="drive-legend">
-        <div><dt><i class="drive-swatch used"></i>Used</dt><dd>{formatBytes(used)}</dd></div>
-        <div><dt><i class="drive-swatch free"></i>Free</dt><dd>{formatBytes(free)}</dd></div>
-      </dl>
-      <div class="drive-scan">
+      {#if capacity}
+        <div class="drive-usage"><span>Disk usage</span><strong>{capacity.usedPercent.toFixed(1)}%</strong></div>
+        <div class="drive-bar" role="img" aria-label={capacityLabel}>
+          <span style={`width: ${capacity.usedPercent.toFixed(2)}%`}></span>
+        </div>
+        <dl class="drive-legend">
+          <div><dt><i class="drive-swatch used"></i>Used</dt><dd>{formatBytes(capacity.used)}</dd></div>
+          <div><dt><i class="drive-swatch free"></i>Free</dt><dd>{formatBytes(capacity.free)}</dd></div>
+        </dl>
+      {/if}
+      <div class="drive-scan" title={scanLabel ?? undefined}>
         <i class="drive-dot"></i>
         <div>
-          <strong>Scan completed</strong>
+          <strong>{rescanning ? 'Rescanning…' : 'Last scan'}</strong>
           <span>{scanEntries.toLocaleString()} items · {formatBytes(scanBytes)} scanned</span>
         </div>
       </div>
@@ -222,5 +212,5 @@
       {/if}
     </section>
   {/if}
-  <span class="sidebar-footnote macos:text-[11px] windows:hidden linux:hidden">Explore. Select. Review.</span>
+  <span class="sidebar-footnote windows:hidden linux:hidden">Explore. Select. Review.</span>
 </aside>

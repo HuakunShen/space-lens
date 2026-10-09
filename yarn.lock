@@ -3295,6 +3295,7 @@ __metadata:
     clsx: "npm:^2.1.1"
     d3-hierarchy: "npm:^3.1.2"
     d3-shape: "npm:^3.2.0"
+    echarts: "npm:^6.1.0"
     svelte: "npm:^5.56.1"
     svelte-check: "npm:^4.6.0"
     tailwind-merge: "npm:^3.5.0"
@@ -4768,6 +4769,16 @@ __metadata:
     space-lens: "npm:^0.3.0"
   languageName: unknown
   linkType: soft
+
+"echarts@npm:^6.1.0":
+  version: 6.1.0
+  resolution: "echarts@npm:6.1.0"
+  dependencies:
+    tslib: "npm:2.3.0"
+    zrender: "npm:6.1.0"
+  checksum: 10c0/a0911a9d75969ff946d0bce998e95e1924cdec7f5ca6be13ded376e2a47067c70b264ee8d04ba84345aa7895363e202f54c87d2bae114859bd154d565babc09c
+  languageName: node
+  linkType: hard
 
 "effect@npm:^3.21.5":
   version: 3.22.1
@@ -7285,6 +7296,7 @@ __metadata:
     "@space-lens/contract": "workspace:*"
     "@space-lens/web-ui": "workspace:*"
     "@sveltejs/vite-plugin-svelte": "npm:^7.1.2"
+    "@tailwindcss/vite": "npm:^4.3.0"
     "@types/node": "npm:^25.9.3"
     "@types/vscode": "npm:^1.90.0"
     esbuild: "npm:^0.28.1"
@@ -7756,6 +7768,13 @@ __metadata:
   version: 0.0.3
   resolution: "tr46@npm:0.0.3"
   checksum: 10c0/047cb209a6b60c742f05c9d3ace8fa510bff609995c129a37ace03476a9b12db4dbf975e74600830ef0796e18882b2381fb5fb1f6b4f96b832c374de3ab91a11
+  languageName: node
+  linkType: hard
+
+"tslib@npm:2.3.0":
+  version: 2.3.0
+  resolution: "tslib@npm:2.3.0"
+  checksum: 10c0/a845aed84e7e7dbb4c774582da60d7030ea39d67307250442d35c4c5dd77e4b44007098c37dd079e100029c76055f2a362734b8442ba828f8cc934f15ed9be61
   languageName: node
   linkType: hard
 
@@ -8438,5 +8457,14 @@ __metadata:
   version: 4.6.5
   resolution: "zod@npm:4.6.5"
   checksum: 10c0/32eb6c5e98becbe045675b2141c3611451c16ba567f9779231d79af41c4d651ca1c22f154aef7e6c6e77b929f23e43f1154ca05b82e119e922353725d6776af5
+  languageName: node
+  linkType: hard
+
+"zrender@npm:6.1.0":
+  version: 6.1.0
+  resolution: "zrender@npm:6.1.0"
+  dependencies:
+    tslib: "npm:2.3.0"
+  checksum: 10c0/bfdb5e2ccd70893a9e2c7f33959749a6a1abc8912c2b1af301a05593d677a2f6f6087cdc4f0bf73883b99eea2f2d11d1922c71c3bf0bd4e9e5b362fd32129bce
   languageName: node
   linkType: hard

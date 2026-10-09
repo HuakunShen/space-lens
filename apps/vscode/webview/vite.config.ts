@@ -1,13 +1,14 @@
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
+import tailwindcss from '@tailwindcss/vite'
 
 // The webview builds one IIFE script + one stylesheet that the extension host
 // loads via asWebviewUri (CSS is inlined into the HTML so the CSP stays at
 // default-src 'none').
 export default defineConfig({
   root: import.meta.dirname,
-  plugins: [svelte()],
+  plugins: [tailwindcss(), svelte()],
   build: {
     outDir: resolve(import.meta.dirname, '../dist/webview'),
     emptyOutDir: true,

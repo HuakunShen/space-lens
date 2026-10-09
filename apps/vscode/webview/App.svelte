@@ -6,11 +6,7 @@
     ScanPicker,
     StateBanner,
     StatusBar,
-    SunburstChart,
-    TreemapChart,
-    IcicleChart,
-    BubblesChart,
-    StripsChart,
+    DiskChart,
     DEFAULT_CHART_MODE,
     DEFAULT_TREEMAP_DENSITY,
     parseChartMode,
@@ -43,14 +39,6 @@
   // with the rest of the panel state.
   let chartMode = $state<ChartMode>(DEFAULT_CHART_MODE)
   let treemapDensity = $state<TreemapDensity>(DEFAULT_TREEMAP_DENSITY)
-  const chartComponents = {
-    sunburst: SunburstChart,
-    treemap: TreemapChart,
-    icicle: IcicleChart,
-    bubbles: BubblesChart,
-    strips: StripsChart,
-  } as const
-  let ActiveChart = $derived(chartComponents[chartMode])
   function setChartMode(mode: ChartMode): void {
     chartMode = mode
     persistPanelState()
@@ -204,7 +192,7 @@
     {/if}
     <div class="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div class="flex min-w-0 flex-col items-center gap-3">
-        <ActiveChart
+        <DiskChart
           tree={slice?.tree ?? null}
           focusNode={slice?.focusNode ?? null}
           mode={chartMode}

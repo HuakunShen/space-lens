@@ -33,6 +33,7 @@
         type="button"
         class:active={mode === family.value}
         aria-pressed={mode === family.value}
+        aria-label={family.label}
         title={family.hint}
         onclick={() => onModeChange(family.value)}
       >

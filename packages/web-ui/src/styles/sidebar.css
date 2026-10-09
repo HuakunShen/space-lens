@@ -1,0 +1,151 @@
+/* Shared geometry keeps the locations and chart panels at the same reading scale. */
+@layer components {
+  .scan-sidebar {
+    width: 216px;
+    padding: 18px 10px 12px;
+    font-size: 13px;
+    background: var(--sidebar);
+  }
+  .scan-sidebar .sidebar-scroll {
+    min-height: 0;
+    padding-bottom: 16px;
+    scrollbar-width: thin;
+  }
+  .scan-sidebar .sidebar-heading {
+    margin: 24px 0 8px;
+    padding: 0 10px;
+    font-size: 11px;
+    font-weight: 550;
+    letter-spacing: 0.015em;
+  }
+  .scan-sidebar .sidebar-heading:first-child {
+    margin-top: 0;
+  }
+  .scan-sidebar .sidebar-item {
+    height: 34px;
+    gap: 9px;
+    margin: 2px 0;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--foreground);
+  }
+  .scan-sidebar .sidebar-item svg {
+    color: var(--muted-foreground);
+    stroke-width: 1.6;
+  }
+  .scan-sidebar .sidebar-item:hover:not(:disabled),
+  .scan-sidebar .sidebar-recent:hover {
+    background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  }
+  .scan-sidebar .sidebar-item.selected,
+  .scan-sidebar .sidebar-recent.selected {
+    background: color-mix(in srgb, var(--foreground) 9%, transparent);
+    color: var(--foreground);
+  }
+  .scan-sidebar .sidebar-recent.selected .sidebar-item {
+    background: transparent;
+  }
+  .scan-sidebar .sidebar-item.selected svg,
+  .scan-sidebar .sidebar-recent.selected svg {
+    color: var(--foreground);
+  }
+  .scan-sidebar .sidebar-recent {
+    align-items: center;
+    border-radius: 6px;
+  }
+  .scan-sidebar .sidebar-item:focus-visible,
+  .scan-sidebar .sidebar-forget:focus-visible,
+  .scan-sidebar .drive-rescan:focus-visible {
+    outline: 2px solid var(--muted-foreground);
+    outline-offset: -2px;
+  }
+  .scan-sidebar .drive-card {
+    flex: none;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--foreground) 3%, transparent);
+  }
+  .scan-sidebar .drive-head {
+    gap: 9px;
+  }
+  .scan-sidebar .drive-head svg {
+    flex: none;
+  }
+  .scan-sidebar .drive-head > div {
+    gap: 3px;
+  }
+  .scan-sidebar .drive-head strong {
+    font-size: 13px;
+    font-weight: 550;
+  }
+  .scan-sidebar .drive-head span,
+  .scan-sidebar .drive-usage,
+  .scan-sidebar .drive-legend dt,
+  .scan-sidebar .drive-legend dd {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .scan-sidebar .drive-usage {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted-foreground);
+  }
+  .scan-sidebar .drive-usage strong {
+    font-weight: 500;
+    color: var(--foreground);
+  }
+  .scan-sidebar .drive-bar {
+    height: 6px;
+    margin-top: -3px;
+  }
+  .scan-sidebar .drive-bar > span,
+  .scan-sidebar .drive-swatch.used {
+    background: color-mix(in srgb, var(--foreground) 65%, transparent);
+  }
+  .scan-sidebar .drive-legend {
+    gap: 6px;
+  }
+  .scan-sidebar .drive-scan {
+    display: flex;
+    gap: 7px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .scan-sidebar .drive-scan > div {
+    gap: 4px;
+  }
+  .scan-sidebar .drive-scan strong {
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .scan-sidebar .drive-scan span {
+    font-size: 10px;
+    line-height: 1.5;
+  }
+  .scan-sidebar .drive-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--muted-foreground);
+  }
+  .scan-sidebar .drive-rescan {
+    min-height: 30px;
+    border-radius: 5px;
+    font-size: 12px;
+  }
+  .scan-sidebar .sidebar-footnote {
+    font-size: 10px;
+    padding: 12px 10px 0;
+  }
+  .dark .scan-sidebar {
+    --foreground: #e8e8e8;
+    --muted-foreground: #999999;
+    --border: rgb(255 255 255 / 9%);
+    background: #181818;
+  }
+  [data-density='comfortable'] .scan-sidebar .sidebar-item {
+    height: 40px;
+  }
+}

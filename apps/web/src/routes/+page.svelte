@@ -9,11 +9,7 @@
     ScanPicker,
     StateBanner,
     StatusBar,
-    SunburstChart,
-    TreemapChart,
-    IcicleChart,
-    BubblesChart,
-    StripsChart,
+    DiskChart,
     LensSelect,
     WorkspaceHeading,
     LensToolbar,
@@ -25,6 +21,7 @@
     Input,
     formatBytes,
     formatNodeName,
+    resolveScanVolume,
   } from '@space-lens/web-ui'
   import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
@@ -98,22 +95,12 @@
   let resizing = $state(false)
   let layoutElement = $state<HTMLElement | null>(null)
 
-  /**
-   * The volume the current scan lives on. The longest mount path that is a
-   * prefix of the scan root wins, so a scan on an external volume reports that
-   * disk's capacity rather than the startup disk's.
-   */
-  let scanVolume = $derived.by(() => {
-    const status = workbench.status
-    const volumes = status?.volumes ?? []
-    if (volumes.length === 0) return null
-    const root = status?.label ?? scannedPaths[0] ?? ''
-    if (!root) return volumes[0] ?? null
-    const containing = volumes
-      .filter((volume) => root === volume.path || root.startsWith(`${volume.path.replace(/\/+$/, '')}/`))
-      .sort((left, right) => right.path.length - left.path.length)
-    return containing[0] ?? null
-  })
+  /** Follow the canonical focus path, including when browsing another scanned root. */
+  let scanVolume = $derived.by(() => resolveScanVolume(
+    workbench.slice?.focusNode.path ?? scannedPaths[0] ?? workbench.status?.label,
+    workbench.status?.volumes ?? [],
+    workbench.volumes,
+  ))
   let rescanning = $state(false)
   async function rescan(): Promise<void> {
     const paths = scannedPaths.length > 0 ? scannedPaths : workbench.targets.map((target) => target.path)
@@ -212,16 +199,6 @@
     treemapDensity = density
     window.localStorage.setItem(TREEMAP_DENSITY_KEY, density)
   }
-  // Every chart family takes the same prop contract, so the mode picks the
-  // component and the call site below stays single.
-  const chartComponents = {
-    sunburst: SunburstChart,
-    treemap: TreemapChart,
-    icicle: IcicleChart,
-    bubbles: BubblesChart,
-    strips: StripsChart,
-  } as const
-  let ActiveChart = $derived(chartComponents[chartMode])
   let pickerOpen = $state(false)
   let pickerPath = $state('')
   let startingScan = $state(false)
@@ -1011,7 +988,7 @@
             {#if chartVisible}<div
                 class="explorer-chart macos:bg-background macos:p-5 windows:rounded-lg windows:border windows:bg-background windows:p-4 linux:bg-background linux:p-5"
               >
-                <ActiveChart
+                <DiskChart
                   tree={workbench.slice?.tree ?? null}
                   focusNode={displayFocus}
                   mode={chartMode}

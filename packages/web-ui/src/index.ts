@@ -1,3 +1,5 @@
+export { default as DiskChart } from './components/lens/DiskChart.svelte'
+export { resolveScanVolume } from './lib/scan-volume'
 // Lens components (product)
 export { default as BreadcrumbBar } from './components/lens/BreadcrumbBar.svelte'
 export { default as ChildList } from './components/lens/ChildList.svelte'
