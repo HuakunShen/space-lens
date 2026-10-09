@@ -1,6 +1,22 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { BreadcrumbBar, ChildList, ScanPicker, StateBanner, StatusBar, SunburstChart } from '@space-lens/web-ui'
+  import {
+    BreadcrumbBar,
+    ChildList,
+    ScanPicker,
+    StateBanner,
+    StatusBar,
+    SunburstChart,
+    TreemapChart,
+    IcicleChart,
+    BubblesChart,
+    StripsChart,
+    DEFAULT_CHART_MODE,
+    DEFAULT_TREEMAP_DENSITY,
+    parseChartMode,
+    parseTreemapDensity,
+  } from '@space-lens/web-ui'
+  import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanStatus, ScanTarget, TreeNodeSummary, TreeSlice } from '@space-lens/contract'
 
   interface vscodeApi {
@@ -21,6 +37,31 @@
   let items = $state<TreeNodeSummary[]>([])
   let hoveredId = $state<string | null>(null)
   let activeScanId = $state<string | null>(null)
+
+  // The webview has no localStorage of its own worth keeping — VS Code
+  // restores `setState` between sessions, so the chart choice rides along
+  // with the rest of the panel state.
+  let chartMode = $state<ChartMode>(DEFAULT_CHART_MODE)
+  let treemapDensity = $state<TreemapDensity>(DEFAULT_TREEMAP_DENSITY)
+  const chartComponents = {
+    sunburst: SunburstChart,
+    treemap: TreemapChart,
+    icicle: IcicleChart,
+    bubbles: BubblesChart,
+    strips: StripsChart,
+  } as const
+  let ActiveChart = $derived(chartComponents[chartMode])
+  function setChartMode(mode: ChartMode): void {
+    chartMode = mode
+    persistPanelState()
+  }
+  function setTreemapDensity(density: TreemapDensity): void {
+    treemapDensity = density
+    persistPanelState()
+  }
+  function persistPanelState(): void {
+    vscode.setState({ chartMode, treemapDensity })
+  }
 
   const collectedIds = $derived(new Set<string>())
   const ancestors = $derived(slice === null ? [] : [...slice.ancestors, slice.focusNode])
@@ -135,6 +176,11 @@
   }
 
   onMount(() => {
+    // Restore the chart choice VS Code carried over from the last session,
+    // validating it the same way the browser build validates localStorage.
+    const restored = vscode.getState() as { chartMode?: string; treemapDensity?: string } | undefined
+    chartMode = parseChartMode(restored?.chartMode ?? null)
+    treemapDensity = parseTreemapDensity(restored?.treemapDensity ?? null, restored?.chartMode ?? null)
     void request({ kind: 'pair', ticket: '' })
       .catch((problem: { message: string }) => {
         phase = 'failed'
@@ -158,7 +204,19 @@
     {/if}
     <div class="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div class="flex min-w-0 flex-col items-center gap-3">
-        <SunburstChart tree={slice?.tree ?? null} focusNode={slice?.focusNode ?? null} hoveredId={hoveredId} collectedIds={collectedIds} onHover={(id) => (hoveredId = id)} onOpen={(node) => void focus(node)} onContext={(node) => void focus(node)} />
+        <ActiveChart
+          tree={slice?.tree ?? null}
+          focusNode={slice?.focusNode ?? null}
+          mode={chartMode}
+          onModeChange={setChartMode}
+          density={treemapDensity}
+          onDensityChange={setTreemapDensity}
+          hoveredId={hoveredId}
+          collectedIds={collectedIds}
+          onHover={(id) => (hoveredId = id)}
+          onOpen={(node) => void focus(node)}
+          onContext={(node) => void focus(node)}
+        />
         <BreadcrumbBar items={ancestors} onSelect={(node) => void focus(node)} />
       </div>
       <ChildList items={items} hoveredId={hoveredId} collectedIds={collectedIds} onHover={(id) => (hoveredId = id)} onOpen={(node) => void focus(node)} onCollect={() => {}} onContext={() => {}} />

@@ -7,6 +7,10 @@ Previews: [Browse](preview/browse-web-dark.png) · [Developer cleanup](preview/d
 ## Workspace
 
 - **Browse:** linked storage map and compact file list, breadcrumbs, name/size sorting, search of loaded items, and incremental loading. Hide the map or navigation sidebar to give the list more space.
+
+The storage map draws one of five chart families — sunburst, treemap (flat or nested), icicle, bubbles, or proportional strips — chosen from the segmented control above it and remembered per browser. The chart and the folder list are separated by a draggable divider: drag it, or focus it and use the arrow keys, to trade width between them; double-click resets the split. The location sidebar's foot shows the capacity of the volume the scan lives on, with what the last scan measured and a rescan action.
+
+Charts lay out against the panel they are painted in, so widening the window or dragging the divider gives them more room rather than scaling a fixed drawing. See [docs/chart-modes.md](../../docs/chart-modes.md) for the shared contract.
 - **Large files:** size-sorted files throughout the scanned locations, including files inside summarized ignored directories. Choose a minimum size, search loaded results, copy paths, or open the containing folder.
 - **Developer cleanup:** Node dependencies, Cargo build output, Python bytecode, pytest/mypy/Ruff caches, and common JavaScript build caches. Rust and JavaScript candidates require project manifests; Python environments and uv caches are excluded from automatic cache classification.
 - **Gitignored space:** the total and list of paths matched by the engine's `.gitignore` traversal. This does not include every Git global exclusion or prove that a file is disposable. Cache and ignored totals can overlap and are not added together.

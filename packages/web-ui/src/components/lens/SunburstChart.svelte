@@ -1,19 +1,25 @@
 <script lang="ts">
   import { fade } from 'svelte/transition'
   import { prefersReducedMotion } from 'svelte/motion'
-  import { Folder, File, ArrowUpLeft } from '@lucide/svelte'
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
   import { buildSunburstSegments } from '../../lib/sunburst'
-  import type { ChartMode } from '../../lib/treemap'
+  import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
+  import type { ChartSize } from '../../lib/chart-size'
+  import { chartEmptyMessage } from '../../lib/chart-empty'
   import { formatBytes } from '../../lib/format'
   import { formatNodeSize } from '../../lib/node-size'
   import ChartModeToggle from './ChartModeToggle.svelte'
+  import ChartStage from './ChartStage.svelte'
+  import ChartInspector from './ChartInspector.svelte'
 
   interface Props {
     tree: TreeSliceNode | null
     focusNode: TreeNodeSummary | null
     mode: ChartMode
     onModeChange: (mode: ChartMode) => void
+    /** Carried so the toggle can flip the treemap's density from any chart. */
+    density: TreemapDensity
+    onDensityChange: (density: TreemapDensity) => void
     hoveredId: string | null
     hoveredNode?: TreeNodeSummary | null
     collectedIds: Set<string>
@@ -29,6 +35,8 @@
     focusNode,
     mode,
     onModeChange,
+    density,
+    onDensityChange,
     hoveredId,
     hoveredNode = null,
     collectedIds,
@@ -38,8 +46,14 @@
     onBack,
     canGoBack = false,
   }: Props = $props()
-  const size = 620
-  let segments = $derived(tree ? buildSunburstSegments(tree, 285) : [])
+  let size = $state<ChartSize>({ width: 620, height: 430 })
+  // The ring canvas follows the stage, so a wider workbench buys real ring
+  // thickness and label room rather than just scaling the same drawing.
+  let canvas = $derived({ width: Math.max(240, size.width), height: Math.max(240, size.height) })
+  let radius = $derived(Math.max(80, Math.min(canvas.width, canvas.height) / 2 - 10))
+  // The hole stays a fraction of the chart, so a small panel is not all well.
+  let innerRadius = $derived(Math.max(38, Math.round(radius * 0.24)))
+  let segments = $derived(tree ? buildSunburstSegments(tree, radius, innerRadius) : [])
   let active = $derived(segments.find((segment) => segment.id === hoveredId))
   let inspected = $derived(active?.node ?? hoveredNode ?? focusNode)
   let percentage = $derived(focusNode && focusNode.size > 0 && inspected ? (inspected.size / focusNode.size) * 100 : 0)
@@ -51,19 +65,24 @@
 <section class="chart-wrap" aria-label="Disk usage chart">
   <div class="chart-toolbar">
     <span class="chart-eyebrow">SPACE DISTRIBUTION</span>
-    <ChartModeToggle {mode} onModeChange={onModeChange} />
+    <ChartModeToggle {mode} onModeChange={onModeChange} {density} onDensityChange={onDensityChange} />
   </div>
-  <div class="chart-stage macos:md:flex-1 windows:md:flex-1 linux:md:flex-1">
-    {#key tree?.id}
+  <ChartStage
+    label="Sunburst disk usage chart"
+    empty={segments.length === 0 ? chartEmptyMessage(focusNode) : null}
+    {canGoBack}
+    {onBack}
+    bind:size
+  >
+    {#key `${tree?.id ?? ''}:${canvas.width}x${canvas.height}`}
       <svg
-        class="sunburst macos:md:absolute macos:md:inset-0 macos:md:h-full macos:md:max-w-none windows:md:absolute windows:md:inset-0 windows:md:h-full windows:md:max-w-none linux:md:absolute linux:md:inset-0 linux:md:h-full linux:md:max-w-none"
-        viewBox={`0 0 ${size} ${size}`}
-        role="group"
+        class="sunburst" width="100%" height="100%"
+        viewBox={`0 0 ${canvas.width} ${canvas.height}`}
         aria-label="Sunburst disk usage chart"
         in:fade={{ duration: prefersReducedMotion.current ? 0 : 220 }}
       >
-        <g transform={`translate(${size / 2}, ${size / 2})`}>
-          <circle class="center-well" r="62" />
+        <g transform={`translate(${canvas.width / 2}, ${canvas.height / 2})`}>
+          <circle class="center-well" r={innerRadius} />
           {#each segments as segment (segment.id)}
             <path
               class="arc"
@@ -123,45 +142,6 @@
         </g>
       </svg>
     {/key}
-    {#if segments.length === 0}
-      <div class="chart-empty">
-        {focusNode?.scanState === 'skipped'
-          ? 'This location was not scanned'
-          : focusNode
-            ? 'No child items to display'
-            : 'Choose a folder to explore'}
-      </div>
-    {/if}
-    {#if canGoBack}
-      <button class="chart-back" type="button" onclick={onBack} aria-label="Go to parent folder"
-        ><ArrowUpLeft size={14} /> Up one level</button
-      >
-    {/if}
-  </div>
-  <div
-    class="chart-inspector macos:rounded-md macos:border-0 macos:border-t macos:bg-transparent macos:px-1 macos:pt-3 windows:rounded-lg windows:bg-card linux:rounded-xl linux:bg-card linux:p-4"
-    class:inspecting={hoveredId !== null && inspected !== focusNode}
-    aria-live="polite"
-    aria-atomic="true"
-  >
-    <div
-      class="inspector-icon macos:border-0 macos:bg-transparent macos:p-1 linux:rounded-lg"
-      style={`--node: ${active?.color ?? 'var(--muted-foreground)'}`}
-    >
-      {#if inspected?.hasChildren || inspected?.collapsed}<Folder size={19} />{:else}<File size={19} />{/if}
-    </div>
-    <div class="inspector-content">
-      <div class="inspector-heading">
-        <strong>{inspected?.name ?? 'Explore your storage'}</strong><span>{formatNodeSize(inspected)}</span>
-      </div>
-      <p class="inspector-path">{inspected?.path ?? 'Hover or focus a segment to see its full path.'}</p>
-      <p class="inspector-hint">
-        {#if inspected?.scanState === 'skipped'}Not scanned · {inspected.skipReason ??
-            'unavailable'}{:else if active?.isAggregate}{active.childCount.toLocaleString()} smaller items grouped here ·
-          open the parent folder to explore{:else if hoveredId && inspected}{percentageLabel} of this folder · {inspected.hasChildren
-            ? 'Click to explore'
-            : 'Click to inspect'}{:else}Hover to inspect · click to explore{/if}
-      </p>
-    </div>
-  </div>
+  </ChartStage>
+  <ChartInspector {inspected} {active} {hoveredId} {focusNode} {percentageLabel} noun="segment" />
 </section>

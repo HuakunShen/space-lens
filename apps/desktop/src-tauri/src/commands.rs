@@ -207,6 +207,7 @@ pub enum ReadRequest {
   Health,
   Capabilities,
   Roots,
+  Volumes,
   ScanStatus {
     scan_id: String,
   },
@@ -326,6 +327,12 @@ pub async fn sl_read(
         ReadRequest::Roots => {
           // wrapped to match the HTTP host shape: { roots: ScanTarget[] }
           serde_json::to_value(json!({ "roots": engine.roots() }))
+            .map_err(|error| problem_value("InternalError", error))
+        }
+        ReadRequest::Volumes => {
+          // Display-only facts for the pre-scan drive list; mount points
+          // grant no scan capability by themselves.
+          serde_json::to_value(json!({ "volumes": engine.volumes() }))
             .map_err(|error| problem_value("InternalError", error))
         }
         ReadRequest::ScanStatus { scan_id } => {

@@ -64,7 +64,10 @@ fn main() {
         .observe_window_appearance(|window, cx| {
           Theme::sync_system_appearance(Some(window), cx);
           apply_macos_theme(
-            THEME_OVERRIDE.get().copied().unwrap_or_else(|| cx.theme().mode),
+            THEME_OVERRIDE
+              .get()
+              .copied()
+              .unwrap_or_else(|| cx.theme().mode),
             cx,
           );
         })

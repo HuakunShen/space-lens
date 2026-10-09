@@ -5,6 +5,7 @@ import type {
   CleanupOutcome,
   Health,
   RootsResponse,
+  VolumesResponse,
   ScanSession,
   ScanStartRequest,
   ScanStatus,
@@ -30,6 +31,9 @@ export interface WorkbenchService {
   health(): Promise<Health>
   capabilities(): Promise<Capabilities>
   roots(): Promise<RootsResponse>
+  /** Mounted volumes with capacity, for the pre-scan drive list. Optional:
+   * older hosts predate the endpoint and answer 404. */
+  volumes?(): Promise<VolumesResponse>
   startScan(body: ScanStartRequest): Promise<ScanSession>
   listScans?(): Promise<ScanStatus[]>
   scanStatus(scanId: string): Promise<ScanStatus>

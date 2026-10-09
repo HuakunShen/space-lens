@@ -11,6 +11,7 @@ import type {
   Health,
   Problem,
   RootsResponse,
+  VolumesResponse,
   ScanListResponse,
   ScanSession,
   ScanStartRequest,
@@ -91,6 +92,7 @@ export function createHttpService(options: HttpServiceOptions) {
       }),
     capabilities: () => request<Capabilities>('/api/v1/capabilities'),
     roots: () => request<RootsResponse>('/api/v1/roots'),
+    volumes: () => request<VolumesResponse>('/api/v1/volumes'),
     startScan: (body: ScanStartRequest) =>
       request<ScanSession>('/api/v1/scans', { method: 'POST', body: JSON.stringify(body) }),
     scanList,

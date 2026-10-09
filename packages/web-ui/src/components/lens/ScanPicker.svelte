@@ -1,16 +1,19 @@
 <script lang="ts">
   import { ArrowRight, FolderSearch, FolderOpen } from '@lucide/svelte'
-  import type { ScanStatus, ScanTarget } from '../../types'
+  import type { ScanStatus, ScanTarget, ScanVolume } from '../../types'
   import { formatBytes } from '../../lib/format'
   import { scanTargetPaths } from '../../lib/scan-targets'
   import { Button } from '../ui/button/index'
   import LensToolbar from './LensToolbar.svelte'
   import ScanSidebar from './ScanSidebar.svelte'
+  import DriveList from './DriveList.svelte'
   import { Input } from '../ui/input/index'
   import { Progress } from '../ui/progress/index'
 
   interface Props {
     targets: ScanTarget[]
+    /** Mounted volumes for the pre-scan drive list; absent on older hosts. */
+    volumes?: ScanVolume[]
     initialPath?: string
     canClose?: boolean
     mode: string
@@ -35,6 +38,7 @@
 
   let {
     targets,
+    volumes = [],
     initialPath = '',
     canClose = false,
     mode,
@@ -217,6 +221,18 @@
           >
             {error}
           </div>{/if}
+        {#if volumes.length > 0}
+          <DriveList
+            {volumes}
+            {targets}
+            {busy}
+            onScanDrive={(path) => {
+              customPath = path
+              selectedId = 'custom'
+              scanSelected()
+            }}
+          />
+        {/if}
       </div>
     </section>
   </div>

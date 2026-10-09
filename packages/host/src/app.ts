@@ -22,6 +22,7 @@ import { ProblemError, Problems } from './problems.ts'
 import { authoritiesFor, checkOrigin, originsForAuthorities, type OriginPolicy } from './origins.ts'
 import type { ResolvedServeConfig } from './config.ts'
 import type { ScanManager } from './scan-store.ts'
+import { mountedVolumes, volumeCapacities } from './volumes.ts'
 
 export interface HostDeps {
   config: ResolvedServeConfig
@@ -191,21 +192,41 @@ export function buildApp(deps: HostDeps): HonoApp {
     return c.json(capabilities)
   })
 
-  /** Preset scan targets: exactly the roots this host was configured with. */
-  app.get('/api/v1/roots', (c) => {
+  /**
+   * Preset scan targets: exactly the roots this host was configured with.
+   * Capacity comes from one `df` call so the picker can show used/free
+   * before any scan runs; roots `df` cannot report keep size 0 and no
+   * `used`, which the UI renders as "unknown".
+   */
+  app.get('/api/v1/roots', async (c) => {
     ensureScope(c.get('session'), 'scan:read')
+    const capacities = await volumeCapacities(config.roots)
     return c.json({
-      roots: config.roots.map((rootPath, index) => ({
-        id: `root_${index}`,
-        label: basename(rootPath) || rootPath,
-        path: rootPath,
-        kind: 'folder' as const,
-        description: '',
-        size: 0,
-        source: 'preset' as const,
-        removable: false,
-      })),
+      roots: config.roots.map((rootPath, index) => {
+        const capacity = capacities.get(rootPath)
+        return {
+          id: `root_${index}`,
+          label: basename(rootPath) || rootPath,
+          path: rootPath,
+          kind: 'folder' as const,
+          description: '',
+          size: capacity?.totalBytes ?? 0,
+          ...(capacity ? { used: capacity.usedBytes } : {}),
+          source: 'preset' as const,
+          removable: false,
+        }
+      }),
     })
+  })
+
+  /**
+   * Mounted volumes with capacity, for the pre-scan "all my drives" list.
+   * Display-only: mount points are facts, not scan targets — the picker
+   * offers a scan only for paths inside the host's configured roots.
+   */
+  app.get('/api/v1/volumes', async (c) => {
+    ensureScope(c.get('session'), 'scan:read')
+    return c.json({ volumes: await mountedVolumes() })
   })
 
   app.post('/api/v1/scans', async (c) => {

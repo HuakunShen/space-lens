@@ -33,7 +33,10 @@ const HEIGHT = 430
 test('flat view shows only the first layer and tiles fill the canvas', () => {
   const root = node('root', 100, [node('big', 60, [node('inner', 10)]), node('small', 20)], { depth: 0 })
   const tiles = buildTreemapTiles(root, WIDTH, HEIGHT, false)
-  assert.ok(tiles.every((tile) => tile.depth === 1), 'no nested layers in the flat view')
+  assert.ok(
+    tiles.every((tile) => tile.depth === 1),
+    'no nested layers in the flat view',
+  )
   assert.deepEqual(
     tiles.map((tile) => tile.id).sort(),
     ['big', 'small'],
@@ -48,7 +51,7 @@ test('tile areas and shares track sibling sizes', () => {
   const tiles = buildTreemapTiles(root, WIDTH, HEIGHT, false)
   const big = tiles.find((tile) => tile.id === 'big')!
   const small = tiles.find((tile) => tile.id === 'small')!
-  assert.ok((big.x1 - big.x0) * (big.y1 - big.y0) / ((small.x1 - small.x0) * (small.y1 - small.y0)) - 3 < 0.05)
+  assert.ok(((big.x1 - big.x0) * (big.y1 - big.y0)) / ((small.x1 - small.x0) * (small.y1 - small.y0)) - 3 < 0.05)
   assert.ok(Math.abs(big.share - 0.75) < 1e-6)
   assert.ok(Math.abs(small.share - 0.25) < 1e-6)
 })
@@ -59,8 +62,8 @@ test('nested view insets children below the parent name strip', () => {
   const big = tiles.find((tile) => tile.id === 'big')!
   const inner = tiles.find((tile) => tile.id === 'inner')!
   assert.ok(inner, 'the nested view paints the second layer')
-  assert.ok(inner.y0 >= big.y0 + 15, 'children start below the name strip')
-  assert.ok(inner.x0 >= big.x0 && inner.x1 <= big.x1 && inner.y1 <= big.y1, 'children stay inside the parent')
+  assert.ok(inner.y0 >= big.y0 + 48, 'children start below the folder title and size')
+  assert.ok(inner.x0 > big.x0 && inner.x1 < big.x1 && inner.y1 < big.y1, 'children have an inset inside the parent')
   assert.equal(big.label, 'strip', 'a parent with painted children is a frame')
   assert.ok(inner.label === 'card' || inner.label === 'name')
 })

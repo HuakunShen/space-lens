@@ -216,30 +216,73 @@
     flex: none;
   }
   .compact-workbench .explorer-layout {
-    grid-template-columns: minmax(280px, 1fr) minmax(300px, 1fr);
+    grid-template-columns: minmax(0, 1fr) var(--contents-width, 340px);
+  }
+  .compact-workbench .explorer-layout[data-chart-visible='true'] {
+    grid-template-columns: minmax(0, 1fr) var(--divider-width, 6px) var(--contents-width, 340px);
   }
   .compact-workbench .explorer-layout.without-chart {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* Stacked mode: the chart rides on top and the divider resizes the
+     contents list's height. Declared after the column rules so a narrow
+     panel (DSH side panel, VS Code webview) can flip orientation without
+     the horizontal grid winning the cascade. */
+  .compact-workbench .explorer-layout[data-orientation='vertical'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) var(--divider-width, 6px) var(--contents-height, 300px);
+  }
+  .compact-workbench .explorer-layout[data-orientation='vertical'][data-chart-visible='true'] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) var(--divider-width, 6px) var(--contents-height, 300px);
+  }
+  .compact-workbench .explorer-layout[data-orientation='vertical'].without-chart {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .explorer-layout[data-orientation='vertical'] .explorer-divider {
+    cursor: row-resize;
+  }
+  .explorer-layout[data-orientation='vertical'] .explorer-divider::after {
+    inset: 2px 0;
+  }
+  .explorer-layout[data-orientation='vertical'] .explorer-sidebar {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    overflow-y: auto;
   }
   .compact-workbench .explorer-chart {
     padding: 16px 16px 12px;
     background: color-mix(in oklch, var(--muted) 18%, var(--background));
   }
+  /* The chart panel is the query container: the caps below are for a narrow
+     panel (the VS Code webview), and applying them unconditionally is what
+     kept the web workbench's chart at 560px inside a 978px column. */
+  .compact-workbench .explorer-chart {
+    container-type: inline-size;
+  }
   .compact-workbench .chart-stage {
-    flex: none;
+    flex: 1 1 0%;
     min-height: 0;
   }
   .compact-workbench .sunburst {
-    width: 100%;
-    max-width: 520px;
     filter: drop-shadow(0 6px 15px rgb(0 0 0 / 0.08));
   }
   .compact-workbench .chart-wrap {
     justify-content: center;
     flex: 1;
-    max-width: 560px;
-    align-self: center;
     gap: 16px;
+  }
+  /* Only a genuinely narrow panel — the VS Code webview — gets the centred,
+     capped chart. A desktop window's chart column is comfortably wider than
+     this and should use all of it. */
+  @container (max-width: 560px) {
+    .compact-workbench .chart-wrap {
+      max-width: 560px;
+      align-self: center;
+    }
+    .compact-workbench .sunburst {
+      max-width: 520px;
+    }
   }
   .compact-workbench .center-well {
     fill: var(--background);
@@ -821,7 +864,10 @@
       width: 170px;
     }
     .compact-workbench .explorer-layout {
-      grid-template-columns: minmax(250px, 0.9fr) minmax(290px, 1fr);
+      grid-template-columns: minmax(0, 1fr) var(--contents-width, 320px);
+    }
+    .compact-workbench .explorer-layout[data-chart-visible='true'] {
+      grid-template-columns: minmax(0, 1fr) var(--divider-width, 6px) var(--contents-width, 320px);
     }
     .discovery-heading {
       gap: 14px;

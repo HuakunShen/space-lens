@@ -180,3 +180,9 @@ export const RootsResponseSchema = z.strictObject({
 })
 
 export type RootsResponse = z.infer<typeof RootsResponseSchema>
+
+export const VolumesResponseSchema = z.strictObject({
+  volumes: z.array(ScanVolumeSchema),
+})
+
+export type VolumesResponse = z.infer<typeof VolumesResponseSchema>

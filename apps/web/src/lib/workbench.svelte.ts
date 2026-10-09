@@ -1,4 +1,11 @@
-import type { CollectorEntry, ScanStatus, ScanTarget, TreeNodeSummary, TreeSlice } from '@space-lens/contract'
+import type {
+  CollectorEntry,
+  ScanStatus,
+  ScanTarget,
+  ScanVolume,
+  TreeNodeSummary,
+  TreeSlice,
+} from '@space-lens/contract'
 import type { HttpService } from '@space-lens/client'
 import { connectEventStream } from '@space-lens/client'
 import type { WorkbenchService } from '@space-lens/client'
@@ -93,6 +100,8 @@ export interface WorkbenchState {
   service: WorkbenchService | null
   capabilities: Awaited<ReturnType<HttpService['capabilities']>> | null
   targets: ScanTarget[]
+  /** Mounted volumes for the pre-scan drive list; empty on older hosts. */
+  volumes: ScanVolume[]
   status: ScanStatus | null
   activeScanId: string | null
   slice: TreeSlice | null
@@ -114,6 +123,7 @@ export const workbench = $state<WorkbenchState>({
   service: null,
   capabilities: null,
   targets: [],
+  volumes: [],
   status: null,
   activeScanId: null,
   slice: null,

@@ -1,6 +1,14 @@
 # Space Lens · GPUI
 
-The macOS desktop interface uses a single toolbar, a location sidebar, a sunburst explorer, and a segmented inspector. The app follows the system appearance; the toolbar can switch between light and dark.
+The macOS desktop interface uses a single toolbar, a location sidebar, a chart explorer, and a segmented inspector. The app follows the system appearance; the toolbar can switch between light and dark.
+
+The explorer draws five chart families — the same set the web workbench offers, over one shared geometry contract ([docs/chart-modes.md](../../docs/chart-modes.md)). The segmented control switches between them:
+
+- **Sunburst** — rings by depth: the shape of a deep tree at a glance.
+- **Flat** / **Nested** — squarified treemaps; one layer of tiles, or tiles inset inside their parent.
+- **Icicle** — equal-width columns per depth level, so a path reads straight across.
+- **Bubbles** — packed circles with area proportional to size, for orientation rather than ranking.
+- **Strips** — one ranked row per folder, each split into its own children.
 
 From the repository root:
 
@@ -46,7 +54,7 @@ SPACLENS_GPUI_THEME=light SPACLENS_GPUI_AUTO_SCAN=/path/to/folder \
   cargo run --manifest-path apps/gpui/Cargo.toml
 ```
 
-`SPACLENS_GPUI_THEME` accepts `light` or `dark`; without it the initial theme follows macOS. `SPACLENS_GPUI_AUTO_SCAN` pre-fills and scans one folder. These hooks do not supply sample scan data.
+`SPACLENS_GPUI_THEME` accepts `light` or `dark`; without it the initial theme follows macOS. `SPACLENS_GPUI_AUTO_SCAN` pre-fills and scans one folder. `SPACLENS_GPUI_CHART` seeds the opening chart instead of the sunburst — it accepts `sunburst`, `flat`, `nested` (the legacy spelling `treemap` also means nested), `icicle`, `bubbles`, or `strips`. These hooks do not supply sample scan data.
 
 ## Verified screenshots
 

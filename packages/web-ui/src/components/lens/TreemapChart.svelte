@@ -1,20 +1,28 @@
 <script lang="ts">
   import { fade } from 'svelte/transition'
   import { prefersReducedMotion } from 'svelte/motion'
-  import { Folder, File, ArrowUpLeft } from '@lucide/svelte'
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
-  import { buildTreemapTiles, clipTileName, type ChartMode, type TreemapTile } from '../../lib/treemap'
+  import { buildTreemapTiles, clipTileName, type TreemapTile } from '../../lib/treemap'
+  import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
+  import type { ChartSize } from '../../lib/chart-size'
+  import { chartEmptyMessage } from '../../lib/chart-empty'
   import { formatBytes } from '../../lib/format'
   import { formatNodeSize } from '../../lib/node-size'
   import ChartModeToggle from './ChartModeToggle.svelte'
+  import ChartStage from './ChartStage.svelte'
+  import ChartInspector from './ChartInspector.svelte'
+  import ChartFolderGlyph from './ChartFolderGlyph.svelte'
+
+  const paintId = $props.id()
 
   interface Props {
     tree: TreeSliceNode | null
     focusNode: TreeNodeSummary | null
-    /** The flat layer view when false, the nested inset view when true. */
-    nested: boolean
     mode: ChartMode
     onModeChange: (mode: ChartMode) => void
+    /** The treemap's second axis; the toggle lets the user flip it in place. */
+    density: TreemapDensity
+    onDensityChange: (density: TreemapDensity) => void
     hoveredId: string | null
     hoveredNode?: TreeNodeSummary | null
     collectedIds: Set<string>
@@ -28,9 +36,10 @@
   let {
     tree,
     focusNode,
-    nested,
     mode,
     onModeChange,
+    density,
+    onDensityChange,
     hoveredId,
     hoveredNode = null,
     collectedIds,
@@ -41,9 +50,12 @@
     canGoBack = false,
   }: Props = $props()
 
-  const width = 620
-  const height = 430
-  let tiles = $derived(tree ? buildTreemapTiles(tree, width, height, nested) : [])
+  let size = $state<ChartSize>({ width: 620, height: 430 })
+  let nested = $derived(density === 'nested')
+  // Tiles are laid out against the real stage, so a wide window gives each
+  // tile the room its labels need instead of scaling a fixed 620x430 canvas.
+  let canvas = $derived({ width: Math.max(240, size.width), height: Math.max(240, size.height) })
+  let tiles = $derived(tree ? buildTreemapTiles(tree, canvas.width, canvas.height, nested) : [])
   let active = $derived(tiles.find((tile) => tile.id === hoveredId))
   let inspected = $derived(active?.node ?? hoveredNode ?? focusNode)
   let percentage = $derived(focusNode && focusNode.size > 0 && inspected ? (inspected.size / focusNode.size) * 100 : 0)
@@ -55,21 +67,16 @@
   // tile and its ancestor chain lit and dims unrelated tiles.
   function isRelated(tile: TreemapTile, hovered: TreemapTile): boolean {
     return (
-      hovered.path.startsWith(`${tile.path}/`) || tile.path.startsWith(`${hovered.path}/`)
+      tile.id === hovered.id || hovered.path.startsWith(`${tile.path}/`) || tile.path.startsWith(`${hovered.path}/`)
     )
   }
 
   function tileLabelLines(tile: TreemapTile): Array<{ text: string; kind: 'name' | 'detail' }> {
-    const name = clipTileName(tile.name, tile.x1 - tile.x0)
-    const detail = `${formatBytes(tile.size)} · ${(tile.share * 100).toFixed(tile.share * 100 < 10 ? 1 : 0)}%`
+    const width = tile.x1 - tile.x0
+    const name = clipTileName(tile.name, width - (tile.label === 'strip' ? (width >= 180 ? 100 : 48) : 18))
+    const detail = formatBytes(tile.size)
     if (tile.label === 'strip') {
-      // The whole line clips — appending " · NN%" past the tile edge would
-      // bleed into the neighbors.
-      const line = clipTileName(
-        `${tile.name} · ${(tile.share * 100).toFixed(0)}%`,
-        tile.x1 - tile.x0,
-      )
-      return [{ text: line, kind: 'name' }]
+      return [{ text: name, kind: 'name' }, { text: detail, kind: 'detail' }]
     }
     if (tile.label === 'card') {
       return [
@@ -85,18 +92,36 @@
 <section class="chart-wrap" aria-label="Disk usage chart">
   <div class="chart-toolbar">
     <span class="chart-eyebrow">SPACE DISTRIBUTION</span>
-    <ChartModeToggle {mode} onModeChange={onModeChange} />
+    <ChartModeToggle {mode} onModeChange={onModeChange} {density} onDensityChange={onDensityChange} />
   </div>
-  <div class="chart-stage macos:md:flex-1 windows:md:flex-1 linux:md:flex-1">
-    {#key `${tree?.id ?? ''}:${nested}`}
+  <ChartStage
+    label={nested ? 'Nested treemap disk usage chart' : 'Flat treemap disk usage chart'}
+    empty={tiles.length === 0 ? chartEmptyMessage(focusNode) : null}
+    {canGoBack}
+    {onBack}
+    bind:size
+  >
+    {#key `${tree?.id ?? ''}:${nested}:${canvas.width}x${canvas.height}`}
       <svg
-        class="treemap macos:md:absolute macos:md:inset-0 macos:md:h-full macos:md:max-w-none windows:md:absolute windows:md:inset-0 windows:md:h-full windows:md:max-w-none linux:md:absolute linux:md:inset-0 linux:md:h-full linux:md:max-w-none"
-        viewBox={`0 0 ${width} ${height}`}
-        role="group"
+        class="treemap"
+        width="100%"
+        height="100%"
+        viewBox={`0 0 ${canvas.width} ${canvas.height}`}
         aria-label={nested ? 'Nested treemap disk usage chart' : 'Flat treemap disk usage chart'}
         in:fade={{ duration: prefersReducedMotion.current ? 0 : 220 }}
       >
-        {#each tiles as tile (tile.id)}
+        <defs>
+          {#each tiles as tile, index (tile.id)}
+            <linearGradient id={`${paintId}-tile-${index}`} x1="0" y1="0" x2="0.9" y2="1" style={`--node: ${tile.color}`}>
+              <stop class="tile-light" offset="0%" />
+              <stop class="tile-shade" offset="100%" />
+            </linearGradient>
+            <clipPath id={`${paintId}-label-${index}`}>
+              <rect x={tile.x0 + 3} y={tile.y0 + 3} width={Math.max(0, tile.x1 - tile.x0 - 6)} height={Math.max(0, tile.y1 - tile.y0 - 6)} />
+            </clipPath>
+          {/each}
+        </defs>
+        {#each tiles as tile, index (tile.id)}
           {@const lines = tileLabelLines(tile)}
           {@const center = { x: (tile.x0 + tile.x1) / 2, y: (tile.y0 + tile.y1) / 2 }}
           <g
@@ -111,8 +136,8 @@
               y={tile.y0}
               width={tile.x1 - tile.x0}
               height={tile.y1 - tile.y0}
-              rx="3"
-              fill={tile.color}
+              rx={Math.min(9, (tile.x1 - tile.x0) / 5, (tile.y1 - tile.y0) / 5)}
+              fill={`url(#${paintId}-tile-${index})`}
               role="button"
               aria-disabled={tile.isAggregate || tile.node.scanState === 'skipped'}
               tabindex="0"
@@ -140,75 +165,37 @@
               }}
             />
             {#if lines.length > 0}
-              {#if tile.label === 'strip'}
-                <text
-                  class="tile-text"
-                  class:muted-ink={tile.node.ignored}
-                  x={tile.x0 + 6}
-                  y={tile.y0 + 11.5}>{lines[0].text}</text
-                >
-              {:else}
-                <text
-                  class="tile-text tile-name"
-                  class:muted-ink={tile.node.ignored}
-                  text-anchor="middle"
-                  x={center.x}
-                  y={center.y - (lines.length > 1 ? 2 : -4)}>{lines[0].text}</text
-                >
-                {#if lines.length > 1}
-                  <text
-                    class="tile-text tile-detail"
-                    class:muted-ink={tile.node.ignored}
-                    text-anchor="middle"
-                    x={center.x}
-                    y={center.y + 12}>{lines[1].text}</text
-                  >
+              <g class="tile-labels" clip-path={`url(#${paintId}-label-${index})`}>
+                {#if tile.label === 'strip'}
+                  <ChartFolderGlyph x={tile.x0 + 9} y={tile.y0 + 9} size={25} />
+                  <text class="tile-text tile-name" x={tile.x0 + 42} y={tile.y0 + 20}>{lines[0].text}</text>
+                  <text class="tile-text tile-detail" x={tile.x0 + 42} y={tile.y0 + 35}>{lines[1]?.text}</text>
+                  {#if tile.x1 - tile.x0 >= 180}
+                    <rect class="tile-share-pill" x={tile.x1 - 48} y={tile.y0 + 12} width="38" height="21" rx="7" />
+                    <text class="tile-text tile-share" text-anchor="middle" x={tile.x1 - 29} y={tile.y0 + 26}>{(tile.share * 100).toFixed(0)}%</text>
+                  {/if}
+                {:else}
+                  {@const roomy = tile.label === 'card' && tile.y1 - tile.y0 >= 90 && tile.x1 - tile.x0 >= 100}
+                  {@const left = tile.x0 + 12}
+                  {@const baseline = roomy ? center.y + 12 : center.y - (lines.length > 1 ? 2 : -4)}
+                  {#if roomy && tile.hasChildren && !tile.isAggregate}
+                    <ChartFolderGlyph x={left} y={baseline - 48} size={30} />
+                  {/if}
+                  <text class="tile-text tile-name" class:muted-ink={tile.node.ignored} x={left} y={baseline}>{lines[0].text}</text>
+                  {#if lines.length > 1}
+                    <text class="tile-text tile-detail" class:muted-ink={tile.node.ignored} x={left} y={baseline + 17}>{lines[1].text}</text>
+                  {/if}
+                  {#if roomy && tile.x1 - tile.x0 >= 155}
+                    <rect class="tile-share-pill" x={tile.x1 - 48} y={tile.y0 + 10} width="38" height="21" rx="7" />
+                    <text class="tile-text tile-share" text-anchor="middle" x={tile.x1 - 29} y={tile.y0 + 24}>{(tile.share * 100).toFixed(0)}%</text>
+                  {/if}
                 {/if}
-              {/if}
+              </g>
             {/if}
           </g>
         {/each}
       </svg>
     {/key}
-    {#if tiles.length === 0}
-      <div class="chart-empty">
-        {focusNode?.scanState === 'skipped'
-          ? 'This location was not scanned'
-          : focusNode
-            ? 'No child items to display'
-            : 'Choose a folder to explore'}
-      </div>
-    {/if}
-    {#if canGoBack}
-      <button class="chart-back" type="button" onclick={onBack} aria-label="Go to parent folder"
-        ><ArrowUpLeft size={14} /> Up one level</button
-      >
-    {/if}
-  </div>
-  <div
-    class="chart-inspector macos:rounded-md macos:border-0 macos:border-t macos:bg-transparent macos:px-1 macos:pt-3 windows:rounded-lg windows:bg-card linux:rounded-xl linux:bg-card linux:p-4"
-    class:inspecting={hoveredId !== null && inspected !== focusNode}
-    aria-live="polite"
-    aria-atomic="true"
-  >
-    <div
-      class="inspector-icon macos:border-0 macos:bg-transparent macos:p-1 linux:rounded-lg"
-      style={`--node: ${active?.color ?? 'var(--muted-foreground)'}`}
-    >
-      {#if inspected?.hasChildren || inspected?.collapsed}<Folder size={19} />{:else}<File size={19} />{/if}
-    </div>
-    <div class="inspector-content">
-      <div class="inspector-heading">
-        <strong>{inspected?.name ?? 'Explore your storage'}</strong><span>{formatNodeSize(inspected)}</span>
-      </div>
-      <p class="inspector-path">{inspected?.path ?? 'Hover or focus a tile to see its full path.'}</p>
-      <p class="inspector-hint">
-        {#if inspected?.scanState === 'skipped'}Not scanned · {inspected.skipReason ??
-            'unavailable'}{:else if active?.isAggregate}{active.childCount.toLocaleString()} smaller items grouped here ·
-          open the parent folder to explore{:else if hoveredId && inspected}{percentageLabel} of this folder · {inspected.hasChildren
-            ? 'Click to explore'
-            : 'Click to inspect'}{:else}Hover to inspect · click to explore{/if}
-      </p>
-    </div>
-  </div>
+  </ChartStage>
+  <ChartInspector {inspected} {active} {hoveredId} {focusNode} {percentageLabel} noun="tile" />
 </section>

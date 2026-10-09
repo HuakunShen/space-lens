@@ -293,8 +293,40 @@ pub struct ScanTarget {
   pub kind: String,
   pub description: String,
   pub size: u64,
+  /// Bytes used on the volume holding this root, when the OS reports it.
+  /// Absent (not zero) when capacity is unknown, so the UI can show
+  /// "unknown" instead of "empty".
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub used: Option<u64>,
   pub source: String,
   pub removable: bool,
+}
+
+/// Used and total bytes for the filesystem holding `path`, via statvfs.
+/// Returns `None` when the OS cannot say (missing path, unsupported FS),
+/// so callers surface "unknown" rather than a fabricated zero.
+///
+/// Block size is `f_frsize` alone. APFS reports `f_bsize` as the *optimal
+/// transfer size* (1 MiB), not the block size — taking the max of the two
+/// inflated every capacity by 256×.
+pub fn volume_capacity(path: &Path) -> Option<(u64, u64)> {
+  use std::ffi::CString;
+  use std::os::unix::ffi::OsStrExt;
+  let c_path = CString::new(path.as_os_str().as_bytes()).ok()?;
+  // SAFETY: statvfs only reads through the pointer for the call's duration;
+  // `c_path` outlives it and the buffer is a valid zeroed struct.
+  let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
+  if unsafe { libc::statvfs(c_path.as_ptr(), &mut stats) } != 0 {
+    return None;
+  }
+  #[allow(clippy::unnecessary_cast)]
+  let block = stats.f_frsize as u64;
+  let total = (stats.f_blocks as u64).saturating_mul(block);
+  let free = (stats.f_bfree as u64).saturating_mul(block);
+  if total == 0 {
+    return None;
+  }
+  Some((total.saturating_sub(free), total))
 }
 
 fn default_true() -> bool {
@@ -473,20 +505,89 @@ impl EngineStore {
       .roots
       .iter()
       .enumerate()
-      .map(|(index, root)| ScanTarget {
-        id: format!("root_{index}"),
-        label: root
-          .file_name()
-          .map(|n| n.to_string_lossy().to_string())
-          .unwrap_or_else(|| root.to_string_lossy().to_string()),
-        path: root.to_string_lossy().to_string(),
-        kind: "folder".into(),
-        description: String::new(),
-        size: 0,
-        source: "preset".into(),
-        removable: false,
+      .map(|(index, root)| {
+        // Capacity is read live per root so the picker can show used/free
+        // before any scan runs. A root the OS cannot stat keeps `size` 0 and
+        // no `used`, which the UI renders as "unknown".
+        let (size, used) = volume_capacity(root).map(|(used, total)| (total, Some(used))).unwrap_or((0, None));
+        ScanTarget {
+          id: format!("root_{index}"),
+          label: root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| root.to_string_lossy().to_string()),
+          path: root.to_string_lossy().to_string(),
+          kind: "folder".into(),
+          description: String::new(),
+          size,
+          used,
+          source: "preset".into(),
+          removable: false,
+        }
       })
       .collect()
+  }
+
+  /// Mounted volumes with capacity for the pre-scan drive list.
+  /// Display-only facts: a mount point grants no scan capability by itself.
+  /// Candidates are the startup volume plus entries under the platform's
+  /// mount points; anything statvfs cannot report is skipped, never
+  /// fabricated.
+  pub fn volumes(&self) -> Vec<ScanVolume> {
+    let mut mounts = vec![PathBuf::from("/")];
+    #[cfg(target_os = "macos")]
+    if let Ok(entries) = fs::read_dir("/Volumes") {
+      mounts.extend(
+        entries
+          .filter_map(|entry| entry.ok())
+          .map(|entry| entry.path())
+          // `/Volumes/Macintosh HD` is the firmlink twin of `/` — same disk
+          // twice in the list otherwise. Recovery/Preboot/VM are system
+          // partitions with no user data to browse.
+          .filter(|path| {
+            path.file_name().map_or(true, |name| {
+              !matches!(name.to_string_lossy().as_ref(), "Macintosh HD" | "Recovery" | "Preboot" | "VM" | "Boot" | "Home")
+            })
+          })
+          .filter(|path| path.is_dir()),
+      );
+    }
+    #[cfg(target_os = "linux")]
+    for base in ["/mnt", "/media"] {
+      if let Ok(entries) = fs::read_dir(base) {
+        mounts.extend(
+          entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir()),
+        );
+      }
+    }
+    let mut volumes: Vec<ScanVolume> = mounts
+      .iter()
+      .filter_map(|mount| {
+        let (used, total) = volume_capacity(mount)?;
+        let free = total.saturating_sub(used);
+        Some(ScanVolume {
+          path: mount.clone(),
+          total_bytes: total,
+          available_bytes: free,
+          free_bytes: free,
+          is_local: true,
+        })
+      })
+      .collect();
+    volumes.sort_by(|a, b| {
+      if a.path == Path::new("/") {
+        std::cmp::Ordering::Less
+      } else if b.path == Path::new("/") {
+        std::cmp::Ordering::Greater
+      } else {
+        a.path.cmp(&b.path)
+      }
+    });
+    volumes.dedup_by(|a, b| a.path == b.path);
+    volumes
   }
 
   /// Runs the synchronous engine scan. Call from `spawn_blocking`.

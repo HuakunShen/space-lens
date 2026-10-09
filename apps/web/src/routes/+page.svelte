@@ -11,6 +11,9 @@
     StatusBar,
     SunburstChart,
     TreemapChart,
+    IcicleChart,
+    BubblesChart,
+    StripsChart,
     LensSelect,
     WorkspaceHeading,
     LensToolbar,
@@ -23,14 +26,14 @@
     formatBytes,
     formatNodeName,
   } from '@space-lens/web-ui'
-  import type { ChartMode } from '@space-lens/web-ui'
+  import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
   import type { CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem } from '@space-lens/contract'
   import { setMode, userPrefersMode } from 'mode-watcher'
   import { addSelection, selectedAncestor } from '../lib/selection'
   import { ACTIVE_SCAN_KEY, parseActiveScan } from '../lib/resume'
   import { APPEARANCE_KEY, parseAppearance, resolveStyle } from '../lib/appearance'
-  import { CHART_MODE_KEY, parseChartMode } from '../lib/chart-mode'
+  import { CHART_MODE_KEY, TREEMAP_DENSITY_KEY, parseChartMode, parseTreemapDensity } from '../lib/chart-mode'
   import { checkForAppUpdate, currentAppVersion, installAppUpdate } from '../lib/updater'
   import type { UpdateStatus } from '../lib/updater'
   import { ServiceError } from '@space-lens/client'
@@ -63,11 +66,162 @@
   let settingsOpen = $state(false)
   let sidebarVisible = $state(true)
   let chartVisible = $state(true)
+
+  /**
+   * The contents panel's size, dragged by the divider between the chart and
+   * the folder list. Each orientation keeps its own size so flipping the
+   * layout never clobbers the other axis' setting.
+   */
+  const CONTENTS_KEY = 'spacelens.contentsWidth'
+  const CONTENTS_HEIGHT_KEY = 'spacelens.contentsHeight'
+  const LAYOUT_KEY = 'spacelens.layoutDirection'
+  const CONTENTS_MIN = 240
+  const CONTENTS_MAX = 720
+  const CONTENTS_DEFAULT = 340
+  const CONTENTS_HEIGHT_MIN = 160
+  const CONTENTS_HEIGHT_MAX = 640
+  const CONTENTS_HEIGHT_DEFAULT = 300
+  /**
+   * Below this panel width a side-by-side split starves both halves — the
+   * DSH side panel and the VS Code webview are tall and narrow, so `auto`
+   * stacks the chart above the list instead.
+   */
+  const NARROW_PANEL = 900
+  type LayoutPreference = 'auto' | 'horizontal' | 'vertical'
+  let contentsWidth = $state(CONTENTS_DEFAULT)
+  let contentsHeight = $state(CONTENTS_HEIGHT_DEFAULT)
+  let layoutPreference = $state<LayoutPreference>('auto')
+  let viewportWidth = $state(1440)
+  let orientation = $derived<'horizontal' | 'vertical'>(
+    layoutPreference === 'auto' ? (viewportWidth < NARROW_PANEL ? 'vertical' : 'horizontal') : layoutPreference,
+  )
+  let resizing = $state(false)
+  let layoutElement = $state<HTMLElement | null>(null)
+
+  /**
+   * The volume the current scan lives on. The longest mount path that is a
+   * prefix of the scan root wins, so a scan on an external volume reports that
+   * disk's capacity rather than the startup disk's.
+   */
+  let scanVolume = $derived.by(() => {
+    const status = workbench.status
+    const volumes = status?.volumes ?? []
+    if (volumes.length === 0) return null
+    const root = status?.label ?? scannedPaths[0] ?? ''
+    if (!root) return volumes[0] ?? null
+    const containing = volumes
+      .filter((volume) => root === volume.path || root.startsWith(`${volume.path.replace(/\/+$/, '')}/`))
+      .sort((left, right) => right.path.length - left.path.length)
+    return containing[0] ?? null
+  })
+  let rescanning = $state(false)
+  async function rescan(): Promise<void> {
+    const paths = scannedPaths.length > 0 ? scannedPaths : workbench.targets.map((target) => target.path)
+    if (paths.length === 0) return
+    rescanning = true
+    try {
+      await startScan(paths)
+    } finally {
+      rescanning = false
+    }
+  }
+
+  function clampContents(width: number): number {
+    return Math.min(CONTENTS_MAX, Math.max(CONTENTS_MIN, Math.round(width)))
+  }
+  function clampContentsHeight(height: number): number {
+    return Math.min(CONTENTS_HEIGHT_MAX, Math.max(CONTENTS_HEIGHT_MIN, Math.round(height)))
+  }
+  function setContentsWidth(width: number): void {
+    contentsWidth = clampContents(width)
+    window.localStorage.setItem(CONTENTS_KEY, String(contentsWidth))
+  }
+  function setContentsHeight(height: number): void {
+    contentsHeight = clampContentsHeight(height)
+    window.localStorage.setItem(CONTENTS_HEIGHT_KEY, String(contentsHeight))
+  }
+  function resetContentsWidth(): void {
+    if (orientation === 'vertical') setContentsHeight(CONTENTS_HEIGHT_DEFAULT)
+    else setContentsWidth(CONTENTS_DEFAULT)
+  }
+  function setLayoutPreference(next: LayoutPreference): void {
+    layoutPreference = next
+    window.localStorage.setItem(LAYOUT_KEY, next)
+  }
+  /** `auto` re-decides on every resize, so dragging the host panel narrow
+   * stacks the layout without the user touching the toggle. */
+  function onViewportResize(): void {
+    viewportWidth = window.innerWidth
+  }
+  /** Flips between the two explicit layouts; from `auto` it pins the opposite
+   * of whatever is showing, so one click always changes what you see. */
+  function toggleOrientation(): void {
+    setLayoutPreference(orientation === 'vertical' ? 'horizontal' : 'vertical')
+  }
+  function startResize(event: PointerEvent): void {
+    const layout = layoutElement
+    if (!layout) return
+    event.preventDefault()
+    resizing = true
+    const rect = layout.getBoundingClientRect()
+    const stacked = orientation === 'vertical'
+    const target = event.currentTarget as HTMLElement
+    // A failed capture must not kill the drag: without the guard, the throw
+    // below the try would skip the move/up listeners entirely.
+    try {
+      target.setPointerCapture(event.pointerId)
+    } catch {
+      // Synthetic or already-released pointer — drag still works via the
+      // element listeners.
+    }
+    const move = (moveEvent: PointerEvent) =>
+      stacked ? setContentsHeight(rect.bottom - moveEvent.clientY) : setContentsWidth(rect.right - moveEvent.clientX)
+    const stop = () => {
+      resizing = false
+      target.releasePointerCapture(event.pointerId)
+      target.removeEventListener('pointermove', move)
+      target.removeEventListener('pointerup', stop)
+      target.removeEventListener('pointercancel', stop)
+    }
+    target.addEventListener('pointermove', move)
+    target.addEventListener('pointerup', stop)
+    target.addEventListener('pointercancel', stop)
+  }
+  function resizeByKeyboard(event: KeyboardEvent): void {
+    const step = event.shiftKey ? 48 : 16
+    if (orientation === 'vertical') {
+      if (event.key === 'ArrowUp') setContentsHeight(contentsHeight + step)
+      else if (event.key === 'ArrowDown') setContentsHeight(contentsHeight - step)
+      else if (event.key === 'Home') setContentsHeight(CONTENTS_HEIGHT_DEFAULT)
+      else return
+    } else {
+      if (event.key === 'ArrowLeft') setContentsWidth(contentsWidth + step)
+      else if (event.key === 'ArrowRight') setContentsWidth(contentsWidth - step)
+      else if (event.key === 'Home') setContentsWidth(CONTENTS_DEFAULT)
+      else return
+    }
+    event.preventDefault()
+  }
   let chartMode = $state<ChartMode>('sunburst')
+  let treemapDensity = $state<TreemapDensity>('nested')
   function setChartMode(mode: ChartMode): void {
     chartMode = mode
     window.localStorage.setItem(CHART_MODE_KEY, mode)
   }
+  function setTreemapDensity(density: TreemapDensity): void {
+    treemapDensity = density
+    window.localStorage.setItem(TREEMAP_DENSITY_KEY, density)
+  }
+  // Every chart family takes the same prop contract, so the mode picks the
+  // component and the call site below stays single.
+  const chartComponents = {
+    sunburst: SunburstChart,
+    treemap: TreemapChart,
+    icicle: IcicleChart,
+    bubbles: BubblesChart,
+    strips: StripsChart,
+  } as const
+  let ActiveChart = $derived(chartComponents[chartMode])
   let pickerOpen = $state(false)
   let pickerPath = $state('')
   let startingScan = $state(false)
@@ -154,12 +308,18 @@
 
   $effect(() => {
     if (!preferencesReady) return
-    document.documentElement.dataset.interface = resolveStyle(
-      appearance.style,
-      __SPACLENS_DESKTOP__,
-      navigator.userAgent,
-    )
+    const interfaceStyle = resolveStyle(appearance.style, __SPACLENS_DESKTOP__, navigator.userAgent)
+    document.documentElement.dataset.interface = interfaceStyle
     document.documentElement.dataset.density = appearance.density
+    // The desktop shell puts a native NSVisualEffectView behind the webview
+    // (tauri windowEffects), so macOS may go translucent all the way down to
+    // the window material. The attribute gates it: a plain browser or a
+    // non-macOS treatment keeps opaque surfaces.
+    if (__SPACLENS_DESKTOP__ && interfaceStyle === 'macos') {
+      document.documentElement.dataset.backdrop = 'vibrancy'
+    } else {
+      delete document.documentElement.dataset.backdrop
+    }
     window.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance))
   })
   $effect(() => {
@@ -258,6 +418,7 @@
       workbench.capabilities = await service.capabilities()
       const rootsResponse = await service.roots()
       workbench.targets = Array.isArray(rootsResponse?.roots) ? rootsResponse.roots : []
+      workbench.volumes = (await service.volumes?.().catch(() => null))?.volumes ?? []
       workbench.service = service
       workbench.phase = 'ready'
       // Live push first; if the stream cannot start, the 2s polling below
@@ -325,6 +486,7 @@
       workbench.capabilities = await service.capabilities()
       const rootsResponse = await service.roots()
       workbench.targets = Array.isArray(rootsResponse?.roots) ? rootsResponse.roots : []
+      workbench.volumes = (await service.volumes?.().catch(() => null))?.volumes ?? []
       workbench.phase = 'ready'
       stream = startEventStream() ?? null
       startPolling()
@@ -645,12 +807,31 @@
 
   onMount(() => {
     appearance = parseAppearance(window.localStorage.getItem(APPEARANCE_KEY))
-    chartMode = parseChartMode(window.localStorage.getItem(CHART_MODE_KEY))
+    const storedMode = window.localStorage.getItem(CHART_MODE_KEY)
+    chartMode = parseChartMode(storedMode)
+    // The legacy mode key already carries the density a pre-treemap install
+    // last chose, so it is passed as the fallback rather than discarded.
+    treemapDensity = parseTreemapDensity(window.localStorage.getItem(TREEMAP_DENSITY_KEY), storedMode)
+    const storedContents = Number(window.localStorage.getItem(CONTENTS_KEY))
+    if (Number.isFinite(storedContents) && storedContents > 0) contentsWidth = clampContents(storedContents)
+    const storedContentsHeight = Number(window.localStorage.getItem(CONTENTS_HEIGHT_KEY))
+    if (Number.isFinite(storedContentsHeight) && storedContentsHeight > 0) {
+      contentsHeight = clampContentsHeight(storedContentsHeight)
+    }
+    const storedLayout = window.localStorage.getItem(LAYOUT_KEY)
+    if (storedLayout === 'horizontal' || storedLayout === 'vertical' || storedLayout === 'auto') {
+      layoutPreference = storedLayout
+    }
+    viewportWidth = window.innerWidth
+    window.addEventListener('resize', onViewportResize)
     preferencesReady = true
     if (window.innerWidth < 760) sidebarVisible = false
     if (__SPACLENS_DESKTOP__) {
       void connectDesktop()
-      return () => stopStreams()
+      return () => {
+        window.removeEventListener('resize', onViewportResize)
+        stopStreams()
+      }
     }
     const resolved = resolveBaseUrl(null)
     workbench.resolvedUrl = resolved.url
@@ -665,7 +846,10 @@
         return startScan(workbench.targets.map((target) => target.path))
       })
     }
-    return () => stopStreams()
+    return () => {
+      window.removeEventListener('resize', onViewportResize)
+      stopStreams()
+    }
   })
 </script>
 
@@ -687,6 +871,7 @@
 {:else if pickerOpen || workbench.status === null || workbench.status.state !== 'ready'}
   <ScanPicker
     {targets}
+    volumes={workbench.volumes}
     mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
     folderPicker={workbench.capabilities?.host.folderPicker ?? false}
     onSettings={() => (settingsOpen = true)}
@@ -726,6 +911,8 @@
         chartVisible = !chartVisible
         view = 'browse'
       }}
+      {orientation}
+      onToggleOrientation={toggleOrientation}
       onOpenCollector={() => (collectorOpen = true)}
       onOpenSettings={() => (settingsOpen = true)}
     />
@@ -743,6 +930,12 @@
           onCustom={() => newLocation()}
           onForget={forgetRecent}
           onSettings={() => (settingsOpen = true)}
+          volume={scanVolume}
+          scanBytes={workbench.status?.bytesScanned ?? 0}
+          scanEntries={workbench.status?.entriesScanned ?? 0}
+          scanLabel={workbench.status?.label ?? null}
+          {rescanning}
+          onRescan={() => void rescan()}
         />
       {/if}
       <div
@@ -807,47 +1000,60 @@
             >
           </div>
           <main
-            class="explorer-layout macos:md:data-[chart-visible=true]:grid-cols-[minmax(0,1.15fr)_minmax(320px,1fr)] windows:md:data-[chart-visible=true]:grid-cols-[minmax(0,1fr)_minmax(340px,1fr)] windows:mx-4 windows:mb-4 windows:gap-3 linux:md:data-[chart-visible=true]:grid-cols-[minmax(0,1.1fr)_minmax(340px,1fr)]"
+            class="explorer-layout windows:mx-4 windows:mb-4 windows:gap-3"
             data-chart-visible={chartVisible}
+            data-orientation={orientation}
             class:without-chart={!chartVisible}
+            style={`--contents-width: ${contentsWidth}px; --contents-height: ${contentsHeight}px`}
             aria-busy={navigating}
+            bind:this={layoutElement}
           >
             {#if chartVisible}<div
                 class="explorer-chart macos:bg-background macos:p-5 windows:rounded-lg windows:border windows:bg-background windows:p-4 linux:bg-background linux:p-5"
               >
-                {#if chartMode === 'sunburst'}<SunburstChart
-                    tree={workbench.slice?.tree ?? null}
-                    focusNode={displayFocus}
-                    mode={chartMode}
-                    onModeChange={setChartMode}
-                    hoveredNode={workbench.items.find((item) => item.id === workbench.hoveredId) ?? null}
-                    onBack={goUp}
-                    canGoBack={ancestors.length > 1}
-                    hoveredId={workbench.hoveredId}
-                    collectedIds={coveredIds}
-                    onHover={(id) => (workbench.hoveredId = id)}
-                    onOpen={(node) => void focus(node)}
-                    onContext={toggleCollected}
-                  />
-                {:else}<TreemapChart
-                    tree={workbench.slice?.tree ?? null}
-                    focusNode={displayFocus}
-                    nested={chartMode === 'nested'}
-                    mode={chartMode}
-                    onModeChange={setChartMode}
-                    hoveredNode={workbench.items.find((item) => item.id === workbench.hoveredId) ?? null}
-                    onBack={goUp}
-                    canGoBack={ancestors.length > 1}
-                    hoveredId={workbench.hoveredId}
-                    collectedIds={coveredIds}
-                    onHover={(id) => (workbench.hoveredId = id)}
-                    onOpen={(node) => void focus(node)}
-                    onContext={toggleCollected}
-                  />{/if}
+                <ActiveChart
+                  tree={workbench.slice?.tree ?? null}
+                  focusNode={displayFocus}
+                  mode={chartMode}
+                  onModeChange={setChartMode}
+                  density={treemapDensity}
+                  onDensityChange={setTreemapDensity}
+                  hoveredNode={workbench.items.find((item) => item.id === workbench.hoveredId) ?? null}
+                  onBack={goUp}
+                  canGoBack={ancestors.length > 1}
+                  hoveredId={workbench.hoveredId}
+                  collectedIds={coveredIds}
+                  onHover={(id) => (workbench.hoveredId = id)}
+                  onOpen={(node) => void focus(node)}
+                  onContext={toggleCollected}
+                />
                 {#if workbench.slice?.truncated}<p class="chart-summary">
                     {workbench.slice.omittedCount.toLocaleString()} smaller items grouped · open a folder to explore
                   </p>{/if}
               </div>{/if}
+            {#if chartVisible}
+              <!-- ARIA's window-splitter pattern: a focusable `separator`
+                   carrying aria-valuenow. Svelte's linter reads any focusable
+                   div as a mistake, so both rules are suppressed here with the
+                   reason attached rather than downgrading this to a button,
+                   which would misdescribe it to screen readers. -->
+              <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+              <div
+                class="explorer-divider"
+                data-dragging={resizing}
+                role="separator"
+                tabindex="0"
+                aria-orientation={orientation === 'vertical' ? 'horizontal' : 'vertical'}
+                aria-label="Resize folder contents"
+                aria-valuenow={orientation === 'vertical' ? contentsHeight : contentsWidth}
+                aria-valuemin={orientation === 'vertical' ? CONTENTS_HEIGHT_MIN : CONTENTS_MIN}
+                aria-valuemax={orientation === 'vertical' ? CONTENTS_HEIGHT_MAX : CONTENTS_MAX}
+                onpointerdown={startResize}
+                onkeydown={resizeByKeyboard}
+                ondblclick={resetContentsWidth}
+              ></div>
+            {/if}
             <aside
               class="explorer-sidebar macos:bg-background macos:p-3 windows:rounded-lg windows:border windows:bg-card windows:p-3 linux:bg-card linux:p-4"
               aria-label="Folder contents"

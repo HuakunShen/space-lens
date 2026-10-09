@@ -29,6 +29,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 trash = "5"
 sha1 = "0.10"
+# statvfs for pre-scan volume capacity on roots; the engine crate owns the
+# scan-time volume walk, but `roots()` lives in this shell.
+libc = "0.2"
 # The engine, vendored at the repo root; aliased under the familiar name.
 space-lens = { package = "kuntu-scan", path = "../../../vendors/kuntu/crates/kuntu-scan" }
 # Shared discovery heuristics (cache categories) — the CLI's MCP adapter

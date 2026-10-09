@@ -6,12 +6,18 @@ export { default as ScanPicker } from './components/lens/ScanPicker.svelte'
 export { default as StatusBar } from './components/lens/StatusBar.svelte'
 export { default as SunburstChart } from './components/lens/SunburstChart.svelte'
 export { default as TreemapChart } from './components/lens/TreemapChart.svelte'
+export { default as IcicleChart } from './components/lens/IcicleChart.svelte'
+export { default as BubblesChart } from './components/lens/BubblesChart.svelte'
+export { default as StripsChart } from './components/lens/StripsChart.svelte'
 export { default as ChartModeToggle } from './components/lens/ChartModeToggle.svelte'
+export { default as ChartStage } from './components/lens/ChartStage.svelte'
+export { default as ChartInspector } from './components/lens/ChartInspector.svelte'
 export { default as LensSelect } from './components/lens/LensSelect.svelte'
 export { default as ScanCoveragePanel } from './components/lens/ScanCoveragePanel.svelte'
 export { default as WorkspaceHeading } from './components/lens/WorkspaceHeading.svelte'
 export { default as LensToolbar } from './components/lens/LensToolbar.svelte'
 export { default as ScanSidebar } from './components/lens/ScanSidebar.svelte'
+export { default as DriveList } from './components/lens/DriveList.svelte'
 
 export { default as DiscoveryList } from './components/lens/DiscoveryList.svelte'
 export { default as AppearancePanel } from './components/lens/AppearancePanel.svelte'
@@ -39,4 +45,15 @@ export { Badge, Button, Card, ContextMenu, Checkbox, Input, Progress, ScrollArea
 export { formatBytes, formatPercent } from './lib/format.js'
 export { formatNodeName } from './lib/node-size.js'
 export { cn } from './lib/utils.js'
-export type { ChartMode } from './lib/treemap.js'
+export { chartEmptyMessage } from './lib/chart-empty.js'
+export {
+  CHART_MODES,
+  DEFAULT_CHART_MODE,
+  DEFAULT_TREEMAP_DENSITY,
+  parseChartMode,
+  parseTreemapDensity,
+} from './lib/chart-mode.js'
+export type { ChartMode, TreemapDensity } from './lib/chart-mode.js'
+export type { IcicleSegment, IcicleColumn } from './lib/icicle.js'
+export type { BubbleCircle } from './lib/bubbles.js'
+export type { StripRow, StripSegment, RankedItem } from './lib/strips.js'

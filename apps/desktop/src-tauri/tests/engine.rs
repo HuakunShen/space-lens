@@ -184,3 +184,36 @@ fn plan_execute_trashes_staged_entries() {
     .unwrap_err();
   assert_eq!(gone.code, "NotFound");
 }
+
+#[test]
+fn roots_carry_live_capacity() {
+  let (_dir, store) = fixture();
+  let roots = store.roots();
+  assert_eq!(roots.len(), 1);
+  let root = &roots[0];
+  // The fixture lives on a real filesystem, so capacity must be populated
+  // and self-consistent: size is the volume total, used is within it.
+  assert!(root.size > 0, "root size should be the volume total, got 0");
+  let used = root.used.expect("root should carry used bytes pre-scan");
+  assert!(used <= root.size, "used {used} exceeds total {}", root.size);
+}
+
+#[test]
+fn roots_without_capacity_stay_unknown() {
+  let store = EngineStore::new(vec![std::path::PathBuf::from("/definitely/not/here-9f8e7d6c")]);
+  let roots = store.roots();
+  assert_eq!(roots.len(), 1);
+  assert_eq!(roots[0].size, 0);
+  assert_eq!(roots[0].used, None, "unstatable roots must be unknown, not zero");
+}
+
+#[test]
+fn volumes_lists_a_usable_startup_volume() {
+  let (_dir, store) = fixture();
+  let volumes = store.volumes();
+  assert!(!volumes.is_empty(), "at least the startup volume must list");
+  let root = volumes.iter().find(|v| v.path == std::path::Path::new("/")).expect("startup volume / must list");
+  assert!(root.total_bytes > 0);
+  assert!(root.free_bytes <= root.total_bytes);
+  assert!(root.available_bytes <= root.total_bytes);
+}

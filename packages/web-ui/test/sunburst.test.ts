@@ -67,3 +67,19 @@ test('empty folders and zero-byte items never produce invalid paths', () => {
     assert.doesNotMatch(segment.pathData, /NaN|Infinity/)
   }
 })
+
+test('the inner well is a parameter, not a fixed hole', () => {
+  // A fixed 62px hole swallowed a small panel and was invisible in a large
+  // one; the caller now derives it from the canvas.
+  const root = node('root', 100, [node('a', 60), node('b', 40)], { depth: 0 })
+  const small = buildSunburstSegments(root, 90, 22)
+  const large = buildSunburstSegments(root, 300, 72)
+  assert.ok(small.length > 0 && large.length > 0)
+  for (const segment of [...small, ...large]) {
+    assert.ok(segment.pathData.length > 0)
+    assert.doesNotMatch(segment.pathData, /NaN|Infinity/)
+  }
+  const wide = buildSunburstSegments(root, 285, 20).find((s) => s.id === 'a')!
+  const narrow = buildSunburstSegments(root, 285, 62).find((s) => s.id === 'a')!
+  assert.notEqual(wide.pathData, narrow.pathData, 'the requested well reaches the arc geometry')
+})

@@ -283,16 +283,288 @@
     padding: 0.8rem 1.5rem;
     border-bottom: 1px solid var(--border);
   }
+  /* The split between chart and contents is the user's, not the stylesheet's:
+     `--contents-width` is set inline by the drag divider (and persisted), so
+     the contents column stops eating half the workbench on a wide window. */
   .explorer-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(290px, 340px);
+    grid-template-columns: minmax(0, 1fr) var(--contents-width, 340px);
     flex: 1;
     min-height: 0;
+  }
+  .explorer-layout[data-chart-visible='true'] {
+    grid-template-columns: minmax(0, 1fr) var(--divider-width, 6px) var(--contents-width, 340px);
+  }
+  :root[data-interface='windows'] .explorer-layout,
+  :root[data-interface='linux'] .explorer-layout {
+    --contents-width: 360px;
+  }
+  .explorer-divider {
+    position: relative;
+    appearance: none;
+    border: 0;
+    padding: 0;
+    background: transparent;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .explorer-divider::after {
+    content: '';
+    position: absolute;
+    inset: 0 2px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 140ms;
+  }
+  .explorer-divider:hover::after,
+  .explorer-divider:focus-visible::after,
+  .explorer-divider[data-dragging='true']::after {
+    background: var(--border);
+  }
+  .explorer-divider:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
+  }
+  /* Capacity card at the foot of the location sidebar: the volume the scan
+     lives on, how full it is, and what the last scan measured. */
+  .drive-card {
+    margin-top: auto;
+    padding: 0.7rem 0.75rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in oklch, var(--card) 55%, transparent);
+    display: grid;
+    gap: 0.55rem;
+  }
+  .drive-head {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-width: 0;
+    color: var(--muted-foreground);
+  }
+  .drive-head > div {
+    min-width: 0;
+    display: grid;
+  }
+  .drive-head strong {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .drive-head span {
+    font-size: 0.66rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .drive-bar {
+    height: 7px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: color-mix(in oklch, var(--foreground) 12%, transparent);
+  }
+  .drive-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--primary);
+  }
+  .drive-legend {
+    display: grid;
+    gap: 0.3rem;
+    margin: 0;
+  }
+  .drive-legend > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .drive-legend dt {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--muted-foreground);
+    font-size: 0.68rem;
+  }
+  .drive-legend dd {
+    margin: 0;
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .drive-swatch {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--primary);
+  }
+  .drive-swatch.free {
+    background: color-mix(in oklch, var(--foreground) 22%, transparent);
+  }
+  .drive-scan-btn {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.45rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .drive-scan > div {
+    min-width: 0;
+    display: grid;
+  }
+  .drive-scan strong {
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+  .drive-scan span {
+    color: var(--muted-foreground);
+    font-size: 0.64rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .drive-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    margin-top: 0.25rem;
+    border-radius: 999px;
+    background: oklch(0.72 0.19 145);
+  }
+  .drive-rescan {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    width: 100%;
+    padding: 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--foreground);
+    font: inherit;
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition:
+      background 140ms,
+      border-color 140ms;
+  }
+  .drive-rescan:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--foreground) 6%, transparent);
+    border-color: color-mix(in oklch, var(--foreground) 22%, transparent);
+  }
+  .drive-rescan:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .drive-rescan:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  /* Pre-scan drive list: every mounted volume with its capacity, before any
+     scan runs. Shares the drive-card bar language so pre- and post-scan
+     capacity reads as one system. */
+  .drive-list {
+    margin-top: 0.75rem;
+  }
+  .drive-list-heading {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    margin: 0 0 0.45rem 0.1rem;
+  }
+  .drive-list ol {
+    display: grid;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .drive-row {
+    display: flex;
+    gap: 0.55rem;
+    align-items: flex-start;
+    padding: 0.6rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in oklch, var(--card) 55%, transparent);
+  }
+  .drive-icon {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+    color: var(--muted-foreground);
+  }
+  .drive-meta {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 0.4rem;
+  }
+  .drive-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .drive-top strong {
+    font-size: 0.76rem;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .drive-top span {
+    flex-shrink: 0;
+    font-size: 0.68rem;
+    color: var(--muted-foreground);
+    font-variant-numeric: tabular-nums;
+  }
+  .drive-sub {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-size: 0.66rem;
+    color: var(--muted-foreground);
+    font-variant-numeric: tabular-nums;
+  }
+  .drive-scan-btn {
+    appearance: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--foreground);
+    font: inherit;
+    font-size: 0.68rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+  }
+  .drive-scan-btn:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--foreground) 6%, transparent);
+  }
+  .drive-scan-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .drive-scan-btn:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .drive-nonscan {
+    font-size: 0.64rem;
+    opacity: 0.75;
   }
   .explorer-chart {
     min-width: 0;
     min-height: 0;
-    overflow: auto;
+    overflow: hidden;
     padding: 1.25rem 2rem 1rem;
     display: flex;
     flex-direction: column;
@@ -392,17 +664,29 @@
   }
   .chart-stage {
     width: 100%;
-    min-height: 200px;
-    flex: 1;
+    /* `flex: 1` plus `min-height: 0` is what makes the stage a bounded box the
+       charts can measure; a min-height floor would let dense content push the
+       panel taller than the window instead. */
+    min-height: 0;
+    flex: 1 1 0%;
     display: grid;
     place-items: center;
     position: relative;
   }
-  .sunburst {
-    width: min(100%, 60dvh);
+  /* Every chart fills the stage it was measured against. The old caps
+     (min(100%, 60dvh), max-width 680px) kept the drawing small no matter how
+     much room the workbench had, which is what made dense trees unreadable. */
+  .sunburst,
+  .treemap,
+  .icicle,
+  .bubbles {
+    width: 100%;
+    height: 100%;
     min-width: 0;
-    max-width: 680px;
+    min-height: 0;
     overflow: visible;
+  }
+  .sunburst {
     filter: drop-shadow(0 18px 28px rgb(0 0 0 / 0.18));
   }
   .arc {
@@ -439,6 +723,13 @@
   .arc[aria-disabled='true'] {
     cursor: default;
   }
+  .chart-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.4rem;
+  }
   .chart-mode {
     display: inline-flex;
     gap: 1px;
@@ -454,12 +745,29 @@
     font: inherit;
     font-size: 0.7rem;
     line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
     padding: 0.32rem 0.6rem;
     border-radius: 5px;
     cursor: pointer;
     transition:
       background 140ms,
       color 140ms;
+  }
+  .chart-mode button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  /* The density axis is a sub-choice of one family, so it reads lighter
+     than the family row it belongs to. */
+  .chart-mode-sub {
+    background: transparent;
+    border: 1px solid var(--border);
+  }
+  .chart-mode-sub button {
+    font-size: 0.65rem;
+    padding: 0.3rem 0.5rem;
   }
   .chart-mode button:hover {
     color: var(--foreground);
@@ -470,9 +778,6 @@
     font-weight: 600;
   }
   .treemap {
-    width: min(100%, calc(60dvh * 1.44));
-    min-width: 0;
-    max-width: 680px;
     border-radius: 8px;
   }
   .tile-group {
@@ -496,6 +801,339 @@
   .tile-detail {
     font-size: 10px;
     opacity: 0.78;
+  }
+
+  .icicle-level {
+    fill: var(--muted-foreground);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+  }
+  .icicle-level-title {
+    fill: var(--muted-foreground);
+    font-size: 9px;
+    opacity: 0.75;
+  }
+
+  .bubble {
+    stroke: color-mix(in oklch, var(--background) 82%, black 18%);
+    stroke-width: 1;
+  }
+  .bubble-backdrop {
+    fill: color-mix(in oklch, var(--foreground) 4%, transparent);
+    stroke: color-mix(in oklch, var(--foreground) 10%, transparent);
+    stroke-width: 1;
+    stroke-dasharray: 3 4;
+  }
+  .bubble-text {
+    pointer-events: none;
+    user-select: none;
+  }
+  .bubble-name {
+    fill: oklch(0.25 0.02 260);
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .bubble-detail {
+    fill: oklch(0.3 0.02 260);
+    font-size: 10px;
+    opacity: 0.8;
+  }
+  .bubble-text.muted-ink {
+    fill: oklch(0.9 0.01 260);
+  }
+  /* The strips view is HTML, not SVG: rows of text want selection, wrapping,
+     and real buttons. It scrolls on its own so a long folder list never
+     pushes the inspector off screen. */
+  .chart-stage-strips {
+    display: block;
+    overflow-y: auto;
+    min-height: 0;
+    container-type: inline-size;
+  }
+  .strips-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(170px, 220px);
+    gap: 1rem;
+    align-items: start;
+    width: 100%;
+  }
+  /* The rail only drops below the rows when the panel is genuinely too
+     narrow for both; at the workbench's usual column width it sits beside
+     them, which is what keeps the whole view inside one screen. */
+  @container (max-width: 520px) {
+    .strips-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .strips-main {
+    min-width: 0;
+  }
+  /* Reports the ranked tail the row cap left out, so the list is bounded
+     without pretending the folder had fewer entries than it does. */
+  .strip-more {
+    margin-top: 0.5rem;
+    padding-left: 0.3rem;
+    color: var(--muted-foreground);
+    font-size: 0.65rem;
+  }
+  .strip-rows {
+    display: grid;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  /* One card per folder: label row on top, tiled breakdown below — the
+     concept's reading order is "which folder, then what's inside it". */
+  .strip-row {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.45rem 0.55rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in oklch, var(--card) 35%, transparent);
+    transition:
+      border-color 140ms,
+      background 140ms;
+  }
+  .strip-row:hover,
+  .strip-row.is-hovered {
+    border-color: color-mix(in oklch, var(--foreground) 22%, transparent);
+    background: color-mix(in oklch, var(--card) 60%, transparent);
+  }
+  .strip-head {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    display: grid;
+    grid-template-columns: 1.9rem minmax(0, 1fr) auto auto 1rem;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.1rem 0.1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .strip-head:hover,
+  .strip-head:focus-visible {
+    background: color-mix(in oklch, var(--foreground) 5%, transparent);
+  }
+  .strip-head:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .strip-rank,
+  .rail-rank {
+    color: var(--muted-foreground);
+    font-size: 0.65rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .strip-icon,
+  .rail-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--node);
+  }
+  /* The concept's category tile: a rounded chip tinted with the row's own
+     family color, so scanning the left column reads as category, not glyph. */
+  .strip-chip {
+    width: 1.9rem;
+    height: 1.9rem;
+    border-radius: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--node);
+    background: color-mix(in oklch, var(--node) 22%, transparent);
+  }
+  .strip-chevron {
+    color: var(--muted-foreground);
+  }
+  .strip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .strip-size {
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .strip-share {
+    min-width: 2.6rem;
+    text-align: right;
+    color: var(--muted-foreground);
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .strip-bar {
+    display: flex;
+    gap: 2px;
+    height: 2.1rem;
+    border-radius: 6px;
+    overflow: hidden;
+    background: color-mix(in oklch, var(--foreground) 6%, transparent);
+  }
+  .strip-piece {
+    appearance: none;
+    border: 0;
+    padding: 0 0.3rem;
+    min-width: 3px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 4px;
+    transition:
+      filter 140ms,
+      opacity 140ms;
+  }
+  /* Ink on a pastel tile: near-black, exactly like the SVG tile labels. */
+  .piece-label {
+    font-size: 0.62rem;
+    font-weight: 600;
+    line-height: 1.2;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: oklch(0.25 0.02 260);
+  }
+  .piece-size {
+    font-size: 0.58rem;
+    line-height: 1.2;
+    opacity: 0.8;
+    font-variant-numeric: tabular-nums;
+    color: oklch(0.3 0.02 260);
+  }
+  .strip-piece.muted-ink .piece-label,
+  .strip-piece.muted-ink .piece-size {
+    color: oklch(0.9 0.01 260);
+  }
+  .strip-piece:hover,
+  .strip-piece.hovered {
+    filter: brightness(1.12);
+  }
+  .strip-piece:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -1px;
+  }
+  /* Nothing was measured here, so the track stays visibly empty instead of
+     claiming a share of the row. */
+  .strip-piece-empty {
+    flex: 1;
+    cursor: default;
+    background: repeating-linear-gradient(
+      135deg,
+      color-mix(in oklch, var(--foreground) 9%, transparent) 0 5px,
+      transparent 5px 10px
+    );
+  }
+  .strip-piece.collected {
+    box-shadow: inset 0 0 0 2px oklch(0.78 0.18 76);
+  }
+  .strips-rail {
+    min-width: 0;
+    padding: 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in oklch, var(--card) 40%, transparent);
+  }
+  .rail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+  .strips-rail h3 {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    margin: 0;
+  }
+  .rail-see-all {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: var(--muted-foreground);
+    font: inherit;
+    font-size: 0.64rem;
+    cursor: pointer;
+    border-radius: 5px;
+    padding: 0.15rem 0.35rem;
+  }
+  .rail-see-all:hover {
+    color: var(--foreground);
+    background: color-mix(in oklch, var(--foreground) 6%, transparent);
+  }
+  .strips-rail ol {
+    display: grid;
+    gap: 1px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .rail-row {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    display: grid;
+    grid-template-columns: 1rem 1.1rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    padding: 0.22rem 0.3rem;
+    border-radius: 5px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .rail-row:hover,
+  .rail-row:focus-visible,
+  .rail-row.is-hovered {
+    background: color-mix(in oklch, var(--foreground) 6%, transparent);
+  }
+  .rail-row:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+  .rail-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.72rem;
+  }
+  .rail-size {
+    color: var(--muted-foreground);
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .rail-insight {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.55rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted-foreground);
+    font-size: 0.65rem;
+    line-height: 1.5;
+  }
+  .rail-insight svg {
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+    color: oklch(0.78 0.16 84);
   }
   .center-size,
   .center-label {
@@ -615,8 +1253,12 @@
       min-height: 100dvh;
       overflow: visible;
     }
-    .explorer-layout {
+    .explorer-layout,
+    .explorer-layout[data-chart-visible='true'] {
       grid-template-columns: minmax(0, 1fr);
+    }
+    .explorer-divider {
+      display: none;
     }
     .explorer-pathbar {
       padding: 0.75rem;

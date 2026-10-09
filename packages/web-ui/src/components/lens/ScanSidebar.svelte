@@ -1,6 +1,18 @@
 <script lang="ts">
-  import { Folder, FolderPlus, HardDrive, X, ChartPie, FileSearch, Boxes, GitBranch, Settings } from '@lucide/svelte'
-  import type { ScanTarget } from '../../types'
+  import {
+    Folder,
+    FolderPlus,
+    HardDrive,
+    X,
+    ChartPie,
+    FileSearch,
+    Boxes,
+    GitBranch,
+    Settings,
+    RefreshCw,
+  } from '@lucide/svelte'
+  import type { ScanTarget, ScanVolume } from '../../types'
+  import { formatBytes } from '../../lib/format'
 
   interface Props {
     targets: ScanTarget[]
@@ -16,6 +28,14 @@
     onSelect: (target: ScanTarget) => void
     onCustom: () => void
     onForget?: (path: string) => Promise<void> | void
+    /** The volume the current scan lives on, for the capacity card. */
+    volume?: ScanVolume | null
+    /** What the last scan measured, shown under the capacity bar. */
+    scanBytes?: number
+    scanEntries?: number
+    scanLabel?: string | null
+    rescanning?: boolean
+    onRescan?: () => void
   }
 
   let {
@@ -32,7 +52,24 @@
     onSelect,
     onCustom,
     onForget,
+    volume = null,
+    scanBytes = 0,
+    scanEntries = 0,
+    scanLabel = null,
+    rescanning = false,
+    onRescan,
   }: Props = $props()
+
+  /** Free space, preferring the host's `freeBytes` and falling back to what
+   * the filesystem reports as available when a host cannot fill in both. */
+  let free = $derived(volume ? (volume.freeBytes || volume.availableBytes) : 0)
+  let used = $derived(volume ? Math.max(0, volume.totalBytes - free) : 0)
+  let usedFraction = $derived(volume && volume.totalBytes > 0 ? (used / volume.totalBytes) * 100 : 0)
+  let capacityLabel = $derived(
+    volume
+      ? `${scanLabel ?? 'This scan'} volume: ${formatBytes(used)} used of ${formatBytes(volume.totalBytes)}, ${formatBytes(free)} free`
+      : '',
+  )
   const itemClass =
     'sidebar-item relative macos:h-8 macos:rounded-md macos:text-[13px] macos:font-normal macos:text-foreground windows:h-10 windows:rounded-[4px] windows:text-sm windows:text-foreground windows:font-normal windows:pl-4 windows:data-[selected=true]:before:absolute windows:data-[selected=true]:before:left-0 windows:data-[selected=true]:before:h-4 windows:data-[selected=true]:before:w-[3px] windows:data-[selected=true]:before:rounded-full windows:data-[selected=true]:before:bg-primary linux:h-10 linux:rounded-lg linux:text-sm linux:text-foreground linux:font-medium comfortable:h-11 focus-visible:ring-2 focus-visible:ring-ring'
   const headingClass =
@@ -155,5 +192,35 @@
   {#if onSettings}<button class={[itemClass, 'mt-3 hidden windows:flex linux:flex']} type="button" onclick={onSettings}
       ><Settings size={16} /><span>Settings</span></button
     >{/if}
+  {#if volume}
+    <section class="drive-card" aria-label="Disk capacity">
+      <div class="drive-head">
+        <HardDrive size={17} />
+        <div>
+          <strong>{scanLabel ?? 'Current scan'}</strong>
+          <span>{formatBytes(volume.totalBytes)} total</span>
+        </div>
+      </div>
+      <div class="drive-bar" role="img" aria-label={capacityLabel}>
+        <span style={`width: ${usedFraction.toFixed(2)}%`}></span>
+      </div>
+      <dl class="drive-legend">
+        <div><dt><i class="drive-swatch used"></i>Used</dt><dd>{formatBytes(used)}</dd></div>
+        <div><dt><i class="drive-swatch free"></i>Free</dt><dd>{formatBytes(free)}</dd></div>
+      </dl>
+      <div class="drive-scan">
+        <i class="drive-dot"></i>
+        <div>
+          <strong>Scan completed</strong>
+          <span>{scanEntries.toLocaleString()} items · {formatBytes(scanBytes)} scanned</span>
+        </div>
+      </div>
+      {#if onRescan}
+        <button class="drive-rescan" type="button" disabled={rescanning} onclick={onRescan}>
+          <RefreshCw size={14} /><span>{rescanning ? 'Rescanning…' : 'Rescan'}</span>
+        </button>
+      {/if}
+    </section>
+  {/if}
   <span class="sidebar-footnote macos:text-[11px] windows:hidden linux:hidden">Explore. Select. Review.</span>
 </aside>

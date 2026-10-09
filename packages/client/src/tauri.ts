@@ -10,6 +10,7 @@ import type {
   Health,
   Problem,
   RootsResponse,
+  VolumesResponse,
   ScanSession,
   ScanStartRequest,
   ScanStatus,
@@ -119,6 +120,9 @@ export function createTauriService(ports: TauriPorts): WorkbenchService {
     },
     async roots() {
       return invokeReply<RootsResponse>('sl_read', { request: { method: 'roots' } })
+    },
+    async volumes() {
+      return invokeReply<VolumesResponse>('sl_read', { request: { method: 'volumes' } })
     },
     async startScan(body: ScanStartRequest) {
       const { paths, ignoreHidden, respectGitignore, ignoredMode, label, localOnly } = body

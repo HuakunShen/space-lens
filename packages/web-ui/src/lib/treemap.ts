@@ -1,9 +1,9 @@
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy'
-import { nodeColor, nodeMutedColor } from './colors.ts'
+import { branchColor } from './colors.ts'
 import { withOmittedBuckets } from './sunburst.ts'
 import type { TreeSliceNode } from '../types'
 
-export type ChartMode = 'sunburst' | 'flat' | 'nested'
+export type { ChartMode } from './chart-mode.ts'
 
 /** How a tile's label renders — decided at build time from the tile's size. */
 export type TreemapLabel = 'strip' | 'card' | 'name' | 'none'
@@ -30,9 +30,9 @@ export interface TreemapTile {
 }
 
 /** Gap between sibling tiles, in canvas pixels. */
-const GAP = 2
+const GAP = 3
 /** Strip reserved above a nested parent's children for the parent's name. */
-const STRIP = 15
+const STRIP = 48
 /** Tiles skinnier than this on either axis are invisible noise. */
 const MIN_SIDE = 2
 
@@ -50,12 +50,7 @@ const MIN_SIDE = 2
  * (leaf sizes, parents contribute nothing), so both charts agree on
  * proportions and colors for the same slice.
  */
-export function buildTreemapTiles(
-  tree: TreeSliceNode,
-  width: number,
-  height: number,
-  nested: boolean,
-): TreemapTile[] {
+export function buildTreemapTiles(tree: TreeSliceNode, width: number, height: number, nested: boolean): TreemapTile[] {
   if (width <= 0 || height <= 0) return []
   const root = hierarchy(withOmittedBuckets(tree))
     .sum((node) => (node.children.length > 0 ? 0 : Math.max(1, node.size)))
@@ -64,24 +59,22 @@ export function buildTreemapTiles(
     .tile(treemapSquarify)
     .size([width, height])
     .paddingInner(GAP)
-    .paddingOuter(0)
+    .paddingOuter((node) => (nested && node.depth > 0 ? 6 : 0))
     .paddingTop((node) => (nested && node.depth > 0 && (node.children?.length ?? 0) > 0 ? STRIP : 0))(root)
 
   return laidOut
     .descendants()
     .filter(
       (node) =>
-        node.depth > 0 &&
-        (nested || node.depth === 1) &&
-        node.x1 - node.x0 > MIN_SIDE &&
-        node.y1 - node.y0 > MIN_SIDE,
+        node.depth > 0 && (nested || node.depth === 1) && node.x1 - node.x0 > MIN_SIDE && node.y1 - node.y0 > MIN_SIDE,
     )
     .map((node) => {
       const tileWidth = node.x1 - node.x0
       const tileHeight = node.y1 - node.y0
       // d3 leaves have `children === undefined`, not an empty array.
       const hasPaintedChildren =
-        nested && (node.children?.some((child) => child.x1 - child.x0 > MIN_SIDE && child.y1 - child.y0 > MIN_SIDE) ?? false)
+        nested &&
+        (node.children?.some((child) => child.x1 - child.x0 > MIN_SIDE && child.y1 - child.y0 > MIN_SIDE) ?? false)
       let label: TreemapLabel = 'none'
       if (hasPaintedChildren) {
         if (tileWidth >= 56 && tileHeight >= STRIP + 12) label = 'strip'
@@ -98,7 +91,7 @@ export function buildTreemapTiles(
         depth: node.data.depth,
         childCount: node.data.childCount,
         share: node.parent && node.parent.value ? (node.value ?? 0) / node.parent.value : 0,
-        color: node.data.ignored ? nodeMutedColor(node.data.depth) : nodeColor(node.data.id, node.data.depth),
+        color: branchColor(node),
         x0: node.x0,
         y0: node.y0,
         x1: node.x1,

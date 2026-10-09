@@ -114,7 +114,10 @@ fn layout_children(
   // exactly, zero-size entries dropped (they carry no area to place).
   let scale = rect.area() / total as f32;
   let sized: Vec<_> = children.iter().filter(|child| child.size > 0).collect();
-  let areas: Vec<f32> = sized.iter().map(|child| child.size as f32 * scale).collect();
+  let areas: Vec<f32> = sized
+    .iter()
+    .map(|child| child.size as f32 * scale)
+    .collect();
   for (ix, placed) in squarify(&areas, rect) {
     if placed.w < min_side || placed.h < min_side {
       continue;
@@ -394,7 +397,11 @@ mod tests {
       "/proj",
       100_000,
       vec![
-        node("/proj/big", 99_990, vec![node("/proj/big/inner", 10, vec![])]),
+        node(
+          "/proj/big",
+          99_990,
+          vec![node("/proj/big/inner", 10, vec![])],
+        ),
         node("/proj/tiny", 10, vec![]),
       ],
     )]);
@@ -432,10 +439,11 @@ mod tests {
 
     let mut flagged = node("/proj/quiet", 20, vec![]);
     flagged.ignored = true;
-    let index = ScanIndex::new(&[node("/proj", 120, vec![
-      node("/proj/loud", 100, vec![]),
-      flagged,
-    ])]);
+    let index = ScanIndex::new(&[node(
+      "/proj",
+      120,
+      vec![node("/proj/loud", 100, vec![]), flagged],
+    )]);
     let root_id = index.root_ids()[0].clone();
     let tiles = build_treemap(&index, &root_id, 800.0, 600.0, 4, 3.0);
     let quiet = tiles.iter().find(|t| t.name == "quiet").unwrap();
