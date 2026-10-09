@@ -4,13 +4,15 @@
   import type { BubbleCircle } from '../../lib/bubbles'
   import type { ChartSize } from '../../lib/chart-size'
   import { buildBubbleLabels } from '../../lib/bubble-label'
-  import { SoftBubbleWorld } from '../../lib/soft-bubbles/world'
+  import { SoftBubbleWorld, type SoftBubbleSnapshot } from '../../lib/soft-bubbles/world'
   import { paintSoftBubbles } from '../../lib/soft-bubbles/paint'
   import type { Point } from '../../lib/soft-bubbles/geometry'
 
   interface Props {
     circles: readonly BubbleCircle[]
     offset: number
+    rest: readonly SoftBubbleSnapshot[]
+    theme: 'dark' | 'light'
     size: ChartSize
     enabled: boolean
     collectedIds: Set<string>
@@ -19,7 +21,7 @@
     onActivated: () => void
     onReleased: () => void
   }
-  let { circles, offset, size, enabled, collectedIds, onActiveChange, onDragChange, onActivated, onReleased }: Props = $props()
+  let { circles, offset, rest, theme, size, enabled, collectedIds, onActiveChange, onDragChange, onActivated, onReleased }: Props = $props()
   let canvas = $state<HTMLCanvasElement>()
   let active = $state(false)
   let world: SoftBubbleWorld | null = null
@@ -45,8 +47,8 @@
       canvas.height = Math.round(size.height * ratio)
     }
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
-    const samples = circles.some((circle) => circle.r > 400) ? 128 : 64
-    paintSoftBubbles(context, world.snapshot(samples), { ...size, offset, labels, collectedIds, hoveredId: draggingId })
+    const samples = 64
+    paintSoftBubbles(context, world.snapshot(samples), { ...size, offset, labels, collectedIds, hoveredId: draggingId, theme })
   }
 
   function finish(): void {
@@ -114,8 +116,9 @@
     if (!circle || circle.isAggregate || circle.node.scanState === 'skipped') return
     cancel()
     const bounds = canvas.getBoundingClientRect()
+    const baseline = rest.find((body) => body.id === id)
     const start = { x: event.clientX - bounds.left, y: event.clientY - bounds.top }
-    pending = { id, pointerId: event.pointerId, start, shift: { x: start.x - circle.x - offset, y: start.y - circle.y - offset }, bounds }
+    pending = { id, pointerId: event.pointerId, start, shift: { x: start.x - (baseline?.cx ?? circle.x + offset), y: start.y - (baseline?.cy ?? circle.y + offset) }, bounds }
     window.addEventListener('pointermove', move, { passive: false })
     window.addEventListener('pointerup', release)
     window.addEventListener('pointercancel', cancel)
@@ -127,7 +130,7 @@
     const point = { x: event.clientX - pending.bounds.left, y: event.clientY - pending.bounds.top }
     if (!active && Math.hypot(point.x - pending.start.x, point.y - pending.start.y) <= 3) return
     if (!active) {
-      world = new SoftBubbleWorld(circles, offset)
+      world = new SoftBubbleWorld(circles, offset, rest)
       if (!world.drag(pending.id, { x: pending.start.x - pending.shift.x, y: pending.start.y - pending.shift.y })) { cancel(); return }
       draggingId = pending.id
       draw()
@@ -150,6 +153,7 @@
 
   $effect(() => {
     void circles
+    void rest
     void size.width
     void size.height
     void enabled

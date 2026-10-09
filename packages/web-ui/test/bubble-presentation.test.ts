@@ -1,12 +1,13 @@
-/** The Canvas handoff uses exactly the circles, labels, and gradients painted by ECharts. */
+/** The Canvas handoff uses exactly the contours, labels, and gradients painted by ECharts. */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { graphic, init, use } from 'echarts/core'
+import { init, use } from 'echarts/core'
 import { CustomChart } from 'echarts/charts'
 import { SVGRenderer } from 'echarts/renderers'
 import { buildDiskChartModel, BUBBLE_CANVAS_INSET } from '../src/lib/echarts-model.ts'
 import { buildBubbleLabels } from '../src/lib/bubble-label.ts'
 import { bubbleStyle, gradientInBounds } from '../src/lib/chart-material.ts'
+import { bounds } from '../src/lib/soft-bubbles/geometry.ts'
 import type { TreeSliceNode } from '../src/types.ts'
 
 use([CustomChart, SVGRenderer])
@@ -25,7 +26,7 @@ const node = (id: string, size: number, children: TreeSliceNode[] = []): TreeSli
   omittedCount: 0,
 })
 
-test('exposed bubble seeds match every actual ECharts circle and share label decisions', () => {
+test('resting contours match actual ECharts paths and share label decisions', () => {
   const tree = node('root', 100, [node('folder', 80, [node('nested', 80)]), node('file', 20)])
   const model = buildDiskChartModel({
     tree,
@@ -47,18 +48,18 @@ test('exposed bubble seeds match every actual ECharts circle and share label dec
     const drawn = chart
       .getZr()
       .storage.getDisplayList(true)
-      .filter((element) => element instanceof graphic.Circle)
+      .filter((element) => element.type === 'path')
     assert.equal(drawn.length, model.bubbles.circles.length)
-    for (const seed of model.bubbles.circles) {
-      assert.ok(
-        drawn.some(
-          (element) =>
-            element.shape.cx === seed.x + model.bubbles.offset &&
-            element.shape.cy === seed.y + model.bubbles.offset &&
-            element.shape.r === seed.r,
-        ),
-      )
+    for (const body of model.bubbles.rest) {
+      const box = bounds(body.points)
+      assert.ok(drawn.some((element) => {
+        const actual = element.getBoundingRect()
+        return Math.abs(actual.x - box.x) < 1 && Math.abs(actual.y - box.y) < 1 &&
+          Math.abs(actual.width - box.width) < 2 && Math.abs(actual.height - box.height) < 2
+      }), `${body.id} uses the settled contour, not a circular approximation`)
     }
+    const selected = buildDiskChartModel({ tree, width: 720, height: 480, mode: 'bubbles', density: 'nested', reducedMotion: true, collectedIds: new Set(['folder']), theme: 'light' })
+    assert.equal(selected.bubbles, model.bubbles, 'selection/theme reuse geometry instead of warming physics again')
   } finally {
     chart.dispose()
   }
@@ -72,4 +73,13 @@ test('relative gradients map both axes into the current deformed bounds', () => 
   assert.deepEqual(gradient.colorStops, style.fill.colorStops)
   assert.equal(bubbleStyle('#365ba8', true, false, true).stroke, 'rgba(255,255,255,0.9)')
   assert.equal(bubbleStyle('#365ba8', true, true).lineWidth, 2)
+})
+
+test('resting bubbles are borderless and theme tint preserves white-label contrast', () => {
+  for (const theme of ['dark', 'light'] as const) {
+    const style = bubbleStyle('#365ba8', true, false, false, theme)
+    assert.equal(style.lineWidth, 0)
+    assert.equal(style.stroke, 'transparent')
+  }
+  assert.notDeepEqual(bubbleStyle('#365ba8', true, false, false, 'dark').fill, bubbleStyle('#365ba8', true, false, false, 'light').fill)
 })

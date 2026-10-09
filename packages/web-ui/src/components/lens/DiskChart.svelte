@@ -42,15 +42,13 @@
   let softActive = $state(false)
   let pointerDown: PointerEvent | null = null
   let suppressClick = false
-  let clickReset: ReturnType<typeof setTimeout> | undefined
   const softEnabled = $derived(softBubbles && mode === 'bubbles' && !prefersReducedMotion.current)
 
   function rememberPointer(event: PointerEvent): void {
+    suppressClick = false
     pointerDown = softEnabled && event.button === 0 && event.isPrimary ? event : null
   }
   function releaseGesture(): void {
-    if (clickReset) clearTimeout(clickReset)
-    clickReset = setTimeout(() => { suppressClick = false; clickReset = undefined }, 0)
     pointerDown = null
   }
   let chart = $state.raw<EChartsType>()
@@ -60,16 +58,17 @@
   }
   const helpId = $props.id()
   let textColor = $state('#e8e8e8')
+  let theme = $state<'dark' | 'light'>('dark')
   $effect(() => {
     if (!host) return
-    const updateColor = () => { if (host) textColor = getComputedStyle(host).color }
+    const updateColor = () => { if (host) { textColor = getComputedStyle(host).color; theme = document.documentElement.classList.contains('dark') ? 'dark' : 'light' } }
     updateColor()
     const observer = new MutationObserver(updateColor)
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-interface'] })
     return () => observer.disconnect()
   })
   let model = $derived(tree ? buildDiskChartModel({ tree, ...size, mode, density,
-    reducedMotion: prefersReducedMotion.current, collectedIds, textColor }) : null)
+    reducedMotion: prefersReducedMotion.current, collectedIds, textColor, theme }) : null)
   let active = $derived(hoveredId ? model?.nodes.get(hoveredId) : undefined)
   let inspected = $derived(active?.node ?? hoveredNode ?? focusNode)
   let percentage = $derived(focusNode?.size && inspected ? inspected.size / focusNode.size * 100 : 0)
@@ -110,7 +109,6 @@
     })
     return () => {
       untrack(() => softOverlay?.cancel())
-      if (clickReset) clearTimeout(clickReset)
       instance.dispose()
       chart = undefined
     }
@@ -167,7 +165,7 @@
       onkeydown={keyboard} oncontextmenu={(event) => event.preventDefault()}
       onfocus={() => { if (!hoveredId) onHover(model?.navigableIds[0] ?? null) }} onblur={() => onHover(null)}></div>
     {#if mode === 'bubbles' && model?.bubbles}
-      <SoftBubblesOverlay bind:this={softOverlay} circles={model.bubbles.circles} offset={model.bubbles.offset} {size}
+      <SoftBubblesOverlay bind:this={softOverlay} circles={model.bubbles.circles} offset={model.bubbles.offset} rest={model.bubbles.rest} {theme} {size}
         enabled={softEnabled} {collectedIds} onActiveChange={(value) => { softActive = value }}
         onDragChange={(id) => onHover(id)} onActivated={() => { suppressClick = true }} onReleased={releaseGesture} />
     {/if}

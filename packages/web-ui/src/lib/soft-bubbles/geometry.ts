@@ -111,3 +111,17 @@ export function bounds(points: readonly Point[]): { x: number; y: number; width:
   }
   return { x, y, width: right - x, height: bottom - y }
 }
+
+/** Same midpoint quadratic contour as Canvas, consumed by ECharts' morphable path. */
+export function bubblePath(points: readonly Point[]): string {
+  const first = points[0]
+  const last = points.at(-1)
+  if (!first || !last) return ''
+  let path = `M${(last.x + first.x) / 2},${(last.y + first.y) / 2}`
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i]
+    const q = points[(i + 1) % points.length]
+    path += `Q${p.x},${p.y},${(p.x + q.x) / 2},${(p.y + q.y) / 2}`
+  }
+  return `${path}Z`
+}

@@ -5,6 +5,7 @@ import type { Point } from './geometry.ts'
 import type { SoftBubbleSnapshot } from './world.ts'
 
 interface PaintOptions {
+  theme?: 'dark' | 'light'
   width: number
   height: number
   offset: number
@@ -44,6 +45,7 @@ export function paintSoftBubbles(
         label.hasVisibleChildren,
         options.collectedIds.has(body.id),
         options.hoveredId === body.id,
+        options.theme,
       )
       let left = Infinity
       let top = Infinity

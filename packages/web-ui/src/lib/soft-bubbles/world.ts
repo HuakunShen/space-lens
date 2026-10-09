@@ -9,6 +9,8 @@ export const CHILD_VERTEX_COUNT = 24
 const FIXED_STEP = 1 / 120
 const WALL_MARGIN = 5
 const CONSTRAINT_ITERATIONS = 5
+const REST_SOLVE_BUDGET_MS = 24
+const REST_SOLVE_MAX_STEPS = 60
 
 interface BodyBase {
   circle: BubbleCircle
@@ -22,10 +24,11 @@ interface MembraneBody extends BodyBase {
   points: Point[]
   previous: Point[]
   seedPoints: Point[]
+  originalPoints: Point[]
   gradients: Point[]
   area: number
-  edge: number
-  bend: number
+  edge: number[]
+  bend: number[]
   floor: number
   kids: MembraneBody[]
   passengers: PassengerBody[]
@@ -63,10 +66,11 @@ function createMembrane(circle: BubbleCircle, offset: number, count: number): Me
     points,
     previous: points.map((point) => ({ ...point })),
     seedPoints: points.map((point) => ({ ...point })),
+    originalPoints: points.map((point) => ({ ...point })),
     gradients: points.map(() => ({ x: 0, y: 0 })),
     area: area(points),
-    edge: 2 * circle.r * Math.sin(Math.PI / count),
-    bend: 2 * circle.r * Math.sin((3 * Math.PI) / count),
+    edge: points.map(() => 2 * circle.r * Math.sin(Math.PI / count)),
+    bend: points.map(() => 2 * circle.r * Math.sin((3 * Math.PI) / count)),
     floor: Infinity,
     kids: [],
     passengers: [],
@@ -81,8 +85,14 @@ export class SoftBubbleWorld {
   private dragging: { body: MembraneBody; point: Point } | null = null
   private active = false
   private releaseSteps = 0
+  private pendingDragStep = false
 
-  constructor(circles: readonly BubbleCircle[], offset = 0) {
+  private compression: Map<string, Point> | null = null
+  private readonly offset: number
+
+  constructor(circles: readonly BubbleCircle[], offset = 0, rest: readonly SoftBubbleSnapshot[] = []) {
+    this.offset = offset
+    const restById = new Map(rest.map((body) => [body.id, body]))
     const parentCircles = new Map<string, BubbleCircle>()
     const circleById = new Map(circles.map((circle) => [circle.id, circle]))
     // Structural IDs work for scanned paths and synthetic aggregate buckets alike.
@@ -125,6 +135,25 @@ export class SoftBubbleWorld {
             local: { x: 0, y: 0 },
             parentBody: null,
           }
+      const baseline = restById.get(circle.id)
+      if (baseline) {
+        body.seed = { x: baseline.cx, y: baseline.cy }
+        body.center = { ...body.seed }
+        if (body.kind === 'membrane') {
+          body.points = baseline.points.map((point) => ({ ...point }))
+          body.previous = baseline.points.map((point) => ({ ...point }))
+          body.seedPoints = baseline.points.map((point) => ({ ...point }))
+          body.originalPoints = circlePoints(circle.x + offset, circle.y + offset, circle.r, body.points.length)
+          body.gradients = body.points.map(() => ({ x: 0, y: 0 }))
+          body.area = area(body.points)
+          const lengths = (skip: number) => body.points.map((p, i) => {
+            const q = body.points[(i + skip) % body.points.length]
+            return Math.hypot(p.x - q.x, p.y - q.y)
+          })
+          body.edge = lengths(1)
+          body.bend = lengths(3)
+        }
+      }
       this.bodies.push(body)
       this.byId.set(circle.id, body)
       if (body.kind === 'membrane') this.membranes.push(body)
@@ -142,6 +171,44 @@ export class SoftBubbleWorld {
     }
   }
 
+  /** Solve POC-style pressure once; ECharts holds these contours without an idle RAF. */
+  compressedRest(pressure = 0.55): SoftBubbleSnapshot[] {
+    if (!this.parents.length || pressure <= 0) return this.snapshot()
+    const center = centroid(this.parents.map((body) => body.seed))
+    const factor = 1 - clamp(pressure, 0, 1) * 0.25
+    this.compression = new Map(this.parents.map((body) => [body.circle.id, {
+      x: center.x + (body.seed.x - center.x) * factor,
+      y: center.y + (body.seed.y - center.y) * factor,
+    }]))
+    // Start at the compressed anchors so even a dense view gets contact
+    // deformation in its first step. Warm-up has a small UI-thread budget;
+    // dragging still uses the full solver and its frame-time downgrade.
+    for (const body of this.bodies) {
+      const parent = body.parentBody ?? (body.kind === 'membrane' ? body : null)
+      const target = parent ? this.compression.get(parent.circle.id) : undefined
+      if (!parent || !target) continue
+      const dx = target.x - parent.seed.x
+      const dy = target.y - parent.seed.y
+      body.center = { x: body.seed.x + dx, y: body.seed.y + dy }
+      if (body.kind === 'membrane') {
+        for (let i = 0; i < body.points.length; i++) {
+          body.points[i].x += dx
+          body.points[i].y += dy
+          Object.assign(body.previous[i], body.points[i])
+        }
+      }
+    }
+    this.active = true
+    const deadline = performance.now() + REST_SOLVE_BUDGET_MS
+    for (let step = 0; step < REST_SOLVE_MAX_STEPS; step++) {
+      this.step()
+      if (performance.now() >= deadline) break
+    }
+    this.compression = null
+    this.active = false
+    return this.snapshot()
+  }
+
   /** Aggregate and budgeted passenger bubbles keep ordinary ECharts interactions. */
   drag(id: string, point: Point): boolean {
     const body = this.byId.get(id)
@@ -150,16 +217,23 @@ export class SoftBubbleWorld {
     this.dragging = { body, point: { ...point } }
     this.active = true
     this.releaseSteps = 0
+    this.pendingDragStep = true
     return true
   }
 
   release(): void {
+    // WebKit can deliver the final move and up before RAF runs. Consume that
+    // target while it still exists, so a quick gesture retains its impulse.
+    if (this.dragging && this.pendingDragStep) {
+      for (let step = 0; step < 3; step += 1) this.step()
+    }
     this.dragging = null
     this.releaseSteps = 0
   }
 
   step(deltaSeconds = FIXED_STEP): void {
     if (!this.active || !Number.isFinite(deltaSeconds) || deltaSeconds <= 0) return
+    this.pendingDragStep = false
     const timeScale = clamp(deltaSeconds / FIXED_STEP, 0.1, 3)
     for (const body of this.membranes) {
       const dragging = this.dragging?.body === body
@@ -168,7 +242,7 @@ export class SoftBubbleWorld {
           ? this.dragging.point
           : body.parentBody
             ? { x: body.parentBody.center.x + body.local.x, y: body.parentBody.center.y + body.local.y }
-            : body.seed
+            : this.compression?.get(body.circle.id) ?? body.seed
       const pull = dragging ? (body.parentBody ? 0.02 : 0.016) : body.parentBody ? 0.006 : 0.0045
       this.integrate(body, target, pull, timeScale)
     }
@@ -180,7 +254,7 @@ export class SoftBubbleWorld {
         for (const child of parent.kids) this.contain(child, parent)
       }
     }
-    if (!this.dragging) {
+    if (!this.dragging && !this.compression) {
       this.releaseSteps += timeScale
       // A soft shape spring strengthens after the initial free rebound. Its final
       // endpoint is the exact packed contour, avoiding residual contact equilibrium.
@@ -198,7 +272,7 @@ export class SoftBubbleWorld {
     }
     for (const body of this.membranes) body.center = centroid(body.points)
     for (const parent of this.membranes) this.positionPassengers(parent)
-    if (!this.dragging && this.isAtRest()) this.resetToSeed()
+    if (!this.dragging && !this.compression && this.isAtRest()) this.resetToSeed()
   }
 
   isAtRest(): boolean {
@@ -224,12 +298,12 @@ export class SoftBubbleWorld {
 
   snapshot(sampleCount = 64): SoftBubbleSnapshot[] {
     return this.bodies.map((body) => {
-      let points = circlePoints(body.seed.x, body.seed.y, body.circle.r, sampleCount)
+      let points = circlePoints(body.circle.x + this.offset, body.circle.y + this.offset, body.circle.r, sampleCount)
       if (body.kind === 'membrane') {
         const displacements = resample(
           body.points.map((point, index) => ({
-            x: point.x - body.seedPoints[index].x,
-            y: point.y - body.seedPoints[index].y,
+            x: point.x - body.originalPoints[index].x,
+            y: point.y - body.originalPoints[index].y,
           })),
           sampleCount,
         )
@@ -273,15 +347,15 @@ export class SoftBubbleWorld {
       const previous = body.previous[index]
       const x = point.x
       const y = point.y
-      const angle = (index * Math.PI * 2) / body.points.length
+      const seed = body.seedPoints[index]
       point.x +=
         clamp((x - previous.x) * 0.88 ** timeScale, -4, 4) +
         ax +
-        (center.x + Math.cos(angle) * body.circle.r - x) * 0.001
+        (center.x + seed.x - body.seed.x - x) * 0.001
       point.y +=
         clamp((y - previous.y) * 0.88 ** timeScale, -4, 4) +
         ay +
-        (center.y + Math.sin(angle) * body.circle.r - y) * 0.001
+        (center.y + seed.y - body.seed.y - y) * 0.001
       previous.x = x
       previous.y = y
     }
@@ -302,8 +376,8 @@ export class SoftBubbleWorld {
 
   private constrain(body: MembraneBody): void {
     const count = body.points.length
-    for (let index = 0; index < count; index += 1) this.distance(body, index, (index + 1) % count, body.edge, 0.78)
-    for (let index = 0; index < count; index += 1) this.distance(body, index, (index + 3) % count, body.bend, 0.055)
+    for (let index = 0; index < count; index += 1) this.distance(body, index, (index + 1) % count, body.edge[index], 0.78)
+    for (let index = 0; index < count; index += 1) this.distance(body, index, (index + 3) % count, body.bend[index], 0.055)
     let norm = 0
     for (let index = 0; index < count; index += 1) {
       const previous = body.points[(index + count - 1) % count]
@@ -321,10 +395,19 @@ export class SoftBubbleWorld {
   }
 
   private collideGroup(group: readonly MembraneBody[]): void {
+    // Compute bounds once, rather than walking every polygon for every
+    // distant pair. Refresh after nearby reactions to keep the broad phase valid.
+    const circles = group.map((body) => reach(body.points))
     for (let left = 0; left < group.length; left += 1) {
       for (let right = left + 1; right < group.length; right += 1) {
+        const a = circles[left]
+        const b = circles[right]
+        const radius = a.radius + b.radius + 2
+        if ((a.x - b.x) ** 2 + (a.y - b.y) ** 2 > radius ** 2) continue
         this.contact(group[left], group[right])
         this.contact(group[right], group[left])
+        circles[left] = reach(group[left].points)
+        circles[right] = reach(group[right].points)
       }
     }
   }

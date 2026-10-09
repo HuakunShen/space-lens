@@ -5,7 +5,7 @@ import { CustomChart, SunburstChart, TreemapChart } from 'echarts/charts'
 import { SVGRenderer } from 'echarts/renderers'
 import { UniversalTransition, LabelLayout } from 'echarts/features'
 import { buildDiskChartModel } from '../src/lib/echarts-model.ts'
-import { chartMaterial, chartSurfaceColor } from '../src/lib/chart-material.ts'
+import { bubbleMaterial, chartMaterial, chartSurfaceColor } from '../src/lib/chart-material.ts'
 import { nodeColor, nodeMutedColor } from '../src/lib/colors.ts'
 import { CHART_MODES } from '../src/lib/chart-mode.ts'
 import type { ChartMode } from '../src/lib/chart-mode.ts'
@@ -56,8 +56,12 @@ test('material guarantees white-label contrast at both stops across all hue fami
   for (let index = 0; index < 200; index++) {
     for (let depth = 1; depth <= 8; depth++) {
       for (const source of [nodeColor(`node-${index}`, depth), nodeMutedColor(depth)]) {
-        for (const stop of chartMaterial(source).colorStops)
-          assert.ok(whiteContrast(stop.color) >= 4.5, `${source} -> ${stop.color}`)
+        const materials = [chartMaterial(source)]
+        for (const theme of ['dark', 'light'] as const)
+          for (const parent of [true, false]) materials.push(bubbleMaterial(source, parent, theme))
+        for (const material of materials)
+          for (const stop of material.colorStops)
+            assert.ok(whiteContrast(stop.color) >= 4.5, `${source} -> ${stop.color}`)
       }
     }
   }
@@ -220,7 +224,7 @@ test('treemap parent headers retain contrast and family fill during collection a
   }
 })
 
-test('highlighting a packed parent never paints it over its child circles', () => {
+test('highlighting a compressed parent never paints it over its child contours', () => {
   const chart = init(null, undefined, { renderer: 'svg', ssr: true, width: 720, height: 480 })
   try {
     const result = model('bubbles')
@@ -228,7 +232,7 @@ test('highlighting a packed parent never paints it over its child circles', () =
     const circles = chart
       .getZr()
       .storage.getDisplayList(true)
-      .filter((element) => element.type === 'circle')
+      .filter((element) => element.type === 'path')
     const [parent, , ...children] = circles
     assert.ok(parent)
     assert.equal(children.length, 2)

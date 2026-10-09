@@ -9,6 +9,8 @@ import { buildStripRows } from './strips.ts'
 import { withOmittedBuckets } from './sunburst.ts'
 import { nodeColor, nodeMutedColor, sunburstColor } from './colors.ts'
 import { bubbleStyle, chartMaterial, chartSurfaceColor } from './chart-material.ts'
+import { SoftBubbleWorld, type SoftBubbleSnapshot } from './soft-bubbles/world.ts'
+import { bubblePath } from './soft-bubbles/geometry.ts'
 import { formatNodeSize } from './node-size.ts'
 
 export interface DiskChartNode {
@@ -28,16 +30,19 @@ interface DiskChartInput {
   reducedMotion: boolean
   collectedIds?: Set<string>
   textColor?: string
+  theme?: 'dark' | 'light'
 }
 
 export interface DiskChartModel {
-  bubbles?: { circles: BubbleCircle[]; offset: number }
+  bubbles?: { circles: BubbleCircle[]; offset: number; rest: SoftBubbleSnapshot[] }
   option: EChartsOption
   nodes: Map<string, DiskChartNode>
   navigableIds: string[]
 }
 
 export const BUBBLE_CANVAS_INSET = 6
+
+const bubbleLayouts = new WeakMap<TreeSliceNode, { width: number; height: number; layout: NonNullable<DiskChartModel['bubbles']> }>()
 
 const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 const EDGE = 'rgba(255,255,255,0.15)'
@@ -217,10 +222,15 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
     const emphasis = { style: { stroke: EMPHASIS_EDGE, lineWidth: 2 } }
     if (mode === 'bubbles') {
       const offset = BUBBLE_CANVAS_INSET
-      const circles = buildBubbleCircles(tree, width - offset * 2, height - offset * 2).filter(
-        (circle) => circle.id !== root.id,
-      )
-      bubbles = { circles, offset }
+      let cached = bubbleLayouts.get(tree)
+      if (!cached || cached.width !== width || cached.height !== height) {
+        const circles = buildBubbleCircles(tree, width - offset * 2, height - offset * 2).filter((circle) => circle.id !== root.id)
+        cached = { width, height, layout: { circles, offset, rest: new SoftBubbleWorld(circles, offset).compressedRest() } }
+        bubbleLayouts.set(tree, cached)
+      }
+      bubbles = cached.layout
+      const { circles, rest } = bubbles
+      const restById = new Map(rest.map((body) => [body.id, body]))
       const labels = buildBubbleLabels(circles)
       const parentByChild = new Map<string, string>()
       const familyByChild = new Map<string, string>()
@@ -229,29 +239,30 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
         if (circle.id === root.id) continue
         const label = labels.get(circle.id)
         if (!label) continue
+        const contour = restById.get(circle.id)!
         const layer = parentByChild.get(circle.id) === root.id ? 0 : 2
-        const normalStyle = bubbleStyle(circle.color, label.hasVisibleChildren, collectedIds.has(circle.id))
+        const normalStyle = bubbleStyle(circle.color, label.hasVisibleChildren, collectedIds.has(circle.id), false, input.theme)
         shapes.push({
           node: circle.node,
           parentId: parentByChild.get(circle.id) ?? root.id,
           family: familyByChild.get(circle.id) ?? circle.id,
           render: () => ({
-            type: 'circle',
+            type: 'path',
             id: circle.id,
             z2: layer,
             morph: true,
-            shape: { cx: circle.x + offset, cy: circle.y + offset, r: circle.r },
+            shape: { pathData: bubblePath(contour.points) },
             style: normalStyle,
             emphasis: {
               z2: layer,
-              style: bubbleStyle(circle.color, label.hasVisibleChildren, collectedIds.has(circle.id), true),
+              style: bubbleStyle(circle.color, label.hasVisibleChildren, collectedIds.has(circle.id), true, input.theme),
             },
             textContent: {
               type: 'text',
               style: {
                 text: label.text,
-                x: label.x + offset,
-                y: label.y + offset,
+                x: label.x + contour.cx - circle.x,
+                y: label.y + contour.cy - circle.y,
                 fill: '#fff',
                 fontFamily: BUBBLE_FONT,
                 fontSize: label.fontSize,

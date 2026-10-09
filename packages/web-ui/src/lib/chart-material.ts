@@ -48,27 +48,21 @@ export function chartMaterial(source: string) {
   }
 }
 
-/** Parent circles are quiet containers; their contents carry the stronger color. */
-export function bubbleMaterial(source: string, parent: boolean) {
+/** Keep a visible hue in the membrane, with lighter contents in the same family. */
+export function bubbleMaterial(source: string, parent: boolean, theme: 'dark' | 'light' = 'dark') {
   const color = chartSurfaceColor(source)
-  const tint = parent ? 0.3 : 0.85
-  return chartMaterial(
-    hex([1, 3, 5].map((start) => Number.parseInt(color.slice(start, start + 2), 16) * tint + 36 * (1 - tint))),
-  )
+  const rgb = [1, 3, 5].map((start) => Number.parseInt(color.slice(start, start + 2), 16))
+  const tint = parent ? (theme === 'dark' ? 0.88 : 1) : (theme === 'dark' ? 0.9 : 0.8)
+  const blend = parent ? 26 : 255
+  return chartMaterial(hex(rgb.map((channel) => channel * tint + blend * (1 - tint))))
 }
 
-/** This style is shared by the static chart and its temporary soft-body overlay. */
-export function bubbleStyle(source: string, parent: boolean, selected: boolean, highlighted = false) {
+/** Resting bubbles have no outline; focus and selection remain identifiable. */
+export function bubbleStyle(source: string, parent: boolean, selected: boolean, highlighted = false, theme: 'dark' | 'light' = 'dark') {
   return {
-    fill: bubbleMaterial(source, parent),
-    stroke: highlighted
-      ? 'rgba(255,255,255,0.9)'
-      : selected
-        ? '#fff'
-        : parent
-          ? 'rgba(255,255,255,0.16)'
-          : 'rgba(255,255,255,0.3)',
-    lineWidth: highlighted ? 1.5 : selected ? 2 : 1,
+    fill: bubbleMaterial(source, parent, theme),
+    stroke: highlighted ? 'rgba(255,255,255,0.9)' : selected ? '#fff' : 'transparent',
+    lineWidth: highlighted ? 1.5 : selected ? 2 : 0,
   }
 }
 

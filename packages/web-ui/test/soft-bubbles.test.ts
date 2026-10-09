@@ -197,3 +197,37 @@ test('aggregates participate without being draggable; invalid requests do not ac
   assert.equal(world.isAtRest(), true)
   assert.deepEqual(new SoftBubbleWorld([]).snapshot(), [])
 })
+
+test('a drag released before the first animation frame still deforms and rebounds', () => {
+  const world = new SoftBubbleWorld(ordinary(), 6)
+  const seed = world.snapshot()
+  const body = getBody(seed, 'p0')
+  world.drag('p0', { x: body.cx + 150, y: body.cy })
+  world.release()
+  assert.equal(world.isAtRest(), false, 'release must not discard an unconsumed drag target')
+  assertState(world.snapshot())
+  for (let step = 0; step < 600 && !world.isAtRest(); step += 1) world.step()
+  assert.equal(world.isAtRest(), true)
+})
+
+test('compressed equilibrium stays deformed while sleeping and is the rebound destination', () => {
+  const circles = ordinary()
+  const settled = new SoftBubbleWorld(circles, 6).compressedRest(0.55)
+  assertState(settled)
+  const parents = settled.filter((body) => !body.parentId)
+  assert.ok(parents.some((body) => {
+    const radii = body.points.map((p) => Math.hypot(p.x - body.cx, p.y - body.cy))
+    return Math.max(...radii) - Math.min(...radii) > 4
+  }), 'contact should visibly flatten a resting parent, not just move a circle')
+  const world = new SoftBubbleWorld(circles, 6, settled)
+  assert.deepEqual(world.snapshot(), settled, 'static-to-Canvas handoff is exact')
+  for (let i = 0; i < 300; i++) world.step()
+  assert.deepEqual(world.snapshot(), settled, 'no idle simulation or drift')
+  const body = getBody(settled, 'p0')
+  world.drag(body.id, { x: body.cx + 110, y: body.cy + 20 })
+  for (let i = 0; i < 45; i++) world.step()
+  world.release()
+  for (let i = 0; i < 600 && !world.isAtRest(); i++) world.step()
+  assert.equal(world.isAtRest(), true)
+  assert.deepEqual(world.snapshot(), settled, 'release returns to the compressed contour')
+})
