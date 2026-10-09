@@ -48,6 +48,15 @@ export function chartMaterial(source: string) {
   }
 }
 
+/** Parent circles are quiet containers; their contents carry the stronger color. */
+export function bubbleMaterial(source: string, parent: boolean) {
+  const color = chartSurfaceColor(source)
+  const tint = parent ? 0.3 : 0.85
+  return chartMaterial(
+    hex([1, 3, 5].map((start) => Number.parseInt(color.slice(start, start + 2), 16) * tint + 36 * (1 - tint))),
+  )
+}
+
 function hex(rgb: number[]): string {
   return `#${rgb.map((channel) => Math.round(channel).toString(16).padStart(2, '0')).join('')}`
 }

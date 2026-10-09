@@ -7,7 +7,7 @@ import { buildIcicleSegments, clipIcicleName } from './icicle.ts'
 import { buildStripRows } from './strips.ts'
 import { withOmittedBuckets } from './sunburst.ts'
 import { nodeColor, nodeMutedColor } from './colors.ts'
-import { chartMaterial, chartSurfaceColor } from './chart-material.ts'
+import { bubbleMaterial, chartMaterial, chartSurfaceColor } from './chart-material.ts'
 import { formatNodeSize } from './node-size.ts'
 
 export interface DiskChartNode {
@@ -196,13 +196,21 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
       walkParents(root, root.id, parentByChild, familyByChild)
       for (const circle of circles) {
         if (circle.id === root.id) continue
-        const hasVisibleChildren = circles.some((child) => parentByChild.get(child.id) === circle.id)
-        const name = clipBubbleName(circle.name, circle.r)
+        const children = circles.filter((child) => parentByChild.get(child.id) === circle.id)
+        const hasVisibleChildren = children.length > 0
+        // ECharts raises emphasis by default; a packed parent must stay behind its children.
+        const layer = parentByChild.get(circle.id) === root.id ? 0 : 2
+        const band = hasVisibleChildren
+          ? Math.min(...children.map((child) => child.y - child.r)) - (circle.y - circle.r)
+          : circle.r * 2
+        const titleY = hasVisibleChildren ? circle.y - circle.r + band / 2 : circle.y
+        const chord = Math.sqrt(Math.max(0, circle.r ** 2 - (Math.abs(titleY - circle.y) + 8) ** 2))
+        const name = clipBubbleName(circle.name, chord)
         const label =
-          circle.labelVisible && circle.r >= 27
-            ? `${name}${circle.r >= 40 ? `\n${formatNodeSize(circle.node)}` : ''}`
+          circle.labelVisible && circle.r >= 27 && band >= 22
+            ? `${name}${circle.r >= 40 && band >= 40 ? `\n${formatNodeSize(circle.node)}` : ''}`
             : ''
-        const titleY = hasVisibleChildren ? circle.y - circle.r * 0.6 : circle.y
+        const fill = bubbleMaterial(circle.color, hasVisibleChildren)
         shapes.push({
           node: circle.node,
           parentId: parentByChild.get(circle.id) ?? root.id,
@@ -210,10 +218,19 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
           render: () => ({
             type: 'circle',
             id: circle.id,
+            z2: layer,
             morph: true,
             shape: { cx: circle.x + 6, cy: circle.y + 6, r: circle.r },
-            style: style(circle.id, circle.color),
-            emphasis,
+            style: {
+              fill,
+              stroke: collectedIds.has(circle.id)
+                ? '#fff'
+                : hasVisibleChildren
+                  ? 'rgba(255,255,255,0.16)'
+                  : 'rgba(255,255,255,0.3)',
+              lineWidth: selectedWidth(circle.id),
+            },
+            emphasis: { z2: layer, style: { fill, stroke: EMPHASIS_EDGE, lineWidth: 1.5 } },
             textContent: {
               type: 'text',
               style: {

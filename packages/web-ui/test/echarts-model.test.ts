@@ -216,3 +216,30 @@ test('treemap parent headers retain contrast and family fill during collection a
     chart.dispose()
   }
 })
+
+test('highlighting a packed parent never paints it over its child circles', () => {
+  const chart = init(null, undefined, { renderer: 'svg', ssr: true, width: 720, height: 480 })
+  try {
+    const result = model('bubbles')
+    chart.setOption(result.option)
+    const circles = chart
+      .getZr()
+      .storage.getDisplayList(true)
+      .filter((element) => element.type === 'circle')
+    const [parent, , ...children] = circles
+    assert.ok(parent)
+    assert.equal(children.length, 2)
+    chart.dispatchAction({ type: 'highlight', seriesId: 'disk', dataIndex: result.nodes.get('folder')?.dataIndex })
+    chart.getZr().animation.update()
+    const highlighted = chart.getZr().storage.getDisplayList(true)
+    for (const child of children) {
+      assert.ok(highlighted.indexOf(parent) < highlighted.indexOf(child), 'parent must remain behind children on hover')
+    }
+    chart.dispatchAction({ type: 'downplay', seriesId: 'disk' })
+    chart.getZr().animation.update()
+    const restored = chart.getZr().storage.getDisplayList(true)
+    for (const child of children) assert.ok(restored.indexOf(parent) < restored.indexOf(child))
+  } finally {
+    chart.dispose()
+  }
+})

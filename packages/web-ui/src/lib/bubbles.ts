@@ -63,9 +63,9 @@ export function buildBubbleCircles(tree: TreeSliceNode, width: number, height: n
   for (const parent of packed.children ?? []) {
     if (!parent.children) continue
     for (const child of parent.descendants().slice(1)) {
-      child.x = parent.x + (child.x - parent.x) * 0.68
-      child.y = parent.y + (child.y - parent.y) * 0.68 + parent.r * 0.18
-      child.r *= 0.68
+      child.x = parent.x + (child.x - parent.x) * 0.8
+      child.y = parent.y + (child.y - parent.y) * 0.8 + parent.r * 0.14
+      child.r *= 0.8
     }
   }
   // The depth-0 circle is only a backdrop for the circles nested inside it.
