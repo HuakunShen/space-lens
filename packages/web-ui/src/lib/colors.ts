@@ -9,6 +9,23 @@ import type { TreeSliceNode } from '../types'
  */
 const HUE_FAMILIES = [212, 268, 148, 32, 336, 186, 46, 240, 88, 6]
 
+/** The original sunburst palette; no text is painted on these light segments. */
+const SUNBURST_PALETTE = [
+  '#f8d66d',
+  '#d8f96a',
+  '#a7f06b',
+  '#6ee7a8',
+  '#5eead4',
+  '#67e8f9',
+  '#93c5fd',
+  '#c4b5fd',
+  '#f0abfc',
+]
+
+export function sunburstColor(id: string, depth: number): string {
+  return SUNBURST_PALETTE[Math.abs(hash(id) + depth * 17) % SUNBURST_PALETTE.length] ?? SUNBURST_PALETTE[0]
+}
+
 /**
  * Lightness and saturation per level. Depth then reads off the chart
  * without a legend: children are a step lighter or deeper than their

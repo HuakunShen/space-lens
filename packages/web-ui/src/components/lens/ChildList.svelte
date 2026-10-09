@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronRight, FolderOpen, Folder, File, Minus, Plus } from '@lucide/svelte'
   import type { TreeNodeSummary } from '../../types'
-  import { nodeColor, nodeMutedColor } from '../../lib/colors'
+  import { nodeColor, nodeMutedColor, sunburstColor } from '../../lib/colors'
   import { formatBytes } from '../../lib/format'
   import { formatNodeSize } from '../../lib/node-size'
   import * as ContextMenu from '../ui/context-menu/index'
@@ -10,6 +10,7 @@
   import { ScrollArea } from '../ui/scroll-area/index'
 
   interface Props {
+    colorMode?: 'sunburst' | 'standard'
     disabled?: boolean
     isCovered?: (item: TreeNodeSummary) => boolean
     items: TreeNodeSummary[]
@@ -23,6 +24,7 @@
   }
 
   let {
+    colorMode = 'standard',
     disabled = false,
     isCovered = () => false,
     items,
@@ -34,6 +36,10 @@
     onCollect,
     onRemove,
   }: Props = $props()
+
+  function itemColor(item: TreeNodeSummary): string {
+    return item.ignored ? nodeMutedColor(item.depth) : colorMode === 'sunburst' ? sunburstColor(item.id, item.depth) : nodeColor(item.id, item.depth)
+  }
 
   // One collector verb per row state: a collected row offers removal, the rest
   // offer collection — the button, the menu item and their labels stay in step.
@@ -75,11 +81,11 @@
             >
               <span
                 class="size-2.5 rounded-full macos:hidden"
-                style={`--node: ${item.ignored ? nodeMutedColor(item.depth) : nodeColor(item.id, item.depth)}; background: var(--node)`}
+                style={`--node: ${itemColor(item)}; background: var(--node)`}
               ></span>
               <span
                 class="hidden macos:block"
-                style={`color: ${item.ignored ? nodeMutedColor(item.depth) : nodeColor(item.id, item.depth)}`}
+                style={`color: ${itemColor(item)}`}
                 >{#if item.isDirectory}<Folder size={19} fill="currentColor" fill-opacity="0.15" />{:else}<File
                     size={18}
                   />{/if}</span
@@ -115,7 +121,7 @@
                 {#if totalSize > 0 && item.scanState !== 'skipped'}
                   <div class="child-meter" aria-hidden="true">
                     <span
-                      style={`width: ${totalSize > 0 ? Math.min(100, (item.size / totalSize) * 100) : 0}%; background: ${item.ignored ? nodeMutedColor(item.depth) : nodeColor(item.id, item.depth)}`}
+                      style={`width: ${totalSize > 0 ? Math.min(100, (item.size / totalSize) * 100) : 0}%; background: ${itemColor(item)}`}
                     ></span>
                   </div>
                 {/if}

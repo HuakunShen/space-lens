@@ -1081,6 +1081,7 @@
                   >{/if}
               </div>
               {#key workbench.slice?.focusNode.id}<ChildList
+                  colorMode={chartMode === 'sunburst' ? 'sunburst' : 'standard'}
                   disabled={planning || workbench.deleting}
                   isCovered={(node) => {
                     const entry = selectedAncestor(workbench.collector, node.path)

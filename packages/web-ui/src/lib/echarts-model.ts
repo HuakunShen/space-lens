@@ -6,7 +6,7 @@ import { buildBubbleCircles, clipBubbleName } from './bubbles.ts'
 import { buildIcicleSegments, clipIcicleName } from './icicle.ts'
 import { buildStripRows } from './strips.ts'
 import { withOmittedBuckets } from './sunburst.ts'
-import { nodeColor, nodeMutedColor } from './colors.ts'
+import { nodeColor, nodeMutedColor, sunburstColor } from './colors.ts'
 import { bubbleMaterial, chartMaterial, chartSurfaceColor } from './chart-material.ts'
 import { formatNodeSize } from './node-size.ts'
 
@@ -65,11 +65,15 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
   const root = withOmittedBuckets(tree)
   const sourceColors = new Map<string, string>()
   function register(node: TreeSliceNode, parentId: string, family: string, dataIndex: number) {
-    const color = node.ignored ? nodeMutedColor(node.depth) : nodeColor(node.id, node.depth, family)
+    const color = node.ignored
+      ? nodeMutedColor(node.depth)
+      : mode === 'sunburst'
+        ? sunburstColor(node.id, node.depth)
+        : nodeColor(node.id, node.depth, family)
     sourceColors.set(node.id, color)
     nodes.set(node.id, {
       node,
-      color: chartSurfaceColor(color),
+      color: mode === 'sunburst' ? color : chartSurfaceColor(color),
       isAggregate: node.id === `${parentId}:omitted`,
       childCount: node.childCount,
       dataIndex,
@@ -95,7 +99,11 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
           : node.children.map((child) => convertBranch(child, node.id, family, visibleDepth + 1))
       const source = sourceColors.get(node.id) ?? ''
       const parentTile = mode === 'treemap' && children.length > 0
-      const borderColor = parentTile ? chartSurfaceColor(source) : selectedEdge(node.id)
+      const borderColor = parentTile
+        ? chartSurfaceColor(source)
+        : mode === 'sunburst' && !collectedIds.has(node.id)
+          ? '#101010'
+          : selectedEdge(node.id)
       const name = `${collectedIds.has(node.id) ? '✓ ' : ''}${node.name}`
       return {
         id: node.id,
@@ -103,19 +111,20 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
         value: leafValue(node),
         ...(children.length > 0 ? { children } : {}),
         itemStyle: {
-          color: chartMaterial(source),
+          color: mode === 'sunburst' ? source : chartMaterial(source),
           borderColor,
           borderWidth: parentTile ? 4 : selectedWidth(node.id),
-          borderRadius: mode === 'treemap' ? 7 : 3,
+          borderRadius: mode === 'treemap' ? 7 : 0,
         },
         label: {
+          show: mode !== 'sunburst',
           color: '#fff',
           formatter: () => (mode === 'treemap' ? `${name}\n${formatNodeSize(node)}` : name),
         },
         upperLabel: { color: '#fff', formatter: () => `${name}   ${formatNodeSize(node)}` },
         emphasis: {
           itemStyle: { borderColor: parentTile ? borderColor : EMPHASIS_EDGE, borderWidth: parentTile ? 4 : 2 },
-          label: { color: '#fff' },
+          label: { show: mode !== 'sunburst', color: '#fff' },
         },
       }
     }
@@ -163,17 +172,29 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
       }
       option.series = [series]
     } else {
+      const outerRadius = Math.max(0, Math.min(width, height) / 2 - 10)
+      const innerRadius = outerRadius * 0.24
+      const depth = Math.max(1, relativeDepth(root))
+      const ringWidth = (outerRadius - innerRadius) / depth
+      const gap = Math.min(6, ringWidth * 0.12)
       const series: SunburstSeriesOption = {
         ...common,
         type: 'sunburst',
         center: ['50%', '50%'],
-        radius: [Math.min(width, height) * 0.12, '94%'],
+        radius: [innerRadius, outerRadius],
         nodeClick: false,
         sort: 'desc',
-        label: { show: true, color: '#fff', rotate: 'tangential', fontSize: 12, minAngle: 13, overflow: 'truncate' },
-        labelLayout: { hideOverlap: true },
-        itemStyle: { borderColor: '#202020', borderWidth: 3, borderRadius: 3 },
-        emphasis: { focus: 'none', itemStyle: { borderWidth: 2, borderColor: '#fff' } },
+        label: { show: false },
+        itemStyle: { borderColor: '#101010', borderWidth: 1, borderRadius: 0 },
+        emphasis: { focus: 'none', label: { show: false }, itemStyle: { borderWidth: 2, borderColor: '#fff' } },
+        levels: Array.from({ length: depth + 1 }, (_, level) =>
+          level === 0
+            ? {}
+            : {
+                r0: innerRadius + (level - 1) * ringWidth + gap / 2,
+                r: innerRadius + level * ringWidth - gap / 2,
+              },
+        ),
         data,
       }
       option.series = [series]

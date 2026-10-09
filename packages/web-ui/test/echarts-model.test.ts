@@ -166,8 +166,11 @@ test('all five options render actual ECharts SVG shapes with safe text and no in
       const svg = chart.renderToSVGString()
       assert.match(svg, /<(path|circle|rect) /, mode)
       assert.doesNotMatch(svg, /NaN|Infinity|undefined/, mode)
-      assert.match(svg, /folder/, mode)
-      assert.match(svg, /#fff/, mode)
+      if (mode === 'sunburst') assert.equal(/<text\b/.test(svg), false)
+      else {
+        assert.match(svg, /folder/, mode)
+        assert.match(svg, /#fff/, mode)
+      }
     } finally {
       chart.dispose()
     }
@@ -239,6 +242,25 @@ test('highlighting a packed parent never paints it over its child circles', () =
     chart.getZr().animation.update()
     const restored = chart.getZr().storage.getDisplayList(true)
     for (const child of children) assert.ok(restored.indexOf(parent) < restored.indexOf(child))
+  } finally {
+    chart.dispose()
+  }
+})
+
+test('dense sunbursts never paint filenames, including while a segment is highlighted', () => {
+  const dense = node(
+    'root',
+    200,
+    Array.from({ length: 200 }, (_, index) => node(`long-filename-${index}`, 1)),
+  )
+  const result = model('sunburst', dense)
+  const chart = init(null, undefined, { renderer: 'svg', ssr: true, width: 720, height: 480 })
+  try {
+    chart.setOption(result.option)
+    assert.equal(/<text\b/.test(chart.renderToSVGString()), false, 'sunburst must not paint filenames')
+    chart.dispatchAction({ type: 'highlight', seriesId: 'disk', dataIndex: 1 })
+    chart.getZr().animation.update()
+    assert.equal(/<text\b/.test(chart.renderToSVGString()), false, 'sunburst must not paint filenames')
   } finally {
     chart.dispose()
   }

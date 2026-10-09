@@ -9,6 +9,7 @@
   import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
   import { buildDiskChartModel } from '../../lib/echarts-model'
   import { chartEmptyMessage } from '../../lib/chart-empty'
+  import { formatNodeSize } from '../../lib/node-size'
   import ChartModeToggle from './ChartModeToggle.svelte'
   import ChartStage from './ChartStage.svelte'
   import ChartInspector from './ChartInspector.svelte'
@@ -134,6 +135,12 @@
       aria-label={`${mode} disk usage visualization`} aria-describedby={helpId}
       onkeydown={keyboard} oncontextmenu={(event) => event.preventDefault()}
       onfocus={() => { if (!hoveredId) onHover(model?.navigableIds[0] ?? null) }} onblur={() => onHover(null)}></div>
+    {#if mode === 'sunburst' && model?.nodes.size}
+      <div class="sunburst-center" aria-hidden="true" style={`--well-width: ${Math.max(0, (Math.min(size.width, size.height) / 2 - 10) * 0.48 - 12)}px`}>
+        <strong>{formatNodeSize(inspected)}</strong>
+        <span>{inspected?.scanState === 'skipped' ? 'NOT SCANNED' : hoveredId && inspected ? `${percentageLabel} of folder` : 'MEASURED SIZE'}</span>
+      </div>
+    {/if}
   </ChartStage>
   <p id={helpId} class="sr-only">Use arrow keys to inspect items, Enter to open, and Shift F10 to add or remove an item from review. The contents list provides the same files and folders.</p>
   <ChartInspector {inspected} {active} {hoveredId} {focusNode} {percentageLabel} noun="item" />
@@ -142,6 +149,9 @@
 <style>
   .disk-chart { position: absolute; inset: 0; min-width: 0; overflow: hidden; border-radius: 8px; }
   .disk-chart:focus-visible { outline: 2px solid var(--muted-foreground); outline-offset: 3px; }
+  .sunburst-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: var(--well-width); text-align: center; pointer-events: none; display: grid; gap: 6px; }
+  .sunburst-center strong { color: var(--foreground); font-size: clamp(10px, calc(var(--well-width) / 5.5), 22px); font-weight: 600; line-height: 1.2; white-space: nowrap; }
+  .sunburst-center span { color: var(--muted-foreground); font-size: clamp(6px, calc(var(--well-width) / 13), 10px); line-height: 1.3; letter-spacing: 0.04em; }
   @media (max-width: 760px) {
     /* The mobile layout scrolls instead of allocating a flex height. */
     :global(.chart-stage.disk-chart-stage) { min-height: min(75vw, 440px); flex: none; }

@@ -207,7 +207,7 @@
         />
         <BreadcrumbBar items={ancestors} onSelect={(node) => void focus(node)} />
       </div>
-      <ChildList items={items} hoveredId={hoveredId} collectedIds={collectedIds} onHover={(id) => (hoveredId = id)} onOpen={(node) => void focus(node)} onCollect={() => {}} onContext={() => {}} />
+      <ChildList colorMode={chartMode === 'sunburst' ? 'sunburst' : 'standard'} items={items} hoveredId={hoveredId} collectedIds={collectedIds} onHover={(id) => (hoveredId = id)} onOpen={(node) => void focus(node)} onCollect={() => {}} onContext={() => {}} />
     </div>
     <StatusBar {status} collectorTotal={0} collectorCount={0} onOpenCollector={() => {}} onCancel={() => {}} />
   </div>
