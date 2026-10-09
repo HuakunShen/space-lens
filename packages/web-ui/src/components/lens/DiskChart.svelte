@@ -10,6 +10,7 @@
   import { buildDiskChartModel } from '../../lib/echarts-model'
   import { chartEmptyMessage } from '../../lib/chart-empty'
   import { formatNodeSize } from '../../lib/node-size'
+  import SoftBubblesOverlay from './SoftBubblesOverlay.svelte'
   import ChartModeToggle from './ChartModeToggle.svelte'
   import ChartStage from './ChartStage.svelte'
   import ChartInspector from './ChartInspector.svelte'
@@ -17,6 +18,7 @@
   use([CustomChart, SunburstChart, TreemapChart, UniversalTransition, LabelLayout, SVGRenderer])
 
   interface Props {
+    softBubbles?: boolean
     tree: TreeSliceNode | null
     focusNode: TreeNodeSummary | null
     mode: ChartMode
@@ -33,9 +35,24 @@
     canGoBack?: boolean
   }
 
-  let { tree, focusNode, mode, onModeChange, density, onDensityChange, hoveredId,
+  let { softBubbles = true, tree, focusNode, mode, onModeChange, density, onDensityChange, hoveredId,
     hoveredNode = null, collectedIds, onHover, onOpen, onContext, onBack, canGoBack = false }: Props = $props()
   let host = $state<HTMLDivElement>()
+  let softOverlay = $state<{ arm(id: string, event: PointerEvent): void; cancel(): void }>()
+  let softActive = $state(false)
+  let pointerDown: PointerEvent | null = null
+  let suppressClick = false
+  let clickReset: ReturnType<typeof setTimeout> | undefined
+  const softEnabled = $derived(softBubbles && mode === 'bubbles' && !prefersReducedMotion.current)
+
+  function rememberPointer(event: PointerEvent): void {
+    pointerDown = softEnabled && event.button === 0 && event.isPrimary ? event : null
+  }
+  function releaseGesture(): void {
+    if (clickReset) clearTimeout(clickReset)
+    clickReset = setTimeout(() => { suppressClick = false; clickReset = undefined }, 0)
+    pointerDown = null
+  }
   let chart = $state.raw<EChartsType>()
   let size = $state({ width: 620, height: 430 })
   const rendered: { width: number; height: number; tree: TreeSliceNode | null; mode: ChartMode | null; density: TreemapDensity | null } = {
@@ -76,20 +93,34 @@
     if (!host) return
     const instance = init(host, undefined, { renderer: 'svg' })
     chart = instance
-    instance.on('mouseover', (event) => onHover(eventId(event.data)))
-    instance.on('globalout', () => onHover(null))
-    instance.on('click', (event) => openNode(eventId(event.data)))
+    instance.on('mouseover', (event) => { if (!softActive) onHover(eventId(event.data)) })
+    instance.on('globalout', () => { if (!softActive) onHover(null) })
+    instance.on('mousedown', (event) => {
+      const id = eventId(event.data)
+      if (softEnabled && id && pointerDown) softOverlay?.arm(id, pointerDown)
+    })
+    instance.on('click', (event) => {
+      if (suppressClick || softActive) { suppressClick = false; return }
+      openNode(eventId(event.data))
+    })
     instance.on('contextmenu', (event) => {
+      if (softActive) return
       const bounds = host?.getBoundingClientRect()
       collectNode(eventId(event.data), (bounds?.left ?? 0) + (event.event?.offsetX ?? 0), (bounds?.top ?? 0) + (event.event?.offsetY ?? 0))
     })
-    return () => { instance.dispose(); chart = undefined }
+    return () => {
+      untrack(() => softOverlay?.cancel())
+      if (clickReset) clearTimeout(clickReset)
+      instance.dispose()
+      chart = undefined
+    }
   })
   $effect(() => {
     if (!chart) return
     if (!model) { chart.clear(); return }
     const resized = rendered.width !== size.width || rendered.height !== size.height
     const changedGeometry = rendered.tree !== tree || rendered.mode !== mode || rendered.density !== density
+    if (resized || changedGeometry) untrack(() => softOverlay?.cancel())
     if (resized) chart.resize({ width: size.width, height: size.height, silent: true })
     chart.setOption({ ...model.option, animation: changedGeometry && !prefersReducedMotion.current }, { notMerge: true })
     Object.assign(rendered, { ...size, tree, mode, density })
@@ -131,10 +162,15 @@
   <ChartStage class="disk-chart-stage" label={`${mode} disk usage chart`} empty={!model?.nodes.size ? chartEmptyMessage(focusNode) : null} {canGoBack} {onBack} bind:size>
     <!-- The visualization is a bounded keyboard application; its arrow/Enter controls are described below. -->
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-    <div class="disk-chart" bind:this={host} role="application" tabindex="0"
+    <div class="disk-chart" class:soft-enabled={softEnabled} style:opacity={softActive ? 0 : 1} onpointerdown={rememberPointer} bind:this={host} role="application" tabindex="0"
       aria-label={`${mode} disk usage visualization`} aria-describedby={helpId}
       onkeydown={keyboard} oncontextmenu={(event) => event.preventDefault()}
       onfocus={() => { if (!hoveredId) onHover(model?.navigableIds[0] ?? null) }} onblur={() => onHover(null)}></div>
+    {#if mode === 'bubbles' && model?.bubbles}
+      <SoftBubblesOverlay bind:this={softOverlay} circles={model.bubbles.circles} offset={model.bubbles.offset} {size}
+        enabled={softEnabled} {collectedIds} onActiveChange={(value) => { softActive = value }}
+        onDragChange={(id) => onHover(id)} onActivated={() => { suppressClick = true }} onReleased={releaseGesture} />
+    {/if}
     {#if mode === 'sunburst' && model?.nodes.size}
       <div class="sunburst-center" aria-hidden="true" style={`--well-width: ${Math.max(0, (Math.min(size.width, size.height) / 2 - 10) * 0.48 - 12)}px`}>
         <strong>{formatNodeSize(inspected)}</strong>
@@ -148,6 +184,7 @@
 
 <style>
   .disk-chart { position: absolute; inset: 0; min-width: 0; overflow: hidden; border-radius: 8px; }
+  .disk-chart.soft-enabled { touch-action: none; }
   .disk-chart:focus-visible { outline: 2px solid var(--muted-foreground); outline-offset: 3px; }
   .sunburst-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: var(--well-width); text-align: center; pointer-events: none; display: grid; gap: 6px; }
   .sunburst-center strong { color: var(--foreground); font-size: clamp(10px, calc(var(--well-width) / 5.5), 22px); font-weight: 600; line-height: 1.2; white-space: nowrap; }
