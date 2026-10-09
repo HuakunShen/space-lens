@@ -26,7 +26,7 @@
 </script>
 
 <div
-  class="chart-inspector macos:rounded-md macos:border-0 macos:border-t macos:bg-transparent macos:px-1 macos:pt-3 windows:rounded-lg windows:bg-card linux:rounded-xl linux:bg-card linux:p-4"
+  class="chart-inspector glass-panel macos:rounded-md macos:border-0 macos:border-t macos:bg-transparent macos:px-1 macos:pt-3 windows:rounded-lg windows:bg-card linux:rounded-xl linux:bg-card linux:p-4"
   class:inspecting={hoveredId !== null && inspected !== focusNode}
   aria-live="polite"
   aria-atomic="true"

@@ -27,7 +27,7 @@
 </script>
 
 <div class="chart-controls">
-  <div class="chart-mode" role="group" aria-label="Chart type">
+  <div class="chart-mode glass-controls" role="group" aria-label="Chart type">
     {#each families as family (family.value)}
       <button
         type="button"
@@ -43,7 +43,7 @@
     {/each}
   </div>
   {#if mode === 'treemap'}
-    <div class="chart-mode chart-mode-sub" role="group" aria-label="Treemap density">
+    <div class="chart-mode chart-mode-sub glass-controls" role="group" aria-label="Treemap density">
       {#each densities as option (option.value)}
         <button
           type="button"

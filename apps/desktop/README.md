@@ -39,10 +39,12 @@ For an unbundled local launch after building the desktop frontend:
 cargo run --manifest-path apps/desktop/src-tauri/Cargo.toml --bin space-lens-desktop
 ```
 
-The macOS host uses public `NSGlassEffectView.contentView` on macOS 26 and
-newer, falling back to `NSVisualEffectView` with `underWindowBackground` on
-older releases. It wraps the existing Tauri content container so WebView,
-resize, keyboard and drag handles stay intact. Native objects remain on the
+The macOS host uses the maintained `window-vibrancy` helper to install
+`NSGlassEffectView` on macOS 26 and newer, with `underWindowBackground`
+vibrancy on older releases. The original Tauri container stays in place; the
+helper moves WKWebView into the glass content view so resize and input handles
+stay intact. Every interface style can reveal native material. Floating
+controls use shared CSS blur, rim lighting and elevation in every web host. Native objects remain on the
 main thread and their parent views retain them; notification observers are
 removed when the window closes.
 

@@ -67,7 +67,7 @@
     >
   </div>
   <div class="toolbar-spacer" data-tauri-drag-region></div>
-  <div class="toolbar-actions macos:gap-2 linux:gap-2">
+  <div class="toolbar-actions glass-controls macos:gap-2 linux:gap-2">
     {#if onNewScan}
       <button
         class="toolbar-button windows:hidden macos:h-7 macos:border-transparent macos:bg-transparent linux:h-9 linux:rounded-lg linux:border-transparent linux:bg-primary linux:px-3 linux:text-primary-foreground linux:font-semibold"

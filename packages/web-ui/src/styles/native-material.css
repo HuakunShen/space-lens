@@ -1,6 +1,6 @@
 /* Native AppKit material shows through only when the host confirms installation. */
 @layer base {
-  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])[data-interface='macos'] {
+  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
     --background: transparent;
     --primary: var(--color-system-accent, #007aff);
     --ring: var(--color-system-accent, #007aff);
@@ -10,43 +10,45 @@
     --control: rgb(255 255 255 / 62%);
     --native-content: rgb(255 255 255 / 86%);
   }
-  :root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])[data-interface='macos'] {
-    --sidebar: rgb(24 24 24 / 78%);
-    --chrome: rgb(20 20 20 / 82%);
-    --card: rgb(28 28 28 / 86%);
+  :root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
+    --sidebar: rgb(24 24 24 / 64%);
+    --chrome: rgb(20 20 20 / 68%);
+    --card: rgb(28 28 28 / 78%);
     --control: rgb(50 50 50 / 88%);
-    --native-content: rgb(18 18 18 / 94%);
+    --native-content: rgb(18 18 18 / 84%);
     --muted: rgb(255 255 255 / 7%);
     --muted-foreground: #b0b0b0;
   }
 }
 @layer components {
   /* Keep data surfaces readable even over a bright wallpaper or inactive glass. */
-  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])[data-interface='macos'] .workspace-content {
+  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) .workspace-content {
     background: var(--native-content);
   }
-  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])[data-interface='macos'] .scan-sidebar {
+  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) .scan-sidebar {
     background: var(--sidebar);
   }
-  :root[macos][data-backdrop='glass'][data-interface='macos']
+  :root[macos][data-backdrop='glass']
     :is(.lens-toolbar, .scan-sidebar, .explorer-sidebar, .explorer-chart) {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
 }
 @media (prefers-reduced-transparency: reduce) {
-  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])[data-interface='macos'] {
+  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
     --background: #fff;
     --sidebar: #ececec;
     --chrome: #f0f0f0;
     --card: #f6f6f6;
     --control: #fff;
+    --native-content: #fff;
   }
-  :root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])[data-interface='macos'] {
+  :root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
     --background: #181818;
     --sidebar: #202020;
     --chrome: #202020;
     --card: #282828;
     --control: #343434;
+    --native-content: #181818;
   }
 }

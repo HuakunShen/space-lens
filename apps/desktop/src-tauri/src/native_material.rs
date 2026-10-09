@@ -37,7 +37,7 @@ pub fn create_main_window(app: &mut tauri::App) -> tauri::Result<()> {
     window.with_webview(move |platform| {
       // with_webview executes on the main thread and keeps Tauri's platform
       // handles alive for this callback. No raw AppKit pointers escape it.
-      unsafe { macos::install(&platform) };
+      unsafe { macos::install(&platform, &ready) };
       macos::observe_preferences(ready.app_handle().clone());
       let _ = ready.show();
     })?;
@@ -67,12 +67,11 @@ mod macos {
     msg_send,
     rc::{Allocated, Retained},
     runtime::{AnyClass, AnyObject, ProtocolObject},
-    sel, ClassType, MainThreadMarker, MainThreadOnly,
+    sel, ClassType, MainThreadMarker,
   };
   use objc2_app_kit::{
-    NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSAutoresizingMaskOptions,
-    NSColor, NSColorSpace, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
-    NSVisualEffectState, NSVisualEffectView, NSWindow,
+    NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication,
+    NSColor, NSColorSpace, NSView, NSVisualEffectView, NSWindow,
   };
   use objc2_foundation::{
     NSArray, NSDistributedNotificationCenter, NSNotification, NSNotificationCenter,
@@ -80,6 +79,7 @@ mod macos {
   };
   use std::{cell::RefCell, ptr::NonNull};
   use tauri::Manager;
+  use window_vibrancy::{apply_liquid_glass, apply_vibrancy, LiquidGlassOptions, NSGlassEffectViewStyle, NSVisualEffectMaterial};
 
   struct Observer {
     center: Retained<NSNotificationCenter>,
@@ -118,21 +118,22 @@ mod macos {
     let Some(content) = window.contentView() else {
       return "none";
     };
-    if glass_class().is_some_and(|class| content.isKindOfClass(class)) {
-      "glass"
-    } else if content.isKindOfClass(NSVisualEffectView::class()) {
-      "vibrancy"
-    } else {
-      "none"
+    // window-vibrancy inserts the material under Tauri's original content
+    // view. Keep that root: Tao caches its NSView for resize and input handling.
+    for view in content.subviews().iter() {
+      if glass_class().is_some_and(|class| view.isKindOfClass(class)) {
+        return "glass";
+      }
+      if view.isKindOfClass(NSVisualEffectView::class()) {
+        return "vibrancy";
+      }
     }
+    "none"
   }
 
-  /// The native window owns the material; its content view owns the original
-  /// Tauri content view. Retained locals bridge removal/reparenting so neither
-  /// view can deallocate in between. Keeping Tauri's original container (and
-  /// WKWebView inside it) preserves its resize, keyboard and drag machinery.
-  pub unsafe fn install(platform: &tauri::webview::PlatformWebview) {
-    let mtm = MainThreadMarker::new().expect("AppKit main thread");
+  /// Use the maintained Tauri helper for native material and content reparenting.
+  /// The only private hook we keep is the guarded WKWebView background setter.
+  pub unsafe fn install(platform: &tauri::webview::PlatformWebview, host: &tauri::WebviewWindow) {
     let webview = &*platform.inner().cast::<AnyObject>();
     let window: Option<Retained<NSWindow>> = msg_send![webview, window];
     let Some(window) = window else {
@@ -145,30 +146,15 @@ mod macos {
       push(webview, &window, false);
       return;
     }
-    let Some(content) = window.contentView() else {
+    let view = &*platform.inner().cast::<NSView>();
+    let installed = apply_liquid_glass(
+      host,
+      LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular).radius(0.0).content_view(view),
+    ).or_else(|_| apply_vibrancy(host, NSVisualEffectMaterial::UnderWindowBackground, None, None));
+    if installed.is_err() {
+      push(webview, &window, false);
       return;
-    };
-    let bounds = content.bounds();
-    let material: Retained<NSView> = if let Some(class) = glass_class() {
-      let glass: Retained<NSView> = msg_send![class, new];
-      let supports_content: bool = msg_send![&*glass, respondsToSelector: sel!(setContentView:)];
-      if supports_content {
-        glass.setFrame(bounds);
-        let _: () = msg_send![&*glass, setContentView: &*content];
-        glass
-      } else {
-        vibrancy(mtm, &content)
-      }
-    } else {
-      vibrancy(mtm, &content)
-    };
-    material.setAutoresizingMask(
-      NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
-    );
-    content.setAutoresizingMask(
-      NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
-    );
-    window.setContentView(Some(&material));
+    }
     let _: () = msg_send![webview, _setDrawsBackground: false];
     let supports_under_page: bool =
       msg_send![webview, respondsToSelector: sel!(setUnderPageBackgroundColor:)];
@@ -200,16 +186,6 @@ mod macos {
         .majorVersion,
       backdrop(&window)
     );
-  }
-
-  unsafe fn vibrancy(mtm: MainThreadMarker, content: &NSView) -> Retained<NSView> {
-    let effect =
-      NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), content.bounds());
-    effect.setMaterial(NSVisualEffectMaterial::UnderWindowBackground);
-    effect.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-    effect.setState(NSVisualEffectState::FollowsWindowActiveState);
-    effect.addSubview(content);
-    Retained::into_super(effect)
   }
 
   unsafe fn state(backdrop: &str) -> String {
