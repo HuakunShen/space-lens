@@ -57,6 +57,33 @@ export function bubbleMaterial(source: string, parent: boolean) {
   )
 }
 
+/** This style is shared by the static chart and its temporary soft-body overlay. */
+export function bubbleStyle(source: string, parent: boolean, selected: boolean, highlighted = false) {
+  return {
+    fill: bubbleMaterial(source, parent),
+    stroke: highlighted
+      ? 'rgba(255,255,255,0.9)'
+      : selected
+        ? '#fff'
+        : parent
+          ? 'rgba(255,255,255,0.16)'
+          : 'rgba(255,255,255,0.3)',
+    lineWidth: highlighted ? 1.5 : selected ? 2 : 1,
+  }
+}
+
+/** Convert ECharts' relative gradient coordinates into a Canvas bounding box. */
+export function gradientInBounds(
+  gradient: ReturnType<typeof chartMaterial>,
+  box: { x: number; y: number; width: number; height: number },
+) {
+  return {
+    start: { x: box.x + gradient.x * box.width, y: box.y + gradient.y * box.height },
+    end: { x: box.x + gradient.x2 * box.width, y: box.y + gradient.y2 * box.height },
+    colorStops: gradient.colorStops,
+  }
+}
+
 function hex(rgb: number[]): string {
   return `#${rgb.map((channel) => Math.round(channel).toString(16).padStart(2, '0')).join('')}`
 }

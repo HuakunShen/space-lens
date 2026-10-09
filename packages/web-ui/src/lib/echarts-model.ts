@@ -2,12 +2,13 @@ import type { EChartsOption, CustomSeriesOption, TreemapSeriesOption, SunburstSe
 type CustomSeriesRenderItemReturn = ReturnType<NonNullable<CustomSeriesOption['renderItem']>>
 import type { TreeSliceNode } from '../types.ts'
 import type { ChartMode, TreemapDensity } from './chart-mode.ts'
-import { buildBubbleCircles, clipBubbleName } from './bubbles.ts'
+import { buildBubbleCircles, type BubbleCircle } from './bubbles.ts'
+import { buildBubbleLabels, BUBBLE_FONT } from './bubble-label.ts'
 import { buildIcicleSegments, clipIcicleName } from './icicle.ts'
 import { buildStripRows } from './strips.ts'
 import { withOmittedBuckets } from './sunburst.ts'
 import { nodeColor, nodeMutedColor, sunburstColor } from './colors.ts'
-import { bubbleMaterial, chartMaterial, chartSurfaceColor } from './chart-material.ts'
+import { bubbleStyle, chartMaterial, chartSurfaceColor } from './chart-material.ts'
 import { formatNodeSize } from './node-size.ts'
 
 export interface DiskChartNode {
@@ -29,11 +30,14 @@ interface DiskChartInput {
   textColor?: string
 }
 
-interface DiskChartModel {
+export interface DiskChartModel {
+  bubbles?: { circles: BubbleCircle[]; offset: number }
   option: EChartsOption
   nodes: Map<string, DiskChartNode>
   navigableIds: string[]
 }
+
+export const BUBBLE_CANVAS_INSET = 6
 
 const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 const EDGE = 'rgba(255,255,255,0.15)'
@@ -43,6 +47,7 @@ const EMPHASIS_EDGE = 'rgba(255,255,255,0.9)'
 export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
   const { tree, width, height, mode, density, reducedMotion, collectedIds = new Set<string>() } = input
   const nodes = new Map<string, DiskChartNode>()
+  let bubbles: DiskChartModel['bubbles']
   const option: EChartsOption = {
     backgroundColor: 'transparent',
     animation: !reducedMotion,
@@ -211,27 +216,21 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
     }
     const emphasis = { style: { stroke: EMPHASIS_EDGE, lineWidth: 2 } }
     if (mode === 'bubbles') {
-      const circles = buildBubbleCircles(tree, width - 12, height - 12)
+      const offset = BUBBLE_CANVAS_INSET
+      const circles = buildBubbleCircles(tree, width - offset * 2, height - offset * 2).filter(
+        (circle) => circle.id !== root.id,
+      )
+      bubbles = { circles, offset }
+      const labels = buildBubbleLabels(circles)
       const parentByChild = new Map<string, string>()
       const familyByChild = new Map<string, string>()
       walkParents(root, root.id, parentByChild, familyByChild)
       for (const circle of circles) {
         if (circle.id === root.id) continue
-        const children = circles.filter((child) => parentByChild.get(child.id) === circle.id)
-        const hasVisibleChildren = children.length > 0
-        // ECharts raises emphasis by default; a packed parent must stay behind its children.
+        const label = labels.get(circle.id)
+        if (!label) continue
         const layer = parentByChild.get(circle.id) === root.id ? 0 : 2
-        const band = hasVisibleChildren
-          ? Math.min(...children.map((child) => child.y - child.r)) - (circle.y - circle.r)
-          : circle.r * 2
-        const titleY = hasVisibleChildren ? circle.y - circle.r + band / 2 : circle.y
-        const chord = Math.sqrt(Math.max(0, circle.r ** 2 - (Math.abs(titleY - circle.y) + 8) ** 2))
-        const name = clipBubbleName(circle.name, chord)
-        const label =
-          circle.labelVisible && circle.r >= 27 && band >= 22
-            ? `${name}${circle.r >= 40 && band >= 40 ? `\n${formatNodeSize(circle.node)}` : ''}`
-            : ''
-        const fill = bubbleMaterial(circle.color, hasVisibleChildren)
+        const normalStyle = bubbleStyle(circle.color, label.hasVisibleChildren, collectedIds.has(circle.id))
         shapes.push({
           node: circle.node,
           parentId: parentByChild.get(circle.id) ?? root.id,
@@ -241,30 +240,25 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
             id: circle.id,
             z2: layer,
             morph: true,
-            shape: { cx: circle.x + 6, cy: circle.y + 6, r: circle.r },
-            style: {
-              fill,
-              stroke: collectedIds.has(circle.id)
-                ? '#fff'
-                : hasVisibleChildren
-                  ? 'rgba(255,255,255,0.16)'
-                  : 'rgba(255,255,255,0.3)',
-              lineWidth: selectedWidth(circle.id),
+            shape: { cx: circle.x + offset, cy: circle.y + offset, r: circle.r },
+            style: normalStyle,
+            emphasis: {
+              z2: layer,
+              style: bubbleStyle(circle.color, label.hasVisibleChildren, collectedIds.has(circle.id), true),
             },
-            emphasis: { z2: layer, style: { fill, stroke: EMPHASIS_EDGE, lineWidth: 1.5 } },
             textContent: {
               type: 'text',
               style: {
-                text: label,
-                x: circle.x + 6,
-                y: titleY + 6,
+                text: label.text,
+                x: label.x + offset,
+                y: label.y + offset,
                 fill: '#fff',
-                fontFamily: FONT,
-                fontSize: circle.r > 90 ? 14 : 12,
-                fontWeight: hasVisibleChildren ? 600 : 500,
+                fontFamily: BUBBLE_FONT,
+                fontSize: label.fontSize,
+                fontWeight: label.fontWeight,
                 align: 'center',
                 verticalAlign: 'middle',
-                lineHeight: 19,
+                lineHeight: label.lineHeight,
               },
             },
             textConfig: { local: false, inside: true },
@@ -413,7 +407,12 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
     }
     option.series = [series]
   }
-  return { option, nodes, navigableIds: [...nodes].filter(([, entry]) => !entry.isAggregate).map(([id]) => id) }
+  return {
+    option,
+    nodes,
+    bubbles,
+    navigableIds: [...nodes].filter(([, entry]) => !entry.isAggregate).map(([id]) => id),
+  }
 }
 
 function leafValue(node: TreeSliceNode): number {
