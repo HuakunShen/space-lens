@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
@@ -31,8 +32,21 @@ pub struct SessionBundle {
   pub events: EventSink,
   // Only discovery requests wait here; ordinary reads never acquire it.
   discovery: Mutex<()>,
-  // Only app-audit requests wait here; ordinary reads never acquire it.
-  pub app_audit: Mutex<()>,
+  // Only app-audit and app-icon requests wait here; ordinary reads never
+  // acquire it.
+  pub app_audit: Mutex<AppAuditState>,
+}
+
+/// Per-session app-audit state: the icon allow-list plus the icon cache.
+///
+/// `known_paths` accumulates the canonical `.app` bundle paths of every audit
+/// this session has run; icons are served only for those paths, so a raw IPC
+/// caller cannot turn `appIcon` into an arbitrary-file read. `icons` caches
+/// successful data URLs by canonical path; icon misses are never cached.
+#[derive(Default)]
+pub struct AppAuditState {
+  known_paths: std::collections::HashSet<PathBuf>,
+  icons: std::collections::HashMap<PathBuf, String>,
 }
 
 pub struct AppState {
@@ -82,7 +96,7 @@ fn connect_window_session(window_label: &str, state: &AppState) -> Value {
       engine: Mutex::new(engine),
       events: EventSink::new(),
       discovery: Mutex::new(()),
-      app_audit: Mutex::new(()),
+      app_audit: Mutex::new(AppAuditState::default()),
     }),
   );
   session_metadata(&session_id)
@@ -257,6 +271,9 @@ pub enum ReadRequest {
     #[serde(default = "default_app_audit_limit")]
     limit: usize,
   },
+  AppIcon {
+    app_path: String,
+  },
 }
 
 #[derive(Deserialize)]
@@ -342,6 +359,9 @@ pub async fn sl_read(
       {
         return read_app_audit(&bundle, *min_size, *include_heuristic, *limit);
       }
+      if let ReadRequest::AppIcon { app_path } = &request {
+        return read_app_icon(&bundle, app_path);
+      }
       let mut engine = bundle.engine.lock().unwrap();
       let result: Result<Value, Value> = match request {
         ReadRequest::Health => Ok(json!({
@@ -417,6 +437,9 @@ pub async fn sl_read(
         ReadRequest::AppAudit { .. } => {
           unreachable!("appAudit handled before locking the engine")
         }
+        ReadRequest::AppIcon { .. } => {
+          unreachable!("appIcon handled before locking the engine")
+        }
       };
       drop(engine);
       result
@@ -437,6 +460,8 @@ pub async fn sl_read(
 /// Standalone audit read: runs the app-storage audit outside the engine lock
 /// (mirroring `read_discovery`). The contract bounds `limit` to 1..=1000;
 /// enforce it here so a raw IPC caller cannot request beyond that shape.
+/// Successful audits extend the session's icon allow-list (`known_paths`;
+/// audits accumulate, never clear) with every reported `.app` bundle path.
 fn read_app_audit(
   bundle: &SessionBundle,
   min_size: u64,
@@ -449,7 +474,7 @@ fn read_app_audit(
       "appAudit limit must be between 1 and 1000",
     ));
   }
-  let _guard = bundle.app_audit.lock().unwrap();
+  let mut state = bundle.app_audit.lock().unwrap();
   let options = spacelens_app_audit::AppAuditOptions {
     min_size,
     include_heuristic,
@@ -458,7 +483,53 @@ fn read_app_audit(
   };
   let report = spacelens_app_audit::audit_installed_apps(&options)
     .map_err(|error| problem_value("InternalError", error))?;
+  for app in &report.apps {
+    let Some(app_path) = app.app_path.as_deref() else {
+      continue;
+    };
+    if let Ok(canonical) = std::fs::canonicalize(app_path) {
+      state.known_paths.insert(canonical);
+    }
+  }
   serde_json::to_value(report).map_err(|error| problem_value("InternalError", error))
+}
+
+/// Standalone icon read: serves a downscaled PNG data URL for one audited app.
+/// The path must have been returned by an app storage audit in this session;
+/// anything else is `Forbidden`, so a raw IPC caller cannot turn this into an
+/// arbitrary-file read. Never touches the engine lock.
+fn read_app_icon(bundle: &SessionBundle, app_path: &str) -> Result<Value, Value> {
+  // Fail closed on symlinks and missing paths: only real bundles resolve.
+  if std::fs::symlink_metadata(app_path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+    return Err(problem_value(
+      "NotFound",
+      format!("no such app: {app_path}"),
+    ));
+  }
+  let canonical = std::fs::canonicalize(app_path)
+    .map_err(|_| problem_value("NotFound", format!("no such app: {app_path}")))?;
+  let mut state = bundle.app_audit.lock().unwrap();
+  if !state.known_paths.contains(&canonical) {
+    return Err(problem_value(
+      "Forbidden",
+      "app icons are only served for apps returned by an app storage audit",
+    ));
+  }
+  if let Some(data_url) = state.icons.get(&canonical) {
+    return serde_json::to_value(json!({ "dataUrl": data_url }))
+      .map_err(|error| problem_value("InternalError", error));
+  }
+  let png = spacelens_app_audit::app_icon_png(&canonical);
+  let Some(png) = png else {
+    return Err(problem_value("NotFound", "no icon available for this app"));
+  };
+  let data_url = format!(
+    "data:image/png;base64,{}",
+    base64::engine::general_purpose::STANDARD.encode(&png)
+  );
+  state.icons.insert(canonical, data_url.clone());
+  serde_json::to_value(json!({ "dataUrl": data_url }))
+    .map_err(|error| problem_value("InternalError", error))
 }
 
 fn read_discovery(
@@ -972,7 +1043,7 @@ mod tests {
       engine: std::sync::Mutex::new(engine),
       events: crate::events::EventSink::new(),
       discovery: std::sync::Mutex::new(()),
-      app_audit: std::sync::Mutex::new(()),
+      app_audit: std::sync::Mutex::new(super::AppAuditState::default()),
     };
     super::run_local_scan_task(&bundle, task);
     let status = bundle
@@ -1079,7 +1150,7 @@ mod tests {
       engine: Mutex::new(engine),
       events: crate::events::EventSink::new(),
       discovery: Mutex::new(()),
-      app_audit: Mutex::new(()),
+      app_audit: Mutex::new(super::AppAuditState::default()),
     });
     let walks = Arc::new(AtomicUsize::new(0));
     let (started_tx, started_rx) = mpsc::channel();
@@ -1238,20 +1309,59 @@ mod tests {
   }
 
   #[test]
-  fn app_audit_limit_out_of_contract_range_is_refused_before_scanning() {
+  fn app_icon_read_matches_the_closed_contract() {
+    let request: ReadRequest = serde_json::from_value(serde_json::json!({
+        "method": "appIcon", "appPath": "/Applications/Foo.app",
+    }))
+    .unwrap();
+    assert!(matches!(
+      request,
+      ReadRequest::AppIcon { app_path } if app_path == "/Applications/Foo.app"
+    ));
+    // Missing appPath and unknown fields are rejected (deny_unknown_fields).
+    assert!(
+      serde_json::from_value::<ReadRequest>(serde_json::json!({"method": "appIcon"})).is_err()
+    );
+    assert!(serde_json::from_value::<ReadRequest>(serde_json::json!({
+        "method": "appIcon", "appPath": "/Applications/Foo.app", "path": "/arbitrary",
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<ReadRequest>(serde_json::json!({
+        "method": "appIcon", "appPath": 42,
+    }))
+    .is_err());
+  }
+
+  #[test]
+  fn app_icon_for_paths_outside_the_audit_allow_list_is_forbidden() {
+    // A fresh session has audited nothing: even an existing filesystem path
+    // must be refused, proving the allow-list (not mere existence) gates icons.
+    let probe = std::env::temp_dir().join(format!("sl-app-icon-forbidden-{}", std::process::id()));
+    std::fs::write(&probe, b"probe").unwrap();
+    let probe = std::fs::canonicalize(&probe).unwrap();
     let bundle = super::SessionBundle {
       window_label: "fixture".into(),
       engine: std::sync::Mutex::new(crate::engine::EngineStore::new(Vec::new())),
       events: crate::events::EventSink::new(),
       discovery: std::sync::Mutex::new(()),
-      app_audit: std::sync::Mutex::new(()),
+      app_audit: std::sync::Mutex::new(super::AppAuditState::default()),
     };
-    for limit in [0usize, 1001] {
-      let problem = super::read_app_audit(&bundle, 0, true, limit).unwrap_err();
-      assert_eq!(
-        problem["problem"]["code"], "InvalidRequest",
-        "limit {limit}"
-      );
-    }
+    let problem = super::read_app_icon(&bundle, &probe.to_string_lossy()).unwrap_err();
+    assert_eq!(problem["problem"]["code"], "Forbidden");
+    // A missing path never reaches the allow-list check: it is NotFound.
+    let missing = probe.with_file_name("sl-app-icon-forbidden-missing");
+    let problem = super::read_app_icon(&bundle, &missing.to_string_lossy()).unwrap_err();
+    assert_eq!(problem["problem"]["code"], "NotFound");
+    // An allow-listed path without a loadable icon is NotFound, not Forbidden:
+    // the gate passed, the icon load failed (a temp file is no `.app` bundle).
+    bundle
+      .app_audit
+      .lock()
+      .unwrap()
+      .known_paths
+      .insert(probe.clone());
+    let problem = super::read_app_icon(&bundle, &probe.to_string_lossy()).unwrap_err();
+    assert_eq!(problem["problem"]["code"], "NotFound");
+    std::fs::remove_file(&probe).unwrap();
   }
 }

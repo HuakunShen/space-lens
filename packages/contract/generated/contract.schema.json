@@ -2216,6 +2216,35 @@
       ],
       "additionalProperties": false
     },
+    "AppIconRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "appPath"
+      ],
+      "additionalProperties": false
+    },
+    "AppIcon": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "dataUrl": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "dataUrl"
+      ],
+      "additionalProperties": false
+    },
     "CleanupPlanRequest": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

@@ -9,6 +9,8 @@ import type {
   DiscoveryRequest,
   AppAuditReport,
   AppAuditRequest,
+  AppIcon,
+  AppIconRequest,
   Health,
   Problem,
   RootsResponse,
@@ -174,6 +176,11 @@ export function createTauriService(ports: TauriPorts): WorkbenchService {
       const { minSize, includeHeuristic, limit } = body
       return invokeReply<AppAuditReport>('sl_read',
         { request: { method: 'appAudit', minSize, includeHeuristic, limit } },
+        DISCOVERY_REPLY_TIMEOUT_MS)
+    },
+    async appIcon(body: AppIconRequest) {
+      return invokeReply<AppIcon>('sl_read',
+        { request: { method: 'appIcon', appPath: body.appPath } },
         DISCOVERY_REPLY_TIMEOUT_MS)
     },
     async plan(body: { scanId: string; nodeIds: string[] }) {

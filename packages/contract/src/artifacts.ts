@@ -8,7 +8,7 @@ import {
 } from './cleanup.ts'
 import { EventEnvelopeSchema } from './events.ts'
 import { DiscoveryKindSchema, DiscoveryRequestSchema, DiscoveryItemSchema, DiscoveryPageSchema } from './discovery.ts'
-import { AppAuditRequestSchema, AppAuditReportSchema } from './apps.ts'
+import { AppAuditRequestSchema, AppAuditReportSchema, AppIconRequestSchema, AppIconSchema } from './apps.ts'
 import {
   LocalScanReportSchema,
   LocalScanNodeSchema,
@@ -49,6 +49,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   DiscoveryPage: DiscoveryPageSchema,
   AppAuditRequest: AppAuditRequestSchema,
   AppAuditReport: AppAuditReportSchema,
+  AppIconRequest: AppIconRequestSchema,
+  AppIcon: AppIconSchema,
   CleanupPlanRequest: CleanupPlanRequestSchema,
   CleanupPlan: CleanupPlanSchema,
   CleanupExecuteRequest: CleanupExecuteRequestSchema,

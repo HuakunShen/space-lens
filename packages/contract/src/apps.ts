@@ -53,3 +53,9 @@ export const AppAuditReportSchema = z.strictObject({
   truncated: z.boolean(),
 })
 export type AppAuditReport = z.infer<typeof AppAuditReportSchema>
+
+export const AppIconRequestSchema = z.strictObject({ appPath: z.string().min(1).max(4096) })
+export type AppIconRequest = z.infer<typeof AppIconRequestSchema>
+
+export const AppIconSchema = z.strictObject({ dataUrl: z.string().min(1) })
+export type AppIcon = z.infer<typeof AppIconSchema>
