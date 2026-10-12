@@ -872,32 +872,81 @@
     onConnect={() => void connect()}
   />
 {:else if pickerOpen || workbench.status === null || workbench.status.state !== 'ready'}
-  <ScanPicker
-    {targets}
-    volumes={workbench.volumes}
-    mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
-    folderPicker={workbench.capabilities?.host.folderPicker ?? false}
-    onSettings={() => (settingsOpen = true)}
-    onPickFolder={() => workbench.service?.pickFolder?.() ?? Promise.resolve(null)}
-    chromeInset={headerInset()}
-    logo={`${base}/logo-mark.png`}
-    initialPath={pickerPath}
-    canClose={workbench.status?.state === 'ready'}
-    busy={startingScan || workbench.status?.state === 'scanning'}
-    error={workbench.error ||
-      (workbench.status?.state === 'failed'
-        ? workbench.status.message
-        : workbench.status?.state === 'cancelled'
-          ? 'Scan cancelled. Choose a location to start again.'
-          : null)}
-    status={workbench.status}
-    onScan={(paths) => void startScan(paths)}
-    onForget={forgetRecent}
-    onCancel={() => {
-      if (workbench.status?.state === 'scanning') void cancelScan()
-      else pickerOpen = false
-    }}
-  />
+  {#if view === 'apps' && appAuditAvailable}
+    <main class="scan-picker flex h-dvh min-h-0 flex-col bg-background text-foreground">
+      <LensToolbar
+        title="App storage"
+        mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
+        chromeInset={headerInset()}
+        sidebarVisible={false}
+        onOpenSettings={() => (settingsOpen = true)}
+        logo={`${base}/logo-mark.png`}
+      />
+      <div class="picker-layout flex min-h-0 flex-1 max-md:flex-col max-md:overflow-auto windows:bg-sidebar">
+        <section
+          class="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto p-8 max-md:p-5 windows:rounded-tl-lg windows:border windows:border-border windows:bg-background windows:px-8 linux:bg-background"
+        >
+          <div class="my-auto mx-auto w-full max-w-4xl">
+            <div class="mb-4">
+              <button
+                type="button"
+                class="text-sm text-muted-foreground underline-offset-4 hover:underline"
+                onclick={() => (view = 'browse')}>← Back</button
+              >
+            </div>
+            {#key view}<AppAuditList
+                report={appAuditReport}
+                loading={appAuditLoading}
+                error={appAuditError}
+                minSize={appMinSize}
+                disabled={workbench.deleting || planning}
+                onRefresh={() => void refreshAppAudit()}
+                onMinSize={(v) => (appMinSize = v)}
+                onCopy={(path) => void copyPath(path)}
+              />{/key}
+          </div>
+        </section>
+      </div>
+    </main>
+  {:else}
+    <div class="relative">
+      <ScanPicker
+        {targets}
+        volumes={workbench.volumes}
+        mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
+        folderPicker={workbench.capabilities?.host.folderPicker ?? false}
+        onSettings={() => (settingsOpen = true)}
+        onPickFolder={() => workbench.service?.pickFolder?.() ?? Promise.resolve(null)}
+        chromeInset={headerInset()}
+        logo={`${base}/logo-mark.png`}
+        initialPath={pickerPath}
+        canClose={workbench.status?.state === 'ready'}
+        busy={startingScan || workbench.status?.state === 'scanning'}
+        error={workbench.error ||
+          (workbench.status?.state === 'failed'
+            ? workbench.status.message
+            : workbench.status?.state === 'cancelled'
+              ? 'Scan cancelled. Choose a location to start again.'
+              : null)}
+        status={workbench.status}
+        onScan={(paths) => void startScan(paths)}
+        onForget={forgetRecent}
+        onCancel={() => {
+          if (workbench.status?.state === 'scanning') void cancelScan()
+          else pickerOpen = false
+        }}
+      />
+      {#if appAuditAvailable}
+        <div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+          <button
+            type="button"
+            class="pointer-events-auto text-xs text-muted-foreground underline-offset-4 hover:underline"
+            onclick={() => (view = 'apps')}>App storage →</button
+          >
+        </div>
+      {/if}
+    </div>
+  {/if}
 {:else}
   <div class="workbench-shell compact-workbench windows:bg-sidebar">
     <LensToolbar
