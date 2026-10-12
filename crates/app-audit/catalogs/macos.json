@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "platform": "macos",
+  "entries": [
+    {
+      "id": "raycast",
+      "name": "Raycast",
+      "kind": "app",
+      "match": { "bundleIds": ["com.raycast.macos"], "appNames": ["Raycast"] },
+      "locations": [
+        { "path": "~/Library/Application Support/com.raycast.macos/clipboard", "label": "Clipboard history files", "classification": "user-data", "purgeable": true, "comment": "Images and files you copied, stored as plain files named by content hash. Deleting removes clipboard history content; Raycast's Clear History cleans this too." },
+        { "path": "~/Library/Application Support/com.raycast.macos/node", "label": "Bundled Node runtime", "classification": "re-downloadable", "purgeable": true, "comment": "Private Node.js runtime (~110 MB) shipped for extensions. Raycast reinstalls it automatically." },
+        { "path": "~/Library/Application Support/com.raycast.macos/index", "label": "File search index", "classification": "cache", "purgeable": true, "comment": "Full-disk file index (minidex). Rebuilt automatically after removal." },
+        { "path": "~/Library/Application Support/com.raycast.macos/extensions", "label": "Extension API caches", "classification": "cache", "purgeable": true, "comment": "Per-extension runtime caches. Extension code itself is stored inside Raycast's encrypted database." },
+        { "path": "~/Library/Application Support/com.raycast.macos", "label": "Raycast data root", "classification": "support", "purgeable": false, "comment": "Settings, snippet and history databases (encrypted). Kept intact; only the itemized subfolders above are called out." },
+        { "path": "~/Library/Application Support/.com.raycast.macos.backups", "label": "Automatic database backups", "classification": "versions", "purgeable": true, "comment": "Daily full copies of Raycast's databases under per-version folders. Older timestamped folders can go." },
+        { "path": "~/Library/Caches/com.raycast.macos", "label": "WebKit caches", "classification": "cache", "purgeable": true, "comment": null },
+        { "path": "~/Library/Logs/com.raycast.macos", "label": "Diagnostic logs", "classification": "logs", "purgeable": true, "comment": null }
+      ]
+    },
+    {
+      "id": "claude-desktop",
+      "name": "Claude",
+      "kind": "app",
+      "match": { "bundleIds": ["com.anthropic.claudefordesktop"], "appNames": ["Claude"] },
+      "locations": [
+        { "path": "~/Library/Application Support/Claude/claude-code-vm", "label": "Sandbox VM images", "classification": "re-downloadable", "purgeable": true, "comment": "Linux VM images used for sandboxed code execution (multiple GB, sparse). Re-downloaded on next use." },
+        { "path": "~/Library/Application Support/Claude/vm_bundles", "label": "VM bundle cache", "classification": "re-downloadable", "purgeable": true, "comment": "Cached VM bundles for code mode. Re-created when needed." },
+        { "path": "~/Library/Application Support/Claude/claude-code", "label": "Bundled CLI versions", "classification": "versions", "purgeable": true, "comment": "claude-code bundles kept by the updater, one folder per version." },
+        { "path": "~/Library/Application Support/Claude", "label": "Claude data root", "classification": "support", "purgeable": false, "comment": "App settings and local stores (includes the bundled Chromium copy). Chat data is synced via your account." }
+      ]
+    },
+    {
+      "id": "cherry-studio",
+      "name": "Cherry Studio",
+      "kind": "app",
+      "match": { "bundleIds": ["com.kangfenmao.CherryStudio"], "appNames": ["Cherry Studio"] },
+      "locations": [
+        { "path": "~/.cherrystudio", "label": "Cherry Studio data", "classification": "support", "purgeable": false, "comment": "App data including knowledge bases, model provider caches and bundled toolchains." }
+      ]
+    },
+    {
+      "id": "vscode",
+      "name": "Visual Studio Code",
+      "kind": "app",
+      "match": { "bundleIds": ["com.microsoft.VSCode"], "appNames": ["Visual Studio Code", "Code"] },
+      "locations": [
+        { "path": "~/Library/Application Support/Code/User/workspaceStorage", "label": "Workspace state", "classification": "cache", "purgeable": true, "comment": "Per-workspace caches and state. VS Code rebuilds what it needs." },
+        { "path": "~/Library/Application Support/Code/CachedExtensionVSIXs", "label": "Downloaded extension installers", "classification": "cache", "purgeable": true, "comment": null },
+        { "path": "~/Library/Application Support/Code", "label": "VS Code user data", "classification": "support", "purgeable": false, "comment": "Settings, state and caches in one folder; the itemized subfolders above are the regenerable parts." },
+        { "path": "~/.vscode/extensions", "label": "Installed extensions", "classification": "user-data", "purgeable": true, "comment": "Downloaded extension payloads. Deleting an extension folder uninstalls that extension." }
+      ]
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "kind": "app",
+      "match": { "bundleIds": [], "appNames": ["Cursor"] },
+      "locations": [
+        { "path": "~/Library/Application Support/Cursor", "label": "Cursor user data", "classification": "support", "purgeable": false, "comment": "Settings, chat history and caches in one folder." },
+        { "path": "~/.cursor/extensions", "label": "Installed extensions", "classification": "user-data", "purgeable": true, "comment": "Extension payloads; some ship platform binaries for every OS (hundreds of MB of dead weight possible)." }
+      ]
+    },
+    {
+      "id": "claude-code-cli",
+      "name": "Claude Code CLI",
+      "kind": "cli",
+      "match": null,
+      "locations": [
+        { "path": "~/.claude/projects", "label": "Session transcripts", "classification": "user-data", "purgeable": true, "comment": "Per-project conversation transcripts. Can reach many GB; this is your history — back up before deleting." },
+        { "path": "~/.claude/shell-snapshots", "label": "Shell snapshots", "classification": "cache", "purgeable": true, "comment": null },
+        { "path": "~/.claude/statsig", "label": "Feature-flag cache", "classification": "cache", "purgeable": true, "comment": null },
+        { "path": "~/.claude", "label": "Claude Code data root", "classification": "support", "purgeable": false, "comment": "Config plus the itemized subfolders. Watch for stray .bk backup folders." }
+      ]
+    },
+    {
+      "id": "codex-cli",
+      "name": "Codex CLI",
+      "kind": "cli",
+      "match": null,
+      "locations": [
+        { "path": "~/.codex/sessions", "label": "Chat session logs", "classification": "user-data", "purgeable": true, "comment": "One JSONL per conversation. Months of sessions can reach tens of GB — your conversation history; back up first." },
+        { "path": "~/.codex/archived", "label": "Archived sessions", "classification": "user-data", "purgeable": true, "comment": "Rotated older sessions; same nature as sessions/." },
+        { "path": "~/.codex/packages/standalone/releases", "label": "Historical CLI releases", "classification": "versions", "purgeable": true, "comment": "Every release the updater ever kept (~250 MB each). Only the current one is used." },
+        { "path": "~/.codex/worktrees", "label": "Agent worktrees", "classification": "user-data", "purgeable": true, "comment": "Git worktrees created by agent runs. May contain uncommitted work — review before deleting." },
+        { "path": "~/.codex", "label": "Codex data root", "classification": "support", "purgeable": false, "comment": "Config, auth and history databases; the itemized subfolders above are the big movers." }
+      ]
+    },
+    { "id": "zcode-cli", "name": "ZCode CLI", "kind": "cli", "match": null, "locations": [ { "path": "~/.zcode", "label": "ZCode data", "classification": "support", "purgeable": false, "comment": "Assistant sessions, caches and settings." } ] },
+    { "id": "opencode-cli", "name": "OpenCode CLI", "kind": "cli", "match": null, "locations": [ { "path": "~/.opencode", "label": "OpenCode data", "classification": "support", "purgeable": false, "comment": "Config, session data and caches." } ] },
+    { "id": "gemini-cli", "name": "Gemini CLI", "kind": "cli", "match": null, "locations": [ { "path": "~/.gemini/tmp", "label": "Temp files", "classification": "cache", "purgeable": true, "comment": null }, { "path": "~/.gemini", "label": "Gemini CLI data", "classification": "support", "purgeable": false, "comment": null } ] },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "kind": "cli",
+      "match": null,
+      "locations": [
+        { "path": "~/.ollama/models", "label": "Model weights", "classification": "re-downloadable", "purgeable": true, "comment": "Downloaded model weights. Removing a model forces a full re-pull later." },
+        { "path": "~/.ollama", "label": "Ollama data root", "classification": "support", "purgeable": false, "comment": null }
+      ]
+    },
+    { "id": "kimi-code", "name": "Kimi Code CLI", "kind": "cli", "match": null, "locations": [ { "path": "~/.kimi-code", "label": "Kimi Code data", "classification": "support", "purgeable": false, "comment": null } ] },
+    {
+      "id": "npm-cache",
+      "name": "npm cache",
+      "kind": "cli",
+      "match": null,
+      "locations": [
+        { "path": "~/.npm/_cacache", "label": "Package download cache", "classification": "cache", "purgeable": true, "comment": "Safe to clear (npm cache clean --force); contents re-download on demand." },
+        { "path": "~/.npm/_logs", "label": "npm logs", "classification": "logs", "purgeable": true, "comment": null }
+      ]
+    },
+    {
+      "id": "pnpm-store",
+      "name": "pnpm store",
+      "kind": "cli",
+      "match": null,
+      "locations": [
+        { "path": "~/Library/pnpm", "label": "pnpm store and global bin", "classification": "support", "purgeable": false, "comment": "Content-addressable package store. Old-generation stores can be reclaimed with pnpm store prune." },
+        { "path": "~/Library/Caches/pnpm", "label": "pnpm cache", "classification": "cache", "purgeable": true, "comment": null }
+      ]
+    },
+    { "id": "misc-cache", "name": "Shared toolchain caches", "kind": "cli", "match": null, "locations": [ { "path": "~/.cache", "label": "~/.cache", "classification": "cache", "purgeable": true, "comment": "Shared cache dir used by pip, puppeteer and other tools; each recreates its own subfolder." } ] }
+  ]
+}
