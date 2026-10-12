@@ -222,6 +222,25 @@
   let appAuditError = $state<string | null>(null)
   let appMinSize = $state(0)
   let appAuditSequence = 0
+  // App icons are stable per path, so the session cache survives refreshes.
+  // The service method is optional (older hosts lack it) — resolve null then.
+  const appIconCache = new Map<string, Promise<string | null>>()
+  async function appIcon(appPath: string): Promise<string | null> {
+    const cached = appIconCache.get(appPath)
+    if (cached) return cached
+    const task = (async (): Promise<string | null> => {
+      try {
+        const service = workbench.service as unknown as {
+          appIcon?: (args: { appPath: string }) => Promise<string | null>
+        } | null
+        return (await service?.appIcon?.({ appPath })) ?? null
+      } catch {
+        return null
+      }
+    })()
+    appIconCache.set(appPath, task)
+    return task
+  }
   let browseSearch = $state('')
   let browseSort = $state<'size' | 'name' | 'path'>('size')
   const sortOptions = [
@@ -903,6 +922,7 @@
                 onRefresh={() => void refreshAppAudit()}
                 onMinSize={(v) => (appMinSize = v)}
                 onCopy={(path) => void copyPath(path)}
+                onIcon={appIcon}
               />{/key}
           </div>
         </section>
@@ -1191,6 +1211,7 @@
               onRefresh={() => void refreshAppAudit()}
               onMinSize={(v) => (appMinSize = v)}
               onCopy={(path) => void copyPath(path)}
+              onIcon={appIcon}
             />{/key}
         {:else}
           {#key view}<DiscoveryList

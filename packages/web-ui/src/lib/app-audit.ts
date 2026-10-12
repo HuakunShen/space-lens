@@ -1,4 +1,4 @@
-import type { AppAuditClassification, AppAuditLocation } from '@space-lens/contract'
+import type { AppAuditClassification, AppAuditEntry, AppAuditLocation } from '@space-lens/contract'
 
 const CLASSIFICATION_LABELS: Record<AppAuditClassification, string> = {
   application: 'Application',
@@ -34,4 +34,27 @@ export function classificationLabel(classification: AppAuditClassification): str
 /** Sum of sizes of locations flagged purgeable by their classification. */
 export function purgeableTotal(locations: Pick<AppAuditLocation, 'purgeable' | 'size'>[]): number {
   return locations.reduce((total, location) => (location.purgeable ? total + location.size : total), 0)
+}
+
+/** First-letter avatar text for an app name; tolerates blank names. */
+export function initialsFor(name: string): string {
+  const first = name.trim().charAt(0)
+  return first === '' ? '?' : first.toUpperCase()
+}
+
+/** Client-side name/bundleId filter for the app storage search box. */
+export function matchesQuery(entry: Pick<AppAuditEntry, 'name' | 'bundleId'>, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return true
+  if (entry.name.toLowerCase().includes(needle)) return true
+  return (entry.bundleId ?? '').toLowerCase().includes(needle)
+}
+
+/** The largest location in an entry, or null when it has none. */
+export function largestLocation(entry: Pick<AppAuditEntry, 'locations'>): AppAuditLocation | null {
+  let largest: AppAuditLocation | null = null
+  for (const location of entry.locations) {
+    if (largest === null || location.size > largest.size) largest = location
+  }
+  return largest
 }
