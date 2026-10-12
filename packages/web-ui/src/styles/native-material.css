@@ -4,28 +4,33 @@
     --background: transparent;
     --primary: var(--color-system-accent, #007aff);
     --ring: var(--color-system-accent, #007aff);
-    --sidebar: rgb(245 245 245 / 38%);
-    --chrome: rgb(250 250 250 / 35%);
-    --card: rgb(255 255 255 / 45%);
-    --control: rgb(255 255 255 / 62%);
-    --native-content: rgb(255 255 255 / 86%);
+    --sidebar: rgb(245 245 245 / 64%);
+    --chrome: rgb(250 250 250 / 62%);
+    --card: rgb(255 255 255 / 68%);
+    --control: rgb(255 255 255 / 80%);
+    --native-content: rgb(255 255 255 / 92%);
   }
   :root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
-    --sidebar: rgb(24 24 24 / 64%);
-    --chrome: rgb(20 20 20 / 68%);
-    --card: rgb(28 28 28 / 78%);
-    --control: rgb(50 50 50 / 88%);
-    --native-content: rgb(18 18 18 / 84%);
+    --sidebar: rgb(24 24 24 / 84%);
+    --chrome: rgb(20 20 20 / 86%);
+    --card: rgb(28 28 28 / 90%);
+    --control: rgb(50 50 50 / 93%);
+    --native-content: rgb(18 18 18 / 91%);
     --muted: rgb(255 255 255 / 7%);
     --muted-foreground: #b0b0b0;
   }
 }
 @layer components {
   /* Keep data surfaces readable even over a bright wallpaper or inactive glass. */
-  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) .workspace-content {
+  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])
+    :is(.workspace-content, .scan-picker .picker-layout > section) {
     background: var(--native-content);
   }
-  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) .scan-sidebar {
+  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) .scan-sidebar,
+  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])
+    .scan-picker
+    .picker-layout
+    > aside {
     background: var(--sidebar);
   }
   :root[macos][data-backdrop='glass']
