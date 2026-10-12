@@ -37,6 +37,7 @@ space-lens = { package = "kuntu-scan", path = "../../../vendors/kuntu/crates/kun
 # Shared discovery heuristics (cache categories) — the CLI's MCP adapter
 # consumes the same crate, so the catalogs cannot drift apart.
 spacelens-discovery = { path = "../../../crates/discovery" }
+spacelens-app-audit = { path = "../../../crates/app-audit" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

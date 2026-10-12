@@ -31,6 +31,8 @@ pub struct SessionBundle {
   pub events: EventSink,
   // Only discovery requests wait here; ordinary reads never acquire it.
   discovery: Mutex<()>,
+  // Only app-audit requests wait here; ordinary reads never acquire it.
+  pub app_audit: Mutex<()>,
 }
 
 pub struct AppState {
@@ -80,6 +82,7 @@ fn connect_window_session(window_label: &str, state: &AppState) -> Value {
       engine: Mutex::new(engine),
       events: EventSink::new(),
       discovery: Mutex::new(()),
+      app_audit: Mutex::new(()),
     }),
   );
   session_metadata(&session_id)
@@ -105,7 +108,7 @@ fn capabilities_json() -> Value {
   json!({
       "apiMajor": API_MAJOR,
       "contractVersion": CONTRACT_VERSION,
-      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true },
+      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true },
       "cleanup": { "plan": true, "execute": true, "mode": "trash" },
       "host": { "folderPicker": true },
       "icloud": "unavailable",
@@ -196,6 +199,14 @@ fn cancel_session_scans(bundle: &SessionBundle) {
 
 // --------------------------------------------------------------- closed union
 
+fn default_true() -> bool {
+  true
+}
+
+fn default_app_audit_limit() -> usize {
+  500
+}
+
 #[derive(Deserialize)]
 #[serde(
   tag = "method",
@@ -236,6 +247,14 @@ pub enum ReadRequest {
     #[serde(default)]
     offset: usize,
     #[serde(default = "default_discovery_limit")]
+    limit: usize,
+  },
+  AppAudit {
+    #[serde(default)]
+    min_size: u64,
+    #[serde(default = "default_true")]
+    include_heuristic: bool,
+    #[serde(default = "default_app_audit_limit")]
     limit: usize,
   },
 }
@@ -315,6 +334,23 @@ pub async fn sl_read(
           read_discovery(&bundle, &discovery_request, run_discovery).map_err(problem_to_value)?;
         return serde_json::to_value(page).map_err(|error| problem_value("InternalError", error));
       }
+      if let ReadRequest::AppAudit {
+        min_size,
+        include_heuristic,
+        limit,
+      } = &request
+      {
+        let _guard = bundle.app_audit.lock().unwrap();
+        let options = spacelens_app_audit::AppAuditOptions {
+          min_size: *min_size,
+          include_heuristic: *include_heuristic,
+          limit: *limit,
+          home: None,
+        };
+        let report = spacelens_app_audit::audit_installed_apps(&options)
+          .map_err(|error| problem_value("InternalError", error))?;
+        return serde_json::to_value(report).map_err(|error| problem_value("InternalError", error));
+      }
       let mut engine = bundle.engine.lock().unwrap();
       let result: Result<Value, Value> = match request {
         ReadRequest::Health => Ok(json!({
@@ -386,6 +422,9 @@ pub async fn sl_read(
         }
         ReadRequest::Discovery { .. } => {
           unreachable!("discovery handled before locking the engine")
+        }
+        ReadRequest::AppAudit { .. } => {
+          unreachable!("appAudit handled before locking the engine")
         }
       };
       drop(engine);
@@ -915,6 +954,7 @@ mod tests {
       engine: std::sync::Mutex::new(engine),
       events: crate::events::EventSink::new(),
       discovery: std::sync::Mutex::new(()),
+      app_audit: std::sync::Mutex::new(()),
     };
     super::run_local_scan_task(&bundle, task);
     let status = bundle
@@ -961,6 +1001,7 @@ mod tests {
     assert_eq!(capabilities["scan"]["start"], true);
     assert_eq!(capabilities["scan"]["cancel"], true);
     assert_eq!(capabilities["scan"]["discovery"], true);
+    assert_eq!(capabilities["scan"]["appAudit"], true);
     assert_eq!(capabilities["scan"]["maxConcurrent"], 1);
     assert_eq!(capabilities["cleanup"]["plan"], true);
     assert_eq!(capabilities["cleanup"]["execute"], true);
@@ -1020,6 +1061,7 @@ mod tests {
       engine: Mutex::new(engine),
       events: crate::events::EventSink::new(),
       discovery: Mutex::new(()),
+      app_audit: Mutex::new(()),
     });
     let walks = Arc::new(AtomicUsize::new(0));
     let (started_tx, started_rx) = mpsc::channel();
@@ -1131,6 +1173,44 @@ mod tests {
     ] {
       let mut value =
         serde_json::json!({"method": "discovery", "scanId": "scan_1", "kind": "caches"});
+      value
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+      assert!(serde_json::from_value::<ReadRequest>(value).is_err());
+    }
+  }
+
+  #[test]
+  fn app_audit_read_defaults_and_closed_fields_match_the_contract() {
+    let request: ReadRequest = serde_json::from_value(serde_json::json!({
+        "method": "appAudit", "minSize": 10, "includeHeuristic": false, "limit": 50
+    }))
+    .unwrap();
+    assert!(matches!(
+      request,
+      ReadRequest::AppAudit {
+        min_size: 10,
+        include_heuristic: false,
+        limit: 50,
+      }
+    ));
+    let request: ReadRequest =
+      serde_json::from_value(serde_json::json!({ "method": "appAudit" })).unwrap();
+    assert!(matches!(
+      request,
+      ReadRequest::AppAudit {
+        min_size: 0,
+        include_heuristic: true,
+        limit: 500,
+      }
+    ));
+    for extra in [
+      serde_json::json!({"path": "/arbitrary"}),
+      serde_json::json!({"minSize": -1}),
+      serde_json::json!({"includeHeuristic": "yes"}),
+    ] {
+      let mut value = serde_json::json!({"method": "appAudit"});
       value
         .as_object_mut()
         .unwrap()
