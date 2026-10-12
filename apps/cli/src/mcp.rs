@@ -146,9 +146,9 @@ fn tool_definitions() -> Vec<Value> {
       "inputSchema": {
         "type": "object", "additionalProperties": false,
         "properties": {
-          "minSize": { "type": "integer", "default": 0, "description": "Drop locations smaller than this many bytes." },
+          "minSize": { "type": "integer", "minimum": 0, "default": 0, "description": "Drop locations smaller than this many bytes." },
           "includeHeuristic": { "type": "boolean", "default": true, "description": "Include apps without curated catalog entries." },
-          "limit": { "type": "integer", "default": 500, "description": "Maximum apps returned, largest total first." }
+          "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 500, "description": "Maximum apps returned, largest total first." }
         }
       }
     }),
@@ -564,10 +564,13 @@ mod tests {
     let properties = schema["properties"].as_object().expect("properties");
     assert_eq!(properties.len(), 3);
     assert_eq!(properties["minSize"]["type"], "integer");
+    assert_eq!(properties["minSize"]["minimum"], 0);
     assert_eq!(properties["minSize"]["default"], 0);
     assert_eq!(properties["includeHeuristic"]["type"], "boolean");
     assert_eq!(properties["includeHeuristic"]["default"], true);
     assert_eq!(properties["limit"]["type"], "integer");
+    assert_eq!(properties["limit"]["minimum"], 1);
+    assert_eq!(properties["limit"]["maximum"], 1000);
     assert_eq!(properties["limit"]["default"], 500);
   }
 

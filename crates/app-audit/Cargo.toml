@@ -8,10 +8,14 @@ repository.workspace = true
 version.workspace    = true
 
 [dependencies]
-applications = "0.3.1"
 chrono       = { version = "0.4", default-features = false, features = ["clock"] }
-plist        = "1"
 serde        = { version = "1", features = ["derive"] }
 serde_json   = "1"
 # Published to crates.io as kuntu-scan; the path keeps local (submodule) builds.
 space-lens = { package = "kuntu-scan", version = "0.3", path = "../../vendors/kuntu/crates/kuntu-scan" }
+
+# Enumeration is macOS-only in v1; gating the deps keeps non-macOS builds of
+# the workspace free of the applications/plist dependency trees.
+[target.'cfg(target_os = "macos")'.dependencies]
+applications = "0.3.1"
+plist        = "1"

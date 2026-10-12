@@ -2,15 +2,18 @@
 //!
 //! A new Rust crate combining two layers: an auto layer that enumerates
 //! installed apps, parses bundle ids from `Contents/Info.plist`, and measures
-//! conventional per-bundle-id locations with kuntu's `measure_path`; and a
-//! catalog layer (a per-platform JSON file embedded in the binary) that adds
-//! known non-conventional locations, classifications, and comments.
+//! conventional per-bundle-id locations; and a catalog layer (a per-platform
+//! JSON file embedded in the binary) that adds known non-conventional
+//! locations, classifications, and comments.
 //!
 //! The audit never deletes, moves, trashes, or writes anything. Sizes are
-//! lower bounds where the OS denies reads (`measure_path` fails soft to 0),
-//! and per-app totals never double-count: after merging heuristic and catalog
-//! locations, any parent path is replaced by a residual entry sized
-//! `parent - sum(children)`.
+//! lower bounds where the OS denies reads (failed reads measure as 0), and
+//! per-app totals never double-count: after all entries' locations are
+//! resolved and validated, every surviving location path plus every `.app`
+//! bundle path is measured in ONE deepest-first `space_lens::scan_directory`
+//! call whose shared seen-inode set partitions overlapping paths, so a parent
+//! location keeps its label/classification but its size excludes measured
+//! children. Hardlinked files are attributed exactly once.
 
 #![deny(clippy::all)]
 
@@ -22,6 +25,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use space_lens::{scan_directory, IgnoredMode, ScanOptions};
 
 pub use catalog::{macos_catalog, Catalog, CatalogEntry, CatalogLocation, CatalogMatch};
 
@@ -138,6 +142,18 @@ pub fn audit_installed_apps(options: &AppAuditOptions) -> Result<AppAuditReport,
   audit_with(&apps, &home, options)
 }
 
+/// One report entry before measurement: resolved locations plus identity.
+struct PendingEntry {
+  base_id: String,
+  name: String,
+  kind: AppKind,
+  source: AuditSource,
+  bundle_id: Option<String>,
+  app_path: Option<PathBuf>,
+  app_canonical: Option<PathBuf>,
+  locations: HashMap<PathBuf, LocationMeta>,
+}
+
 /// Testability seam: audit an explicit app list against an explicit home.
 pub fn audit_with(
   apps: &[DiscoveredApp],
@@ -150,37 +166,10 @@ pub fn audit_with(
   // temp dirs, /var -> /private/var).
   let home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
 
-  // Dedup discovered apps by bundle id, keeping the largest bundle.
-  let mut scored: Vec<ScoredApp> = Vec::with_capacity(apps.len());
-  let mut by_bundle_id: HashMap<&str, usize> = HashMap::new();
+  // Resolve every entry's locations (existence + path safety) first; nothing
+  // is measured until the single shared pass below.
+  let mut pending: Vec<PendingEntry> = Vec::with_capacity(apps.len() + catalog.entries.len());
   for app in apps {
-    let installed_size = space_lens::measure_path(&app.app_path);
-    let record = ScoredApp {
-      name: app.name.clone(),
-      bundle_id: app.bundle_id.clone(),
-      app_path: app.app_path.clone(),
-      installed_size,
-    };
-    match &app.bundle_id {
-      Some(bundle_id) => match by_bundle_id.get(bundle_id.as_str()) {
-        Some(&index) => {
-          if installed_size > scored[index].installed_size {
-            scored[index] = record;
-          }
-        }
-        None => {
-          by_bundle_id.insert(bundle_id.as_str(), scored.len());
-          scored.push(record);
-        }
-      },
-      None => scored.push(record),
-    }
-  }
-
-  let mut entries: Vec<AppAuditEntry> = Vec::new();
-  let mut used_ids: HashSet<String> = HashSet::new();
-
-  for app in &scored {
     let matched: Vec<&CatalogEntry> = catalog
       .entries
       .iter()
@@ -193,11 +182,6 @@ pub fn audit_with(
     for entry in &matched {
       table.add_catalog(&home, &entry.locations);
     }
-    let locations = table.finish(options.min_size);
-    let total_size = app.installed_size + locations.iter().map(|item| item.size).sum::<u64>();
-    if locations.is_empty() && app.installed_size == 0 {
-      continue;
-    }
     // Display name and bundle id come from the discovered app; entry id and
     // name come from the catalog when matched.
     let (base_id, name, source) = match matched.first() {
@@ -207,16 +191,15 @@ pub fn audit_with(
         None => (slugify(&app.name), app.name.clone(), AuditSource::Heuristic),
       },
     };
-    entries.push(AppAuditEntry {
-      id: unique_id(&base_id, &mut used_ids),
+    pending.push(PendingEntry {
+      base_id,
       name,
       kind: AppKind::App,
       source,
       bundle_id: app.bundle_id.clone(),
-      app_path: Some(app.app_path.to_string_lossy().into_owned()),
-      installed_size: app.installed_size,
-      total_size,
-      locations,
+      app_path: Some(app.app_path.clone()),
+      app_canonical: resolve_app_bundle(&app.app_path, &home),
+      locations: table.into_inner(),
     });
   }
 
@@ -228,19 +211,144 @@ pub fn audit_with(
   {
     let mut table = LocationTable::default();
     table.add_catalog(&home, &entry.locations);
-    let locations = table.finish(options.min_size);
-    let total_size = locations.iter().map(|item| item.size).sum::<u64>();
-    if locations.is_empty() {
-      continue;
-    }
-    entries.push(AppAuditEntry {
-      id: unique_id(&entry.id, &mut used_ids),
+    pending.push(PendingEntry {
+      base_id: entry.id.clone(),
       name: entry.name.clone(),
       kind: AppKind::Cli,
       source: AuditSource::Catalog,
       bundle_id: None,
       app_path: None,
-      installed_size: 0,
+      app_canonical: None,
+      locations: table.into_inner(),
+    });
+  }
+  let cli_start = pending.len().saturating_sub(
+    catalog
+      .entries
+      .iter()
+      .filter(|entry| entry.kind == AppKind::Cli)
+      .count(),
+  );
+
+  // ONE shared-inode measurement over every surviving location plus every
+  // `.app` bundle path, deepest-first so overlapping paths partition.
+  let mut roots: Vec<PathBuf> = Vec::new();
+  let mut seen_roots: HashSet<PathBuf> = HashSet::new();
+  for entry in &pending {
+    if let Some(canonical) = &entry.app_canonical {
+      if seen_roots.insert(canonical.clone()) {
+        roots.push(canonical.clone());
+      }
+    }
+    for path in entry.locations.keys() {
+      if seen_roots.insert(path.clone()) {
+        roots.push(path.clone());
+      }
+    }
+  }
+  let sizes = measure_partitions(&roots);
+
+  // Dedup discovered apps by bundle id, keeping the largest bundle by its
+  // measured partition. A dropped duplicate's locations merge into the winner
+  // so nested bytes are never lost from the report.
+  let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+  for (index, entry) in pending.iter().enumerate().take(cli_start) {
+    if let Some(bundle_id) = &entry.bundle_id {
+      groups.entry(bundle_id.clone()).or_default().push(index);
+    }
+  }
+  let mut dropped: HashSet<usize> = HashSet::new();
+  for members in groups.values() {
+    if members.len() < 2 {
+      continue;
+    }
+    let installed = |index: usize| {
+      pending[index]
+        .app_canonical
+        .as_ref()
+        .and_then(|path| sizes.get(path))
+        .copied()
+        .unwrap_or(0)
+    };
+    let mut winner = members[0];
+    let mut best = installed(winner);
+    for &member in &members[1..] {
+      let size = installed(member);
+      if size > best {
+        best = size;
+        winner = member;
+      }
+    }
+    for &member in members {
+      if member == winner {
+        continue;
+      }
+      let loser_locations = std::mem::take(&mut pending[member].locations);
+      for (path, meta) in loser_locations {
+        pending[winner].locations.entry(path).or_insert(meta);
+      }
+      dropped.insert(member);
+    }
+  }
+  let mut survivors: Vec<PendingEntry> = pending
+    .into_iter()
+    .enumerate()
+    .filter(|(index, _)| !dropped.contains(index))
+    .map(|(_, entry)| entry)
+    .collect();
+
+  // Report-level uniqueness: no canonical path appears in two entries.
+  // Catalog entries win over heuristic collisions.
+  dedup_locations_across_entries(&mut survivors);
+
+  let mut entries: Vec<AppAuditEntry> = Vec::new();
+  let mut used_ids: HashSet<String> = HashSet::new();
+  for entry in &survivors {
+    let installed_size = entry
+      .app_canonical
+      .as_ref()
+      .and_then(|path| sizes.get(path))
+      .copied()
+      .unwrap_or(0);
+    let mut locations = Vec::with_capacity(entry.locations.len());
+    for (path, meta) in &entry.locations {
+      // A location identical to its own `.app` bundle would double-count the
+      // entry total; the bundle size already covers it.
+      if Some(path) == entry.app_canonical.as_ref() {
+        continue;
+      }
+      // Roots that vanished between validation and measurement fail soft to 0
+      // and fall out through the same `min_size` filter as any other location.
+      let size = sizes.get(path).copied().unwrap_or(0);
+      if size < options.min_size {
+        continue;
+      }
+      locations.push(AppAuditLocation {
+        path: path.to_string_lossy().into_owned(),
+        label: meta.label.clone(),
+        classification: meta.classification,
+        purgeable: meta.purgeable,
+        comment: meta.comment.clone(),
+        size,
+        source: meta.source,
+      });
+    }
+    locations.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.path.cmp(&b.path)));
+    let total_size = installed_size + locations.iter().map(|item| item.size).sum::<u64>();
+    if locations.is_empty() && installed_size == 0 {
+      continue;
+    }
+    entries.push(AppAuditEntry {
+      id: unique_id(&entry.base_id, &mut used_ids),
+      name: entry.name.clone(),
+      kind: entry.kind,
+      source: entry.source,
+      bundle_id: entry.bundle_id.clone(),
+      app_path: entry
+        .app_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned()),
+      installed_size,
       total_size,
       locations,
     });
@@ -267,13 +375,6 @@ pub fn audit_with(
   })
 }
 
-struct ScoredApp {
-  name: String,
-  bundle_id: Option<String>,
-  app_path: PathBuf,
-  installed_size: u64,
-}
-
 fn catalog_matches(entry: &CatalogEntry, bundle_id: Option<&str>, display_name: &str) -> bool {
   let Some(matched) = &entry.r#match else {
     return false;
@@ -291,6 +392,72 @@ fn catalog_matches(entry: &CatalogEntry, bundle_id: Option<&str>, display_name: 
     .app_names
     .iter()
     .any(|candidate| candidate.eq_ignore_ascii_case(display_name))
+}
+
+/// Measure many roots in ONE `scan_directory` call, deepest-first (path
+/// component count desc, then path asc). Kuntu's `ScanCtx` shares its
+/// seen-inode set across all roots of one call, so a hardlinked inode is
+/// attributed exactly once (to the deepest root that reaches it) and every
+/// parent root's size becomes its own data minus deeper measured roots:
+/// locations are additive partitions with zero double counting. Roots that
+/// vanished before the scan simply have no returned node.
+fn measure_partitions(roots: &[PathBuf]) -> HashMap<PathBuf, u64> {
+  let mut sorted = roots.to_vec();
+  sorted.sort_by(|a, b| {
+    b.components()
+      .count()
+      .cmp(&a.components().count())
+      .then_with(|| a.cmp(b))
+  });
+  if sorted.is_empty() {
+    return HashMap::new();
+  }
+  let nodes = scan_directory(ScanOptions {
+    directories: sorted,
+    ignore_hidden: false,
+    full_path: true,
+    respect_gitignore: false,
+    ignored_mode: IgnoredMode::Exclude,
+    follow_symlinks: false,
+  });
+  let mut sizes = HashMap::with_capacity(nodes.len());
+  for node in nodes {
+    sizes.insert(node.path.clone(), node.size);
+  }
+  sizes
+}
+
+/// Report-level location-path uniqueness: no canonical path may appear in two
+/// entries. Catalog entries win over heuristic collisions; otherwise the
+/// first entry keeps the path.
+fn dedup_locations_across_entries(pending: &mut [PendingEntry]) {
+  let mut by_path: HashMap<PathBuf, Vec<usize>> = HashMap::new();
+  for (index, entry) in pending.iter().enumerate() {
+    for path in entry.locations.keys() {
+      by_path.entry(path.clone()).or_default().push(index);
+    }
+  }
+  for (path, mut owners) in by_path.into_iter().filter(|(_, owners)| owners.len() > 1) {
+    owners.sort_unstable();
+    let mut winner = owners[0];
+    for &candidate in &owners[1..] {
+      let winner_source = pending[winner].locations.get(&path).map(|meta| meta.source);
+      let candidate_source = pending[candidate]
+        .locations
+        .get(&path)
+        .map(|meta| meta.source);
+      if candidate_source == Some(AuditSource::Catalog)
+        && winner_source == Some(AuditSource::Heuristic)
+      {
+        winner = candidate;
+      }
+    }
+    for owner in owners {
+      if owner != winner {
+        pending[owner].locations.remove(&path);
+      }
+    }
+  }
 }
 
 #[derive(Clone, Debug)]
@@ -311,7 +478,7 @@ impl LocationTable {
   fn add_heuristic(&mut self, home: &Path, name: &str, bundle_id: Option<&str>) {
     for (relative, classification) in conventional_candidates(name, bundle_id) {
       let raw = home.join(relative);
-      let Some(canonical) = existing_canonical(&raw) else {
+      let Some(canonical) = resolve_location(&raw, home) else {
         continue;
       };
       self.inner.entry(canonical).or_insert(LocationMeta {
@@ -327,7 +494,7 @@ impl LocationTable {
   fn add_catalog(&mut self, home: &Path, locations: &[CatalogLocation]) {
     for location in locations {
       let raw = expand_tilde(&location.path, home);
-      let Some(canonical) = existing_canonical(&raw) else {
+      let Some(canonical) = resolve_location(&raw, home) else {
         continue;
       };
       // Catalog metadata wins when a resolved path collides exactly.
@@ -344,86 +511,43 @@ impl LocationTable {
     }
   }
 
-  /// Merge nested paths via the generalized residual rule: children stay, and
-  /// any parent is replaced by a residual sized `parent - sum(children)`
-  /// (clamped at 0, and a zero residual disappears). Residuals go through the
-  /// same `min_size` filter as every other location.
-  fn finish(self, min_size: u64) -> Vec<AppAuditLocation> {
-    let mut measured: HashMap<&Path, u64> = HashMap::with_capacity(self.inner.len());
-    for path in self.inner.keys() {
-      measured.insert(path.as_path(), space_lens::measure_path(path));
-    }
-    let collected: HashSet<&Path> = self.inner.keys().map(PathBuf::as_path).collect();
-    let mut child_sums: HashMap<&Path, u64> = HashMap::new();
-    let mut has_children: HashSet<&Path> = HashSet::new();
-    for path in self.inner.keys() {
-      let path = path.as_path();
-      for ancestor in path.ancestors().skip(1) {
-        if collected.contains(ancestor) {
-          *child_sums.entry(ancestor).or_default() += measured[path];
-          has_children.insert(ancestor);
-          break;
-        }
-      }
-    }
-    let mut locations = Vec::with_capacity(self.inner.len());
-    for (path, meta) in &self.inner {
-      let size = measured[path.as_path()];
-      if has_children.contains(path.as_path()) {
-        let residual = size.saturating_sub(child_sums[path.as_path()]);
-        if residual == 0 || residual < min_size {
-          continue;
-        }
-        locations.push(AppAuditLocation {
-          path: path.to_string_lossy().into_owned(),
-          label: Some("Other data".to_string()),
-          classification: Classification::Support,
-          purgeable: false,
-          comment: None,
-          size: residual,
-          source: meta.source,
-        });
-      } else {
-        if size < min_size {
-          continue;
-        }
-        locations.push(AppAuditLocation {
-          path: path.to_string_lossy().into_owned(),
-          label: meta.label.clone(),
-          classification: meta.classification,
-          purgeable: meta.purgeable,
-          comment: meta.comment.clone(),
-          size,
-          source: meta.source,
-        });
-      }
-    }
-    locations.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.path.cmp(&b.path)));
-    locations
+  fn into_inner(self) -> HashMap<PathBuf, LocationMeta> {
+    self.inner
   }
 }
 
 /// Conventional per-bundle-id locations from the plan's table. Apps without a
-/// bundle id fall back to name-only candidates.
+/// bundle id fall back to name-only candidates. Bundle ids and display names
+/// are substituted as single path components: anything containing `/`, `\`,
+/// `..`, or empty contributes no candidates.
 fn conventional_candidates(name: &str, bundle_id: Option<&str>) -> Vec<(PathBuf, Classification)> {
   use Classification::{Cache, Logs, Support};
   let primary = bundle_id.unwrap_or(name);
-  let mut candidates = Vec::new();
+  let primary_valid = is_single_component(primary);
+  let mut trio: Vec<&str> = Vec::with_capacity(2);
   for key in [primary, name] {
+    if is_single_component(key) && !trio.contains(&key) {
+      trio.push(key);
+    }
+  }
+  let mut candidates = Vec::new();
+  for key in trio {
     candidates.push((format!("Library/Application Support/{key}"), Support));
     candidates.push((format!("Library/Caches/{key}"), Cache));
     candidates.push((format!("Library/Logs/{key}"), Logs));
   }
-  candidates.push((format!("Library/WebKit/{primary}"), Cache));
-  candidates.push((format!("Library/HTTPStorages/{primary}"), Cache));
-  candidates.push((
-    format!("Library/Saved Application State/{primary}.savedState"),
-    Cache,
-  ));
-  candidates.push((format!("Library/Cookies/{primary}.binarycookies"), Cache));
-  candidates.push((format!("Library/Containers/{primary}"), Support));
-  candidates.push((format!("Library/Application Scripts/{primary}"), Support));
-  candidates.push((format!("Library/Preferences/{primary}.plist"), Support));
+  if primary_valid {
+    candidates.push((format!("Library/WebKit/{primary}"), Cache));
+    candidates.push((format!("Library/HTTPStorages/{primary}"), Cache));
+    candidates.push((
+      format!("Library/Saved Application State/{primary}.savedState"),
+      Cache,
+    ));
+    candidates.push((format!("Library/Cookies/{primary}.binarycookies"), Cache));
+    candidates.push((format!("Library/Containers/{primary}"), Support));
+    candidates.push((format!("Library/Application Scripts/{primary}"), Support));
+    candidates.push((format!("Library/Preferences/{primary}.plist"), Support));
+  }
   candidates
     .into_iter()
     .map(|(path, classification)| (PathBuf::from(path), classification))
@@ -441,14 +565,84 @@ fn default_purgeable(classification: Classification) -> bool {
   }
 }
 
-/// Resolve an existing non-symlink path to its canonical absolute form.
-/// Missing paths and symlinks are skipped (measurement never follows links).
-fn existing_canonical(path: &Path) -> Option<PathBuf> {
-  match std::fs::symlink_metadata(path) {
-    Ok(metadata) if metadata.file_type().is_symlink() => None,
-    Ok(_) => std::fs::canonicalize(path).ok(),
-    Err(_) => None,
+/// Bundle ids and display names substituted into candidate paths must be
+/// single path components: reject anything containing `/`, `\`, `..`, or
+/// empty.
+fn is_single_component(value: &str) -> bool {
+  !value.is_empty() && !value.contains('/') && !value.contains('\\') && !value.contains("..")
+}
+
+/// Fail-closed ancestor walk: every component of `raw` strictly below `home`
+/// is checked with `symlink_metadata`; any symlink means the location is
+/// skipped entirely, so a catalog child can never traverse a linked storage
+/// root (e.g. into Group Containers).
+fn has_symlink_ancestor_below_home(raw: &Path, home: &Path) -> bool {
+  if !raw.starts_with(home) {
+    return false;
   }
+  let home_components = home.components().count();
+  let raw_components = raw.components().count();
+  if raw_components <= home_components {
+    return false;
+  }
+  for count in (home_components + 1)..=raw_components {
+    let prefix: PathBuf = raw.components().take(count).collect();
+    if let Ok(metadata) = std::fs::symlink_metadata(&prefix) {
+      if metadata.file_type().is_symlink() {
+        return true;
+      }
+    }
+  }
+  false
+}
+
+fn contains_group_containers(path: &Path) -> bool {
+  path
+    .components()
+    .any(|component| component.as_os_str() == "Group Containers")
+}
+
+/// Resolve a location path to its canonical absolute form, fail-closed:
+/// symlinked ancestors below home, symlinked leaves, missing paths, `Group
+/// Containers` destinations, and paths escaping home are all skipped
+/// (measurement never follows links).
+fn resolve_location(raw: &Path, home: &Path) -> Option<PathBuf> {
+  if has_symlink_ancestor_below_home(raw, home) {
+    return None;
+  }
+  match std::fs::symlink_metadata(raw) {
+    Ok(metadata) if metadata.file_type().is_symlink() => return None,
+    Ok(_) => {}
+    Err(_) => return None,
+  }
+  let canonical = std::fs::canonicalize(raw).ok()?;
+  if contains_group_containers(&canonical) {
+    return None;
+  }
+  if !canonical.starts_with(home) {
+    return None;
+  }
+  Some(canonical)
+}
+
+/// Resolve a `.app` bundle path for measurement. Bundles may live outside
+/// home (`/Applications`), so there is no under-home requirement, but the
+/// symlink-ancestor, symlinked-leaf, and Group Containers gates still apply;
+/// rejected bundles measure as 0.
+fn resolve_app_bundle(path: &Path, home: &Path) -> Option<PathBuf> {
+  if has_symlink_ancestor_below_home(path, home) {
+    return None;
+  }
+  match std::fs::symlink_metadata(path) {
+    Ok(metadata) if metadata.file_type().is_symlink() => return None,
+    Ok(_) => {}
+    Err(_) => return None,
+  }
+  let canonical = std::fs::canonicalize(path).ok()?;
+  if contains_group_containers(&canonical) {
+    return None;
+  }
+  Some(canonical)
 }
 
 fn expand_tilde(path: &str, home: &Path) -> PathBuf {
@@ -659,8 +853,8 @@ mod tests {
   }
 
   #[test]
-  fn residual_rule_splits_parents() {
-    let fixture = Fixture::new("residual");
+  fn partition_parent_excludes_measured_children() {
+    let fixture = Fixture::new("partition");
     let home = fixture.home();
     fixture.file(".codex/sessions/session-1.jsonl", 4096);
     fixture.file(".codex/stray.bin", 2048);
@@ -673,26 +867,234 @@ mod tests {
       .expect("codex-cli entry");
     let sessions = home.join(".codex/sessions").to_string_lossy().into_owned();
     let root = home.join(".codex").to_string_lossy().into_owned();
+    // Partition semantics: no residual entries are generated; the parent keeps
+    // its own catalog label and classification.
+    assert!(
+      !entry
+        .locations
+        .iter()
+        .any(|item| item.label.as_deref() == Some("Other data")),
+      "residual entry leaked into partitions"
+    );
     let child = entry
       .locations
       .iter()
       .find(|item| item.path == sessions)
       .expect("sessions child");
-    let residual = entry
+    let parent = entry
       .locations
       .iter()
       .find(|item| item.path == root)
-      .expect("residual root");
-    assert_eq!(residual.label.as_deref(), Some("Other data"));
-    assert_eq!(residual.classification, Classification::Support);
-    assert!(!residual.purgeable);
-    assert!(residual.comment.is_none());
-    let parent_size = space_lens::measure_path(&home.join(".codex"));
-    let child_size = space_lens::measure_path(&home.join(".codex/sessions"));
-    assert_eq!(child.size, child_size);
-    assert_eq!(residual.size, parent_size.saturating_sub(child_size));
+      .expect("data root");
+    assert_eq!(parent.label.as_deref(), Some("Codex data root"));
+    assert_eq!(parent.classification, Classification::Support);
+    assert!(!parent.purgeable);
+    assert_eq!(parent.source, AuditSource::Catalog);
+    let parent_total = space_lens::measure_path(&home.join(".codex"));
+    let child_total = space_lens::measure_path(&home.join(".codex/sessions"));
+    // Deepest root keeps its full size; the parent keeps its total minus the
+    // measured child.
+    assert_eq!(child.size, child_total);
+    assert_eq!(parent.size, parent_total.saturating_sub(child_total));
     // No double count: the entry total equals the measured parent total.
-    assert_eq!(entry.total_size, parent_size);
+    assert_eq!(entry.total_size, parent_total);
+  }
+
+  /// Three-level nesting through the shared pass: P superset P/A superset
+  /// P/A/B partitions so the three sizes sum to P's true byte total.
+  /// Unix-only: Windows dir inodes are never deduped (see
+  /// `inode_key`), so ancestor directory-entry blocks recount there.
+  #[cfg(unix)]
+  #[test]
+  fn partition_three_level_nesting() {
+    let fixture = Fixture::new("nesting");
+    let home = fixture.home();
+    fixture.file("nest/outer.bin", 1_048_576);
+    fixture.file("nest/A/mid.bin", 1_048_576);
+    fixture.file("nest/A/B/inner.bin", 1_048_576);
+    let parent = home.join("nest");
+    let middle = parent.join("A");
+    let inner = middle.join("B");
+    // Input order must not matter: pass shallowest-first, the shared pass
+    // sorts deepest-first itself.
+    let sizes = measure_partitions(&[parent.clone(), middle.clone(), inner.clone()]);
+    assert_eq!(sizes.len(), 3);
+    let parent_total = space_lens::measure_path(&parent);
+    let middle_total = space_lens::measure_path(&middle);
+    let inner_total = space_lens::measure_path(&inner);
+    assert_eq!(sizes[&inner], inner_total);
+    assert_eq!(sizes[&middle], middle_total.saturating_sub(inner_total));
+    assert_eq!(sizes[&parent], parent_total.saturating_sub(middle_total));
+    assert_eq!(sizes.values().sum::<u64>(), parent_total);
+    // One ~1 MiB file per level: every partition keeps a non-trivial share.
+    for size in sizes.values() {
+      assert!(*size >= 1_000_000, "partition too small: {size}");
+    }
+  }
+
+  /// A file hardlinked into two sibling locations is attributed exactly once:
+  /// the two partition sizes sum to the unique bytes.
+  #[test]
+  fn partition_hardlink_counted_once() {
+    let fixture = Fixture::new("hardlink");
+    let home = fixture.home();
+    fixture.file("link-a/blob.bin", 1_048_576);
+    let source = home.join("link-a/blob.bin");
+    let dir_b = home.join("link-b");
+    std::fs::create_dir_all(&dir_b).unwrap();
+    std::fs::hard_link(&source, dir_b.join("blob.bin")).unwrap();
+    let dir_a = home.join("link-a");
+    let sizes = measure_partitions(&[dir_a.clone(), dir_b.clone()]);
+    assert_eq!(sizes.len(), 2);
+    let solo_a = space_lens::measure_path(&dir_a);
+    let solo_b = space_lens::measure_path(&dir_b);
+    #[cfg(unix)]
+    let file_alloc = {
+      use std::os::unix::fs::MetadataExt;
+      std::fs::symlink_metadata(&source).unwrap().blocks() * 512
+    };
+    #[cfg(not(unix))]
+    let file_alloc = std::fs::symlink_metadata(&source).unwrap().len();
+    // Equal depth breaks ties by path ascending, so link-a is measured first
+    // and keeps the shared inode; link-b keeps only its own directory blocks.
+    assert_eq!(sizes[&dir_a], solo_a);
+    assert_eq!(sizes[&dir_b], solo_b.saturating_sub(file_alloc));
+    assert_eq!(sizes.values().sum::<u64>(), solo_a + solo_b - file_alloc);
+  }
+
+  /// Two entries resolving to one canonical child path: the child is measured
+  /// once and attributed to one entry only (catalog entry wins), and no
+  /// canonical path appears in two entries anywhere in the report.
+  #[test]
+  fn shared_child_attributed_once_across_entries() {
+    let fixture = Fixture::new("shared");
+    let home = fixture.home();
+    // Raycast's catalog data root ...
+    fixture.file(
+      "Library/Application Support/com.raycast.macos/data.db",
+      4096,
+    );
+    // ... collides with a heuristic candidate of an unrelated app whose
+    // display name happens to equal that bundle id, which also owns a
+    // disjoint location so both entries survive.
+    fixture.file(
+      "Library/Application Support/com.example.Other/data.bin",
+      4096,
+    );
+
+    let apps = vec![
+      discovered("Raycast", Some("com.raycast.macos"), &home),
+      DiscoveredApp {
+        name: "com.raycast.macos".to_string(),
+        bundle_id: Some("com.example.Other".to_string()),
+        app_path: home.join("Applications/Other.app"),
+      },
+    ];
+    let report = audit_with(&apps, &home, &options(0, true, 500)).unwrap();
+    let shared = home
+      .join("Library/Application Support/com.raycast.macos")
+      .to_string_lossy()
+      .into_owned();
+    let owners: Vec<&AppAuditEntry> = report
+      .apps
+      .iter()
+      .filter(|entry| {
+        entry
+          .locations
+          .iter()
+          .any(|location| location.path == shared)
+      })
+      .collect();
+    assert_eq!(
+      owners.len(),
+      1,
+      "shared path attributed to {} entries",
+      owners.len()
+    );
+    assert_eq!(owners[0].id, "raycast");
+    assert_eq!(
+      owners[0]
+        .locations
+        .iter()
+        .find(|location| location.path == shared)
+        .unwrap()
+        .source,
+      AuditSource::Catalog
+    );
+    assert!(
+      report
+        .apps
+        .iter()
+        .any(|entry| entry.bundle_id.as_deref() == Some("com.example.Other")),
+      "heuristic entry lost its disjoint location"
+    );
+    let mut seen = HashSet::new();
+    for entry in &report.apps {
+      for location in &entry.locations {
+        assert!(
+          seen.insert(location.path.clone()),
+          "path in two entries: {}",
+          location.path
+        );
+      }
+    }
+  }
+
+  /// A catalog child below a symlinked storage root is skipped fail-closed.
+  /// Unix-only: creating symlinks needs privileges on Windows.
+  #[cfg(unix)]
+  #[test]
+  fn ancestor_symlink_location_skipped() {
+    let fixture = Fixture::new("ancestor-symlink");
+    let home = fixture.home();
+    // Real data lives outside the catalog path; ~/.codex is a symlink to it.
+    let target = fixture.root.join("real-codex");
+    std::fs::create_dir_all(target.join("sessions")).unwrap();
+    std::fs::write(
+      target.join("sessions").join("a.jsonl"),
+      "{\"msg\":\"hi\"}\n",
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&target, home.join(".codex")).unwrap();
+
+    let report = audit_with(&[], &home, &options(0, true, 500)).unwrap();
+    assert!(
+      !report.apps.iter().any(|app| app.id == "codex-cli"),
+      "location below a symlinked ancestor must be skipped"
+    );
+  }
+
+  /// `Group Containers` destinations are rejected and hostile bundle ids /
+  /// display names contribute no candidates.
+  #[test]
+  fn group_containers_and_hostile_components_rejected() {
+    let fixture = Fixture::new("path-safety");
+    let home = fixture.home();
+    fixture.file("Library/Group Containers/com.example.Foo/data.bin", 4096);
+    assert!(
+      resolve_location(
+        &home.join("Library/Group Containers/com.example.Foo"),
+        &home
+      )
+      .is_none(),
+      "Group Containers destination must be rejected"
+    );
+
+    assert!(is_single_component("com.example.Foo"));
+    assert!(!is_single_component(""));
+    assert!(!is_single_component("a/b"));
+    assert!(!is_single_component("a\\b"));
+    assert!(!is_single_component("a..b"));
+    assert!(!is_single_component(".."));
+
+    // A bundle id with path separators yields no candidates on its own, and
+    // the entry disappears when nothing else resolves.
+    let apps = vec![discovered("Evil", Some("evil/../escape"), &home)];
+    let report = audit_with(&apps, &home, &options(0, true, 500)).unwrap();
+    assert!(
+      report.apps.is_empty(),
+      "hostile bundle id must contribute no locations"
+    );
   }
 
   #[test]
@@ -733,8 +1135,8 @@ mod tests {
     let fixture = Fixture::new("limits");
     let home = fixture.home();
     // Sizes straddle min_size with block-allocation margin: data files are
-    // ~1 MiB allocated, the small log is a single block, and residuals are
-    // bare directory metadata.
+    // ~1 MiB allocated, the small log is a single block, and parent
+    // partitions shrink to bare directory metadata once children are measured.
     fixture.file(".codex/sessions/a.jsonl", 1_048_576);
     fixture.file(".ollama/models/b.bin", 1_048_576);
     fixture.file(".npm/_logs/tiny.log", 1024);
