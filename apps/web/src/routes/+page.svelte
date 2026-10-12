@@ -317,8 +317,26 @@
     const interfaceStyle = resolveStyle(appearance.style, __SPACLENS_DESKTOP__, navigator.userAgent)
     document.documentElement.dataset.interface = interfaceStyle
     document.documentElement.dataset.density = appearance.density
+    document.documentElement.dataset.transparency = appearance.transparency
     // Material capability and native OS/accent attributes are supplied by the host.
     window.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance))
+  })
+  // The desktop shell publishes data-backdrop='glass'|'vibrancy' on the
+  // document root only when it actually applied the material (see
+  // native_material.rs); a plain browser never sets it. Refresh on mount
+  // and whenever the settings sheet opens, since the attribute can arrive
+  // after first paint.
+  let glassAvailable = $state(false)
+  function refreshGlassAvailable(): void {
+    try {
+      const backdrop = document.documentElement.dataset.backdrop
+      glassAvailable = backdrop === 'glass' || backdrop === 'vibrancy'
+    } catch {
+      glassAvailable = false
+    }
+  }
+  $effect(() => {
+    if (settingsOpen) refreshGlassAvailable()
   })
   $effect(() => {
     const scanId = workbench.activeScanId
@@ -847,6 +865,7 @@
     viewportWidth = window.innerWidth
     window.addEventListener('resize', onViewportResize)
     preferencesReady = true
+    refreshGlassAvailable()
     if (window.innerWidth < 760) sidebarVisible = false
     if (__SPACLENS_DESKTOP__) {
       void connectDesktop()
@@ -1292,6 +1311,8 @@
   style={appearance.style}
   density={appearance.density}
   mode={userPrefersMode.current}
+  transparency={appearance.transparency}
+  glassAvailable={glassAvailable}
   automaticStyle={automaticStyle === 'macos'
     ? 'macOS on this platform'
     : automaticStyle === 'windows'
@@ -1305,6 +1326,7 @@
   onStyle={(style) => (appearance.style = style)}
   onDensity={(density) => (appearance.density = density)}
   onMode={setMode}
+  onTransparency={(value) => (appearance.transparency = value)}
   onCheckUpdates={__SPACLENS_DESKTOP__ ? () => void checkForAppUpdate((status) => (updateStatus = status)) : undefined}
   onInstallUpdate={__SPACLENS_DESKTOP__ ? () => void installAppUpdate((status) => (updateStatus = status)) : undefined}
 />

@@ -1,22 +1,26 @@
 export type InterfaceStyle = 'auto' | 'web' | 'macos' | 'windows' | 'linux'
 export type Density = 'compact' | 'comfortable'
+export type Transparency = 'solid' | 'balanced' | 'glassy'
 export interface Appearance {
   style: InterfaceStyle
   density: Density
+  transparency: Transparency
 }
 export const APPEARANCE_KEY = 'spacelens.appearance'
 export function parseAppearance(raw: string | null): Appearance {
   try {
     const value: unknown = JSON.parse(raw ?? '{}')
-    if (typeof value !== 'object' || value === null) return { style: 'auto', density: 'compact' }
+    if (typeof value !== 'object' || value === null) return { style: 'auto', density: 'compact', transparency: 'balanced' }
     const style = 'style' in value ? value.style : null
     const density = 'density' in value ? value.density : null
+    const transparency = 'transparency' in value ? value.transparency : null
     return {
       style: style === 'web' || style === 'macos' || style === 'windows' || style === 'linux' ? style : 'auto',
       density: density === 'comfortable' ? density : 'compact',
+      transparency: transparency === 'solid' || transparency === 'glassy' ? transparency : 'balanced',
     }
   } catch {
-    return { style: 'auto', density: 'compact' }
+    return { style: 'auto', density: 'compact', transparency: 'balanced' }
   }
 }
 export function resolveStyle(

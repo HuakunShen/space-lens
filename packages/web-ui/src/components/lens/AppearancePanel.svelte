@@ -10,6 +10,8 @@
     style: 'auto' | 'web' | 'macos' | 'windows' | 'linux'
     density: 'compact' | 'comfortable'
     mode: 'system' | 'light' | 'dark'
+    transparency?: 'solid' | 'balanced' | 'glassy'
+    glassAvailable?: boolean
     automaticStyle: string
     appVersion?: string
     update?: UpdateStatusShape
@@ -17,6 +19,7 @@
     onStyle: (style: Props['style']) => void
     onDensity: (density: Props['density']) => void
     onMode: (mode: Props['mode']) => void
+    onTransparency?: (value: NonNullable<Props['transparency']>) => void
     onCheckUpdates?: () => void
     onInstallUpdate?: () => void
   }
@@ -25,6 +28,8 @@
     style,
     density,
     mode,
+    transparency = 'balanced',
+    glassAvailable = false,
     automaticStyle,
     appVersion,
     update,
@@ -32,6 +37,7 @@
     onStyle,
     onDensity,
     onMode,
+    onTransparency,
     onCheckUpdates,
     onInstallUpdate,
   }: Props = $props()
@@ -42,6 +48,7 @@
     { id: 'windows', label: 'Windows', detail: 'WinUI navigation · command bars', icon: AppWindow },
     { id: 'linux', label: 'Linux', detail: 'GNOME header bar · roomy controls', icon: Monitor },
   ]
+  const transparencyOptions: NonNullable<Props['transparency']>[] = ['solid', 'balanced', 'glassy']
   const segmentClass =
     'macos:rounded-[5px] macos:border-0 macos:py-1 macos:text-[13px] macos:data-[selected=true]:bg-background macos:data-[selected=true]:shadow-sm windows:relative windows:min-h-9 windows:border-0 windows:data-[selected=true]:bg-card windows:data-[selected=true]:shadow-none windows:data-[selected=true]:after:absolute windows:data-[selected=true]:after:bottom-0 windows:data-[selected=true]:after:left-1/4 windows:data-[selected=true]:after:w-1/2 windows:data-[selected=true]:after:h-0.5 windows:data-[selected=true]:after:bg-primary linux:min-h-10 linux:rounded-lg linux:border-0 linux:text-sm linux:data-[selected=true]:bg-background linux:data-[selected=true]:shadow-sm focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset'
   const updateLabel: Record<UpdateStatusShape['state'], string> = {
@@ -89,6 +96,24 @@
             >
           {/each}
         </div>
+        {#if glassAvailable}
+          <div
+            class="setting-options macos:overflow-visible macos:gap-0.5 macos:border-0 macos:bg-muted macos:p-0.5 windows:clear-both windows:rounded-[4px] windows:border-0 windows:bg-muted linux:clear-both linux:gap-1 linux:border-0 linux:bg-muted linux:p-1"
+            role="group"
+            aria-label="Transparency"
+          >
+            {#each transparencyOptions as option}
+              <button
+                class={segmentClass}
+                data-selected={transparency === option}
+                class:selected={transparency === option}
+                type="button"
+                aria-pressed={transparency === option}
+                onclick={() => onTransparency?.(option)}>{option}</button
+              >
+            {/each}
+          </div>
+        {/if}
       </fieldset>
       <fieldset
         class="windows:mb-3 windows:rounded-lg windows:border windows:bg-card windows:p-4 linux:mb-3 linux:rounded-xl linux:border linux:bg-card linux:p-4"
