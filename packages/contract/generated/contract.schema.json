@@ -55,6 +55,9 @@
             "discovery": {
               "type": "boolean"
             },
+            "appAudit": {
+              "type": "boolean"
+            },
             "maxConcurrent": {
               "type": "integer",
               "minimum": 0,
@@ -2021,6 +2024,195 @@
         "totalSize",
         "offset",
         "limit"
+      ],
+      "additionalProperties": false
+    },
+    "AppAuditRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "minSize": {
+          "default": 0,
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "includeHeuristic": {
+          "default": true,
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 500,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      },
+      "required": [
+        "minSize",
+        "includeHeuristic",
+        "limit"
+      ],
+      "additionalProperties": false
+    },
+    "AppAuditReport": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+        },
+        "apps": {
+          "maxItems": 1000,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "app",
+                  "cli"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "catalog",
+                  "heuristic"
+                ]
+              },
+              "bundleId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "appPath": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "installedSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "totalSize": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "locations": {
+                "maxItems": 200,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "label": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "classification": {
+                      "type": "string",
+                      "enum": [
+                        "application",
+                        "cache",
+                        "versions",
+                        "logs",
+                        "re-downloadable",
+                        "user-data",
+                        "support"
+                      ]
+                    },
+                    "purgeable": {
+                      "type": "boolean"
+                    },
+                    "comment": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "catalog",
+                        "heuristic"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "label",
+                    "classification",
+                    "purgeable",
+                    "comment",
+                    "size",
+                    "source"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "kind",
+              "source",
+              "bundleId",
+              "appPath",
+              "installedSize",
+              "totalSize",
+              "locations"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "totalApps": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "platform",
+        "generatedAt",
+        "apps",
+        "totalApps",
+        "truncated"
       ],
       "additionalProperties": false
     },

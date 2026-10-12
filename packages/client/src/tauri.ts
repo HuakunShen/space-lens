@@ -7,6 +7,8 @@ import type {
   CleanupPlan,
   DiscoveryPage,
   DiscoveryRequest,
+  AppAuditReport,
+  AppAuditRequest,
   Health,
   Problem,
   RootsResponse,
@@ -167,6 +169,12 @@ export function createTauriService(ports: TauriPorts): WorkbenchService {
         { request: { method: 'discovery', scanId, kind, minSize, offset, limit } },
         DISCOVERY_REPLY_TIMEOUT_MS,
       )
+    },
+    async appAudit(body: AppAuditRequest) {
+      const { minSize, includeHeuristic, limit } = body
+      return invokeReply<AppAuditReport>('sl_read',
+        { request: { method: 'appAudit', minSize, includeHeuristic, limit } },
+        DISCOVERY_REPLY_TIMEOUT_MS)
     },
     async plan(body: { scanId: string; nodeIds: string[] }) {
       return invokeReply<CleanupPlan>('sl_submit', {

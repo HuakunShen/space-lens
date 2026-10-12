@@ -14,6 +14,8 @@ import type {
   CleanupPlan,
   DiscoveryRequest,
   DiscoveryPage,
+  AppAuditRequest,
+  AppAuditReport,
   TreeSlice,
 } from '@space-lens/contract'
 
@@ -41,6 +43,7 @@ export interface WorkbenchService {
   treeSlice(body: TreeSliceRequest): Promise<TreeSlice>
   children(body: ChildrenPageRequest): Promise<ChildrenPage>
   discover?(body: DiscoveryRequest): Promise<DiscoveryPage>
+  appAudit?(body: AppAuditRequest): Promise<AppAuditReport>
   plan(body: { scanId: string; nodeIds: string[] }): Promise<CleanupPlan>
   execute(body: CleanupExecuteRequest): Promise<CleanupOutcome>
   /**
