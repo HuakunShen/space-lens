@@ -6,6 +6,7 @@ use space_lens::{
   build_removal_plan, find_candidates, scan_directory, CandidateOptions, CleanupPreset,
   IgnoredMode, PlatformCapabilities, ScanOptions, SnapshotEnvelope,
 };
+use spacelens_app_audit::{audit_installed_apps, AppAuditOptions};
 use spacelens_discovery::{run_discovery, DiscoveryKind, DiscoveryOptions};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
@@ -140,6 +141,18 @@ fn tool_definitions() -> Vec<Value> {
       }
     }),
     json!({
+      "name": "space_lens_app_audit",
+      "description": "Audit how much disk space installed applications and known CLI tools keep in scattered folders (Application Support, Caches, dot-directories). Returns per-app totals and per-location classifications (cache, versions, logs, re-downloadable, user-data) with explanations. Read-only: it never removes, moves, or trashes anything.",
+      "inputSchema": {
+        "type": "object", "additionalProperties": false,
+        "properties": {
+          "minSize": { "type": "integer", "default": 0, "description": "Drop locations smaller than this many bytes." },
+          "includeHeuristic": { "type": "boolean", "default": true, "description": "Include apps without curated catalog entries." },
+          "limit": { "type": "integer", "default": 500, "description": "Maximum apps returned, largest total first." }
+        }
+      }
+    }),
+    json!({
       "name": "space_lens_capabilities",
       "description": "Return the platform capability matrix without scanning or modifying files.",
       "inputSchema": { "type": "object", "additionalProperties": false }
@@ -164,6 +177,7 @@ fn call_tool(params: Option<&Value>) -> Value {
     "space_lens_scan_snapshot" => scan_snapshot(&arguments),
     "space_lens_cleanup_candidates" => cleanup_candidates(&arguments),
     "space_lens_discovery" => discovery(&arguments),
+    "space_lens_app_audit" => app_audit(&arguments),
     "space_lens_icloud_plan" => icloud_plan(&arguments),
     "space_lens_capabilities" => tool_success(serde_json::to_value(
       PlatformCapabilities::for_current_platform(),
@@ -294,6 +308,39 @@ fn discovery(arguments: &Map<String, Value>) -> Value {
         .retain(|view| kinds.iter().any(|kind| kind.id() == view.kind));
       tool_success(serde_json::to_value(report))
     }
+    Err(error) => tool_error(error.to_string()),
+  }
+}
+
+fn app_audit(arguments: &Map<String, Value>) -> Value {
+  let min_size = match arguments.get("minSize") {
+    None => 0,
+    Some(Value::Number(size)) if size.as_u64().is_some() => size.as_u64().unwrap_or(0),
+    Some(_) => return tool_error("arguments.minSize must be a non-negative integer"),
+  };
+  let include_heuristic = match arguments.get("includeHeuristic") {
+    None => true,
+    Some(Value::Bool(include)) => *include,
+    Some(_) => return tool_error("arguments.includeHeuristic must be a boolean"),
+  };
+  let limit = match arguments.get("limit") {
+    None => 500,
+    Some(Value::Number(limit))
+      if limit
+        .as_u64()
+        .is_some_and(|value| (1..=1000).contains(&value)) =>
+    {
+      limit.as_u64().unwrap_or(500) as usize
+    }
+    Some(_) => return tool_error("arguments.limit must be an integer between 1 and 1000"),
+  };
+  match audit_installed_apps(&AppAuditOptions {
+    min_size,
+    include_heuristic,
+    limit,
+    home: None,
+  }) {
+    Ok(report) => tool_success(serde_json::to_value(report)),
     Err(error) => tool_error(error.to_string()),
   }
 }
@@ -489,5 +536,64 @@ mod tests {
     let invalid = discovery_call(&root, json!({ "kinds": ["bogus"] }));
     assert_eq!(invalid["isError"], true);
     let _ = std::fs::remove_dir_all(&root);
+  }
+
+  #[test]
+  fn app_audit_tool_is_listed_as_read_only() {
+    let response = handle_request(json!({
+      "jsonrpc": "2.0",
+      "id": "audit",
+      "method": "tools/list"
+    }))
+    .expect("response");
+    let tools = response["result"]["tools"].as_array().expect("tools");
+    let tool = tools
+      .iter()
+      .find(|tool| tool["name"] == "space_lens_app_audit")
+      .expect("app audit tool");
+    assert!(tool["description"]
+      .as_str()
+      .expect("description")
+      .contains("Read-only"));
+    // The schema takes only the three documented optional arguments: nothing
+    // is required and nothing else is accepted.
+    let schema = &tool["inputSchema"];
+    assert_eq!(schema["type"], "object");
+    assert_eq!(schema["additionalProperties"], false);
+    assert!(schema.get("required").is_none());
+    let properties = schema["properties"].as_object().expect("properties");
+    assert_eq!(properties.len(), 3);
+    assert_eq!(properties["minSize"]["type"], "integer");
+    assert_eq!(properties["minSize"]["default"], 0);
+    assert_eq!(properties["includeHeuristic"]["type"], "boolean");
+    assert_eq!(properties["includeHeuristic"]["default"], true);
+    assert_eq!(properties["limit"]["type"], "integer");
+    assert_eq!(properties["limit"]["default"], 500);
+  }
+
+  #[test]
+  fn app_audit_rejects_invalid_arguments_without_scanning() {
+    // Every case fails argument validation before any filesystem scan runs.
+    for arguments in [
+      json!({ "limit": 0 }),
+      json!({ "limit": 1001 }),
+      json!({ "limit": -5 }),
+      json!({ "limit": "many" }),
+      json!({ "limit": 1.5 }),
+      json!({ "minSize": -1 }),
+      json!({ "minSize": "1024" }),
+      json!({ "includeHeuristic": "yes" }),
+      json!({ "includeHeuristic": 1 }),
+    ] {
+      let result = handle_request(json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": { "name": "space_lens_app_audit", "arguments": arguments }
+      }))
+      .expect("response")["result"]
+        .clone();
+      assert_eq!(result["isError"], true, "arguments: {arguments}");
+    }
   }
 }
