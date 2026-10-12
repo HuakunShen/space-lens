@@ -23,6 +23,17 @@ export function discoveryAvailable(input: DiscoveryGateInput): boolean {
   return Boolean(input.capabilities?.scan.discovery && input.service?.discover)
 }
 
+export interface AppAuditGateInput {
+  capabilities: Capabilities | null
+  /** `Pick` of the workbench service; only the optional appAudit method matters. */
+  service: { appAudit?: unknown } | null
+}
+
+/** The desktop shell declares appAudit and serves it over Tauri IPC. */
+export function appAuditAvailable(input: AppAuditGateInput): boolean {
+  return Boolean(input.capabilities?.scan.appAudit && input.service?.appAudit)
+}
+
 /** The engine skips `.gitignore` content reads for the startup-disk roots. */
 const FULL_DISK_PATHS = ['/', '/System/Volumes/Data']
 

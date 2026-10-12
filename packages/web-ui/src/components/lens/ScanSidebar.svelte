@@ -8,6 +8,7 @@
     FileSearch,
     Boxes,
     GitBranch,
+    AppWindow,
     Settings,
     RefreshCw,
   } from '@lucide/svelte'
@@ -19,9 +20,10 @@
     targets: ScanTarget[]
     onSettings?: () => void
     class?: string
-    view?: 'browse' | 'large-files' | 'caches' | 'gitignored'
+    view?: 'browse' | 'large-files' | 'caches' | 'gitignored' | 'apps'
     discoveryAvailable?: boolean
     gitignoredAvailable?: boolean
+    appAuditAvailable?: boolean
     onView?: (view: NonNullable<Props['view']>) => void
     selectedPath?: string | null
     customSelected?: boolean
@@ -46,6 +48,7 @@
     view = 'browse',
     discoveryAvailable = false,
     gitignoredAvailable = discoveryAvailable,
+    appAuditAvailable = false,
     onView,
     selectedPath = null,
     customSelected = false,
@@ -89,18 +92,20 @@
   <div class="sidebar-scroll">
     {#if onView}
       <h2 class={headingClass}>Workspace</h2>
-      {#each [{ id: 'browse', label: 'Browse', icon: ChartPie }, { id: 'large-files', label: 'Large files', icon: FileSearch }, { id: 'caches', label: 'Developer cleanup', icon: Boxes }, { id: 'gitignored', label: 'Gitignored space', icon: GitBranch }] as option}
+      {#each [{ id: 'browse', label: 'Browse', icon: ChartPie }, { id: 'large-files', label: 'Large files', icon: FileSearch }, { id: 'caches', label: 'Developer cleanup', icon: Boxes }, { id: 'apps', label: 'App storage', icon: AppWindow }, { id: 'gitignored', label: 'Gitignored space', icon: GitBranch }] as option}
         <button
           class={itemClass}
           data-selected={view === option.id}
           class:selected={view === option.id}
           type="button"
           disabled={option.id !== 'browse' &&
-            (!discoveryAvailable || (option.id === 'gitignored' && !gitignoredAvailable))}
+            (option.id === 'apps' ? !appAuditAvailable : (!discoveryAvailable || (option.id === 'gitignored' && !gitignoredAvailable)))}
           aria-current={view === option.id ? 'page' : undefined}
           title={option.id === 'gitignored' && !gitignoredAvailable
             ? 'Scan a local project folder to classify its ignore rules'
-            : option.id !== 'browse' && !discoveryAvailable
+            : option.id === 'apps' && !appAuditAvailable
+              ? 'App storage audit is unavailable on this host'
+              : option.id !== 'browse' && !discoveryAvailable
               ? 'Discovery is unavailable for this scan'
               : option.label}
           onclick={() =>
@@ -109,7 +114,9 @@
                 ? 'large-files'
                 : option.id === 'caches'
                   ? 'caches'
-                  : option.id === 'gitignored'
+                  : option.id === 'apps'
+                    ? 'apps'
+                    : option.id === 'gitignored'
                     ? 'gitignored'
                     : 'browse',
             )}

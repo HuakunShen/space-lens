@@ -15,6 +15,7 @@
     LensToolbar,
     ScanSidebar,
     DiscoveryList,
+    AppAuditList,
     AppearancePanel,
     ScanCoveragePanel,
     Button,
@@ -25,7 +26,7 @@
   } from '@space-lens/web-ui'
   import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
-  import type { CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem } from '@space-lens/contract'
+  import type { CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, AppAuditReport } from '@space-lens/contract'
   import { setMode, userPrefersMode } from 'mode-watcher'
   import { addSelection, selectedAncestor } from '../lib/selection'
   import { ACTIVE_SCAN_KEY, parseActiveScan } from '../lib/resume'
@@ -53,6 +54,7 @@
     cleanupAvailable as cleanupGate,
     discoveryAvailable as discoveryGate,
     gitignoredAvailable as gitignoredGate,
+    appAuditAvailable as appAuditGate,
   } from '../lib/gates'
   import { startDesktopEventStream } from '../lib/desktop-events'
 
@@ -208,13 +210,18 @@
   let updateStatus = $state<UpdateStatus>({ state: 'idle' })
   if (__SPACLENS_DESKTOP__) void currentAppVersion().then((version) => (appVersion = version))
   let preferencesReady = $state(false)
-  let view = $state<'browse' | DiscoveryKind>('browse')
+  let view = $state<'browse' | DiscoveryKind | 'apps'>('browse')
   let discoveryPage = $state<DiscoveryPage | null>(null)
   let discoveryItems = $state<DiscoveryItem[]>([])
   let discoveryLoading = $state(false)
   let discoveryError = $state<string | null>(null)
   let minimumSize = $state(10 * 1024 ** 2)
   let discoverySequence = 0
+  let appAuditReport = $state<AppAuditReport | null>(null)
+  let appAuditLoading = $state(false)
+  let appAuditError = $state<string | null>(null)
+  let appMinSize = $state(0)
+  let appAuditSequence = 0
   let browseSearch = $state('')
   let browseSort = $state<'size' | 'name' | 'path'>('size')
   const sortOptions = [
@@ -261,6 +268,9 @@
       scannedPaths,
     }),
   )
+  const appAuditAvailable = $derived(
+    appAuditGate({ capabilities: workbench.capabilities, service: workbench.service }),
+  )
   const cleanupAvailable = $derived(
     cleanupGate({
       capabilities: workbench.capabilities,
@@ -294,9 +304,16 @@
   $effect(() => {
     const scanId = workbench.activeScanId
     const size = minimumSize
-    if (!scanId || view === 'browse' || workbench.status?.state !== 'ready' || !discoveryAvailable) return
+    if (!scanId || view === 'browse' || view === 'apps' || workbench.status?.state !== 'ready' || !discoveryAvailable) return
     void size
     void refreshDiscovery(true)
+  })
+  $effect(() => {
+    const size = appMinSize
+    const currentView = view
+    if (currentView !== 'apps' || !appAuditAvailable) return
+    void size
+    void refreshAppAudit(true)
   })
   let navigating = $state(false)
   let navigationRequest = 0
@@ -650,7 +667,7 @@
     invalidatePlan()
     workbench.collector = workbench.collector.filter((entry) => entry.id !== id)
   }
-  function changeView(next: 'browse' | DiscoveryKind): void {
+  function changeView(next: 'browse' | DiscoveryKind | 'apps'): void {
     navigationRequest++
     navigating = false
     view = next
@@ -659,7 +676,7 @@
   }
   async function refreshDiscovery(reset: boolean): Promise<void> {
     const { service, status } = workbench
-    if (!service?.discover || status?.state !== 'ready' || view === 'browse') return
+    if (!service?.discover || status?.state !== 'ready' || view === 'browse' || view === 'apps') return
     const request = ++discoverySequence
     const kind = view
     const offset = reset ? 0 : discoveryItems.length
@@ -678,6 +695,23 @@
       if (request === discoverySequence) discoveryError = describeError(error)
     } finally {
       if (request === discoverySequence) discoveryLoading = false
+    }
+  }
+  async function refreshAppAudit(reset = true): Promise<void> {
+    const { service } = workbench
+    if (!service?.appAudit || view !== 'apps') return
+    const request = ++appAuditSequence
+    appAuditLoading = true
+    appAuditError = null
+    if (reset) appAuditReport = null
+    try {
+      const report = await service.appAudit({ minSize: appMinSize, includeHeuristic: true, limit: 500 })
+      if (request !== appAuditSequence || view !== 'apps') return
+      appAuditReport = report
+    } catch (error) {
+      if (request === appAuditSequence) appAuditError = describeError(error)
+    } finally {
+      if (request === appAuditSequence) appAuditLoading = false
     }
   }
   async function loadMoreChildren(): Promise<void> {
@@ -892,6 +926,7 @@
           {view}
           {discoveryAvailable}
           {gitignoredAvailable}
+          {appAuditAvailable}
           selectedPath={ancestors[0]?.path ?? scannedPaths[0] ?? workbench.status.label}
           busy={workbench.deleting || planning}
           onView={changeView}
@@ -917,7 +952,9 @@
               ? 'Large files'
               : view === 'caches'
                 ? 'Developer cleanup'
-                : 'Gitignored space'}
+                : view === 'apps'
+                  ? 'App storage'
+                  : 'Gitignored space'}
           path={displayFocus?.path ?? workbench.status.label ?? undefined}
           busy={workbench.deleting || planning}
           collectorCount={workbench.collector.length}
@@ -1095,6 +1132,17 @@
                 </div>{/if}
             </aside>
           </main>
+        {:else if view === 'apps'}
+          {#key view}<AppAuditList
+              report={appAuditReport}
+              loading={appAuditLoading}
+              error={appAuditError}
+              minSize={appMinSize}
+              disabled={workbench.deleting || planning}
+              onRefresh={() => void refreshAppAudit()}
+              onMinSize={(v) => (appMinSize = v)}
+              onCopy={(path) => void copyPath(path)}
+            />{/key}
         {:else}
           {#key view}<DiscoveryList
               kind={view}

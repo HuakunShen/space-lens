@@ -22,6 +22,7 @@ export { default as ScanSidebar } from './components/lens/ScanSidebar.svelte'
 export { default as DriveList } from './components/lens/DriveList.svelte'
 
 export { default as DiscoveryList } from './components/lens/DiscoveryList.svelte'
+export { default as AppAuditList } from './components/lens/AppAuditList.svelte'
 export { default as AppearancePanel } from './components/lens/AppearancePanel.svelte'
 
 // App-shell components (connection + feedback)

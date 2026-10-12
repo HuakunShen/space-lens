@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { cleanupAvailable, discoveryAvailable, gitignoredAvailable } from '../src/lib/gates.ts'
+import { cleanupAvailable, discoveryAvailable, gitignoredAvailable, appAuditAvailable } from '../src/lib/gates.ts'
 import type { Capabilities, ScanStatus } from '@space-lens/contract'
 
 const capabilities = (
@@ -55,6 +55,21 @@ test('gitignored discovery stays disabled for full startup-disk scans only', () 
     }),
     false,
   )
+})
+
+test('app storage view requires the appAudit capability and service method', () => {
+  const auditCapabilities = capabilities({ appAudit: true })
+  const auditService = { appAudit: () => Promise.reject(new Error('unused')) }
+  assert.equal(appAuditAvailable({ capabilities: auditCapabilities, service: auditService }), true)
+  // capability missing -> hidden
+  assert.equal(
+    appAuditAvailable({ capabilities: capabilities({ appAudit: undefined }), service: auditService }),
+    false,
+  )
+  assert.equal(appAuditAvailable({ capabilities: null, service: auditService }), false)
+  // service method missing (e.g. the browser HTTP host in v1) -> hidden
+  assert.equal(appAuditAvailable({ capabilities: auditCapabilities, service: {} }), false)
+  assert.equal(appAuditAvailable({ capabilities: auditCapabilities, service: null }), false)
 })
 
 test('cleanup stays desktop-only for covered scans and capability-gated everywhere', () => {
