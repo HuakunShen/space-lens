@@ -18,6 +18,7 @@
 #![deny(clippy::all)]
 
 mod catalog;
+mod icon;
 mod macos;
 
 use std::collections::{HashMap, HashSet};
@@ -28,6 +29,7 @@ use serde::{Deserialize, Serialize};
 use space_lens::{scan_directory, IgnoredMode, ScanOptions};
 
 pub use catalog::{macos_catalog, Catalog, CatalogEntry, CatalogLocation, CatalogMatch};
+pub use icon::app_icon_png;
 
 #[derive(Clone, Debug)]
 pub struct AppAuditOptions {
