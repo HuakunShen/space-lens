@@ -283,6 +283,16 @@ pub fn audit_with(
       if member == winner {
         continue;
       }
+      // A catalog-matched duplicate can lose on bundle size; its curated
+      // identity must survive the merge so the entry keeps catalog metadata
+      // (and survives `include_heuristic = false`).
+      if pending[member].source == AuditSource::Catalog
+        && pending[winner].source != AuditSource::Catalog
+      {
+        pending[winner].base_id = pending[member].base_id.clone();
+        pending[winner].name = pending[member].name.clone();
+        pending[winner].source = AuditSource::Catalog;
+      }
       let loser_locations = std::mem::take(&mut pending[member].locations);
       for (path, meta) in loser_locations {
         pending[winner].locations.entry(path).or_insert(meta);
@@ -297,8 +307,14 @@ pub fn audit_with(
     .map(|(_, entry)| entry)
     .collect();
 
+  // Filter BEFORE attributing shared paths: an entry that the filter would
+  // drop must not claim a location another surviving entry also owns.
+  if !options.include_heuristic {
+    survivors.retain(|entry| entry.source == AuditSource::Catalog);
+  }
+
   // Report-level uniqueness: no canonical path appears in two entries.
-  // Catalog entries win over heuristic collisions.
+  // Catalog-owned locations (and catalog-sourced entries) win collisions.
   dedup_locations_across_entries(&mut survivors);
 
   let mut entries: Vec<AppAuditEntry> = Vec::new();
@@ -354,9 +370,6 @@ pub fn audit_with(
     });
   }
 
-  if !options.include_heuristic {
-    entries.retain(|entry| entry.source == AuditSource::Catalog);
-  }
   entries.sort_by(|a, b| {
     b.total_size
       .cmp(&a.total_size)
@@ -440,15 +453,25 @@ fn dedup_locations_across_entries(pending: &mut [PendingEntry]) {
   for (path, mut owners) in by_path.into_iter().filter(|(_, owners)| owners.len() > 1) {
     owners.sort_unstable();
     let mut winner = owners[0];
+    let better = |preferred: usize, challenger: usize| {
+      let preferred_location = pending[preferred].locations.get(&path);
+      let challenger_location = pending[challenger].locations.get(&path);
+      // A catalog-owned location beats a heuristic one; on a tie, the entry
+      // sourced from the catalog beats a heuristic entry.
+      match (
+        preferred_location.map(|meta| meta.source),
+        challenger_location.map(|meta| meta.source),
+      ) {
+        (Some(AuditSource::Heuristic), Some(AuditSource::Catalog)) => true,
+        (Some(AuditSource::Catalog), Some(AuditSource::Heuristic)) => false,
+        _ => {
+          pending[challenger].source == AuditSource::Catalog
+            && pending[preferred].source != AuditSource::Catalog
+        }
+      }
+    };
     for &candidate in &owners[1..] {
-      let winner_source = pending[winner].locations.get(&path).map(|meta| meta.source);
-      let candidate_source = pending[candidate]
-        .locations
-        .get(&path)
-        .map(|meta| meta.source);
-      if candidate_source == Some(AuditSource::Catalog)
-        && winner_source == Some(AuditSource::Heuristic)
-      {
+      if better(winner, candidate) {
         winner = candidate;
       }
     }
@@ -626,12 +649,22 @@ fn resolve_location(raw: &Path, home: &Path) -> Option<PathBuf> {
 }
 
 /// Resolve a `.app` bundle path for measurement. Bundles may live outside
-/// home (`/Applications`), so there is no under-home requirement, but the
-/// symlink-ancestor, symlinked-leaf, and Group Containers gates still apply;
+/// home (`/Applications`), so the ancestor walk starts at the filesystem
+/// root, not at home: any symlinked component anywhere above the bundle
+/// rejects it. The symlinked-leaf and Group Containers gates still apply;
 /// rejected bundles measure as 0.
 fn resolve_app_bundle(path: &Path, home: &Path) -> Option<PathBuf> {
   if has_symlink_ancestor_below_home(path, home) {
     return None;
+  }
+  let mut prefix = PathBuf::new();
+  for component in path.components() {
+    prefix.push(component);
+    if let Ok(metadata) = std::fs::symlink_metadata(&prefix) {
+      if metadata.file_type().is_symlink() {
+        return None;
+      }
+    }
   }
   match std::fs::symlink_metadata(path) {
     Ok(metadata) if metadata.file_type().is_symlink() => return None,
@@ -1038,6 +1071,101 @@ mod tests {
         );
       }
     }
+  }
+
+  #[test]
+  fn filtered_entries_do_not_claim_shared_paths() {
+    let fixture = Fixture::new("filtered-claim");
+    let home = fixture.home();
+    // VS Code's catalog location collides with a heuristic candidate of an
+    // unrelated app literally named "Code". With heuristic entries filtered
+    // out, the unrelated app must not have claimed the path first.
+    fixture.file("Library/Application Support/Code/User/settings.json", 4096);
+
+    let apps = vec![
+      DiscoveredApp {
+        name: "Code".to_string(),
+        bundle_id: None,
+        app_path: home.join("Applications/Code.app"),
+      },
+      discovered("Visual Studio Code", Some("com.microsoft.VSCode"), &home),
+    ];
+    let report = audit_with(&apps, &home, &options(0, false, 500)).unwrap();
+    let code = home
+      .join("Library/Application Support/Code")
+      .to_string_lossy()
+      .into_owned();
+    let vscode = report
+      .apps
+      .iter()
+      .find(|entry| entry.id == "vscode")
+      .expect("vscode entry survives include_heuristic=false");
+    assert!(
+      vscode
+        .locations
+        .iter()
+        .any(|location| location.path == code),
+      "catalog entry lost its claimed path to a filtered heuristic entry"
+    );
+  }
+
+  #[test]
+  fn catalog_identity_survives_bundle_dedup() {
+    let fixture = Fixture::new("dedup-identity");
+    let home = fixture.home();
+    // A bigger unmatched bundle ("VSCode Beta") shares the bundle id with a
+    // smaller catalog-matched install. Dedup keeps the bigger bundle but must
+    // carry the catalog identity, so it survives include_heuristic=false.
+    fixture.file("Applications/VSCode Beta.app/Contents/big.bin", 512 * 1024);
+    fixture.file(
+      "Applications/Visual Studio Code.app/Contents/small.bin",
+      4096,
+    );
+    fixture.file("Library/Application Support/Code/User/settings.json", 4096);
+
+    let apps = vec![
+      discovered("Visual Studio Code", Some("com.microsoft.VSCode"), &home),
+      DiscoveredApp {
+        name: "VSCode Beta".to_string(),
+        bundle_id: Some("com.microsoft.VSCode".to_string()),
+        app_path: home.join("Applications/VSCode Beta.app"),
+      },
+    ];
+    let report = audit_with(&apps, &home, &options(0, false, 500)).unwrap();
+    assert_eq!(report.apps.len(), 1, "duplicate bundle ids must merge");
+    assert_eq!(report.apps[0].id, "vscode");
+    assert_eq!(report.apps[0].source, AuditSource::Catalog);
+    // The surviving entry reports the larger bundle it kept.
+    assert!(report.apps[0].installed_size >= 512 * 1024);
+  }
+
+  /// A bundle reached through a symlinked ancestor OUTSIDE home (e.g. a
+  /// linked /Applications subfolder) is rejected, not measured.
+  #[cfg(unix)]
+  #[test]
+  fn bundle_behind_outside_home_symlink_ancestor_measures_zero() {
+    let fixture = Fixture::new("bundle-symlink");
+    let home = fixture.home();
+    let real_apps = fixture.root.join("real-apps");
+    std::fs::create_dir_all(real_apps.join("Linked.app/Contents/MacOS")).unwrap();
+    std::fs::write(
+      real_apps.join("Linked.app/Contents/MacOS/binary"),
+      vec![0u8; 256 * 1024],
+    )
+    .unwrap();
+    let link = fixture.root.join("linked-apps");
+    std::os::unix::fs::symlink(&real_apps, &link).unwrap();
+
+    let apps = vec![DiscoveredApp {
+      name: "Linked".to_string(),
+      bundle_id: Some("com.example.Linked".to_string()),
+      app_path: link.join("Linked.app"),
+    }];
+    let report = audit_with(&apps, &home, &options(0, true, 500)).unwrap();
+    assert!(
+      report.apps.is_empty(),
+      "symlink-reached bundle must not be measured"
+    );
   }
 
   /// A catalog child below a symlinked storage root is skipped fail-closed.

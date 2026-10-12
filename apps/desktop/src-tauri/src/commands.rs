@@ -340,16 +340,7 @@ pub async fn sl_read(
         limit,
       } = &request
       {
-        let _guard = bundle.app_audit.lock().unwrap();
-        let options = spacelens_app_audit::AppAuditOptions {
-          min_size: *min_size,
-          include_heuristic: *include_heuristic,
-          limit: *limit,
-          home: None,
-        };
-        let report = spacelens_app_audit::audit_installed_apps(&options)
-          .map_err(|error| problem_value("InternalError", error))?;
-        return serde_json::to_value(report).map_err(|error| problem_value("InternalError", error));
+        return read_app_audit(&bundle, *min_size, *include_heuristic, *limit);
       }
       let mut engine = bundle.engine.lock().unwrap();
       let result: Result<Value, Value> = match request {
@@ -442,6 +433,33 @@ pub async fn sl_read(
 }
 
 // ----------------------------------------------------------------- mutations
+
+/// Standalone audit read: runs the app-storage audit outside the engine lock
+/// (mirroring `read_discovery`). The contract bounds `limit` to 1..=1000;
+/// enforce it here so a raw IPC caller cannot request beyond that shape.
+fn read_app_audit(
+  bundle: &SessionBundle,
+  min_size: u64,
+  include_heuristic: bool,
+  limit: usize,
+) -> Result<Value, Value> {
+  if limit == 0 || limit > 1000 {
+    return Err(problem_value(
+      "InvalidRequest",
+      "appAudit limit must be between 1 and 1000",
+    ));
+  }
+  let _guard = bundle.app_audit.lock().unwrap();
+  let options = spacelens_app_audit::AppAuditOptions {
+    min_size,
+    include_heuristic,
+    limit,
+    home: None,
+  };
+  let report = spacelens_app_audit::audit_installed_apps(&options)
+    .map_err(|error| problem_value("InternalError", error))?;
+  serde_json::to_value(report).map_err(|error| problem_value("InternalError", error))
+}
 
 fn read_discovery(
   bundle: &SessionBundle,
@@ -1216,6 +1234,24 @@ mod tests {
         .unwrap()
         .extend(extra.as_object().unwrap().clone());
       assert!(serde_json::from_value::<ReadRequest>(value).is_err());
+    }
+  }
+
+  #[test]
+  fn app_audit_limit_out_of_contract_range_is_refused_before_scanning() {
+    let bundle = super::SessionBundle {
+      window_label: "fixture".into(),
+      engine: std::sync::Mutex::new(crate::engine::EngineStore::new(Vec::new())),
+      events: crate::events::EventSink::new(),
+      discovery: std::sync::Mutex::new(()),
+      app_audit: std::sync::Mutex::new(()),
+    };
+    for limit in [0usize, 1001] {
+      let problem = super::read_app_audit(&bundle, 0, true, limit).unwrap_err();
+      assert_eq!(
+        problem["problem"]["code"], "InvalidRequest",
+        "limit {limit}"
+      );
     }
   }
 }
