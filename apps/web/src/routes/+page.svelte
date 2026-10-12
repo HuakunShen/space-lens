@@ -224,6 +224,7 @@
   let appAuditSequence = 0
   // App icons are stable per path, so the session cache survives refreshes.
   // The service method is optional (older hosts lack it) — resolve null then.
+  // appIcon replies are { dataUrl }; unwrap to the string the grid consumes.
   const appIconCache = new Map<string, Promise<string | null>>()
   async function appIcon(appPath: string): Promise<string | null> {
     const cached = appIconCache.get(appPath)
@@ -231,9 +232,9 @@
     const task = (async (): Promise<string | null> => {
       try {
         const service = workbench.service as unknown as {
-          appIcon?: (args: { appPath: string }) => Promise<string | null>
+          appIcon?: (args: { appPath: string }) => Promise<{ dataUrl: string } | null>
         } | null
-        return (await service?.appIcon?.({ appPath })) ?? null
+        return (await service?.appIcon?.({ appPath }))?.dataUrl ?? null
       } catch {
         return null
       }
