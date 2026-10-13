@@ -322,16 +322,26 @@ impl AppStorageView {
     .detach();
 
     self._icon_task = Some(cx.spawn(async move |this, cx| {
+      // Icons arrive one message at a time; re-rendering the whole list per
+      // icon made hundreds of apps janky. Batch: drain everything already
+      // queued, insert all of it, then notify once.
+      let mut batch: Vec<(String, Option<Arc<RenderImage>>)> = Vec::new();
       while let Ok((gen, path, rendered)) = rx.recv().await {
+        batch.push((path, rendered));
+        // Take whatever else is already ready without waiting. The channel
+        // is owned by one loader task, so every message carries this `gen`.
+        while let Ok((_, p2, r2)) = rx.try_recv() {
+          batch.push((p2, r2));
+        }
         let current = this.update(cx, |this, cx| {
-          if gen == this.generation {
-            this.icons.insert(path, rendered);
-            cx.notify();
-            true
-          } else {
-            // Stale loader — a newer audit owns the view.
-            false
+          if gen != this.generation {
+            return false;
           }
+          for (path, rendered) in batch.drain(..) {
+            this.icons.insert(path, rendered);
+          }
+          cx.notify();
+          true
         });
         if !matches!(current, Ok(true)) {
           break;
