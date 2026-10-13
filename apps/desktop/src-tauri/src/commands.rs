@@ -16,10 +16,10 @@ use crate::app_cleanup::{
   AppCleanupExecuteRequest, AppCleanupPlanRequest, AppCleanupState, AuditSnapshot,
 };
 use crate::engine::{
-  default_discovery_limit, run_discovery, ChildrenPageRequest, CleanupExecuteRequest,
-  CleanupPlanRequest, DiscoveryData, DiscoveryInput, DiscoveryKind, DiscoveryPage,
-  DiscoveryRequest, EngineProblem, EngineStore, LocalScanTask, PreparedDiscovery, ScanStartRequest,
-  TreeSliceRequest,
+  default_discovery_limit, run_discovery, AppScanStartRequest, ChildrenPageRequest,
+  CleanupExecuteRequest, CleanupPlanRequest, DiscoveryData, DiscoveryInput, DiscoveryKind,
+  DiscoveryPage, DiscoveryRequest, EngineProblem, EngineStore, LocalScanTask, PreparedDiscovery,
+  ScanStartRequest, TreeSliceRequest,
 };
 use crate::events::{EventSink, ScopedEventFrame, SubscriptionAck};
 
@@ -130,11 +130,12 @@ fn session_metadata(session_id: &str) -> Value {
 /// single worker slot — EngineStore rejects a second scan while one is
 /// active or leased; the slot semantics are locked by
 /// `tests/local_scan.rs::protected_prepare_is_nonblocking_and_cancellation_is_terminal`.
+/// `scan.appScan` advertises virtual-root app sessions (`appScanStart`).
 fn capabilities_json() -> Value {
   json!({
       "apiMajor": API_MAJOR,
       "contractVersion": CONTRACT_VERSION,
-      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true },
+      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true, "appScan": true },
       "cleanup": { "plan": true, "execute": true, "mode": "trash", "appPlan": true, "appExecute": true },
       "host": { "folderPicker": true, "appLocationReveal": true },
       "icloud": "unavailable",
@@ -315,6 +316,10 @@ pub enum SubmitRequest {
   AppCleanupExecute {
     #[serde(flatten)]
     request: AppCleanupExecuteRequest,
+  },
+  AppScanStart {
+    #[serde(flatten)]
+    request: AppScanStartRequest,
   },
 }
 
@@ -709,7 +714,12 @@ pub async fn sl_submit(
         Ok(())
       }
       SubmitRequest::AppCleanupPlan { .. } | SubmitRequest::AppCleanupExecute { .. } => {
-        submit_app_cleanup_reply(&bundle, request, &reply)
+        let roots = state.roots.clone();
+        submit_app_cleanup_reply(&bundle, &roots, request, &reply)
+      }
+      SubmitRequest::AppScanStart { request } => {
+        submit_app_scan_reply(bundle, request, &reply);
+        Ok(())
       }
       request => {
         let mut engine = bundle.engine.lock().unwrap();
@@ -769,6 +779,7 @@ fn run_local_scan_task(bundle: &SessionBundle, task: LocalScanTask) {
 /// engine lock is never taken on this path.
 fn submit_app_cleanup_plan(
   bundle: &SessionBundle,
+  configured_roots: &[PathBuf],
   request: AppCleanupPlanRequest,
 ) -> Result<Value, Value> {
   let snapshot = bundle.app_audit.lock().unwrap().audit.clone();
@@ -779,7 +790,7 @@ fn submit_app_cleanup_plan(
     ));
   };
   let mut cleanup = bundle.app_cleanup.lock().unwrap();
-  crate::app_cleanup::plan_app_cleanup(&mut cleanup, &snapshot, &request)
+  crate::app_cleanup::plan_app_cleanup(&mut cleanup, &snapshot, &request, configured_roots)
 }
 
 fn submit_app_cleanup_execute(
@@ -793,13 +804,16 @@ fn submit_app_cleanup_execute(
 
 fn submit_app_cleanup_reply(
   bundle: &SessionBundle,
+  configured_roots: &[PathBuf],
   request: SubmitRequest,
   reply: &Channel<Value>,
 ) -> Result<(), Value> {
   // Rejected plans/executions reply through the Channel like every engine
   // failure — they never escape the command and never touch the engine.
   let value: Result<Value, Value> = match request {
-    SubmitRequest::AppCleanupPlan { request } => submit_app_cleanup_plan(bundle, request),
+    SubmitRequest::AppCleanupPlan { request } => {
+      submit_app_cleanup_plan(bundle, configured_roots, request)
+    }
     SubmitRequest::AppCleanupExecute { request } => submit_app_cleanup_execute(bundle, request),
     _ => Err(problem_value(
       "InternalError",
@@ -812,6 +826,153 @@ fn submit_app_cleanup_reply(
       Err(problem) => json!({ "ok": false, "problem": problem }),
     })
     .map_err(|error| problem_value("InternalError", error))
+}
+
+/// App-scan dispatch: clones the current audit snapshot under a short
+/// app-audit lock (the single A7 pinning point), prepares the session under a
+/// short engine lock, replies the session FIRST, and walks outside every lock
+/// — mirroring the local-scan session-first flow. A closed reply channel
+/// cancels the leased worker like `sl_submit` does for local scans.
+fn submit_app_scan_reply(
+  bundle: std::sync::Arc<SessionBundle>,
+  request: AppScanStartRequest,
+  reply: &Channel<Value>,
+) {
+  let snapshot = bundle.app_audit.lock().unwrap().audit.clone();
+  let Some(snapshot) = snapshot else {
+    let _ = reply.send(json!({ "ok": false, "problem": { "code": "InvalidRequest", "message": "audit is stale; re-run the audit", "retryable": false } }));
+    return;
+  };
+  // The snapshot keeps the serialized report (carrying top-level `auditId`);
+  // deserialize it back to the typed report for the app lookup. The extra
+  // `auditId` key is ignored by the report's open shape.
+  let report: Result<spacelens_app_audit::AppAuditReport, _> =
+    serde_json::from_value(snapshot.report.clone());
+  let Ok(report) = report else {
+    let _ = reply.send(json!({ "ok": false, "problem": { "code": "InternalError", "message": "audit snapshot is corrupt", "retryable": false } }));
+    return;
+  };
+  let prepared = bundle
+    .engine
+    .lock()
+    .unwrap()
+    .prepare_app_scan(request, &snapshot, &report);
+  match prepared {
+    Ok((session, task)) => {
+      // Prepare-time captures for the finish cross-check (A7): cloned from
+      // the SAME snapshot, never reread from current audit state.
+      let locations: Vec<PathBuf> = snapshot
+        .locations_by_app
+        .get(
+          &session
+            .app
+            .as_ref()
+            .map(|app| app.app_id.clone())
+            .unwrap_or_default(),
+        )
+        .cloned()
+        .unwrap_or_default();
+      let origin = session.app.clone().unwrap();
+      let bundle_info = snapshot.app_paths.get(&origin.app_id).map(|path| {
+        let name = report
+          .apps
+          .iter()
+          .find(|app| app.id == origin.app_id)
+          .map(|app| app.name.clone())
+          .unwrap_or_default();
+        let size = report
+          .apps
+          .iter()
+          .find(|app| app.id == origin.app_id)
+          .map(|app| app.installed_size)
+          .unwrap_or(0);
+        (path.clone(), size, name)
+      });
+      let status = bundle
+        .engine
+        .lock()
+        .unwrap()
+        .status(&session.scan_id)
+        .map_err(problem_to_value);
+      if let Ok(status) = status {
+        let _ = bundle
+          .events
+          .publish(json!({ "kind": "scan.updated", "status": status }));
+      }
+      if reply
+        .send(json!({ "ok": true, "result": session }))
+        .is_err()
+      {
+        let mut engine = bundle.engine.lock().unwrap();
+        let _ = engine.cancel_scan(&task.scan_id);
+        let _ = engine.finish_app_scan(
+          &task.scan_id,
+          Err(std::io::Error::new(
+            std::io::ErrorKind::Interrupted,
+            "scan reply channel closed",
+          )),
+          origin,
+          locations,
+          bundle_info,
+        );
+        return;
+      }
+      tauri::async_runtime::spawn_blocking(move || {
+        run_app_scan_task(&bundle, task, origin, locations, bundle_info)
+      });
+    }
+    Err(problem) => {
+      let _ = reply.send(json!({ "ok": false, "problem": problem_to_value(problem) }));
+    }
+  }
+}
+
+/// Background app-scan walk: progress events stream while scanning; the
+/// engine lock is held only for progress/finish updates, never the walk.
+fn run_app_scan_task(
+  bundle: &SessionBundle,
+  task: LocalScanTask,
+  origin: crate::engine::AppScanOrigin,
+  locations: Vec<PathBuf>,
+  bundle_info: Option<(PathBuf, u64, String)>,
+) {
+  let scan_id = task.scan_id;
+  let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    space_lens::local_scan::scan_local_directory_with_progress(
+      task.options,
+      task.cancellation,
+      |progress| {
+        let mut engine = bundle.engine.lock().unwrap();
+        let updated = engine.update_local_scan_progress(&scan_id, progress);
+        if let Ok(status) = updated {
+          if status.state == "scanning" {
+            let _ = bundle
+              .events
+              .publish(json!({ "kind": "scan.updated", "status": status }));
+          }
+        }
+      },
+    )
+  }))
+  .unwrap_or_else(|_| Err(std::io::Error::other("protected scanner panicked")));
+  let mut engine = bundle.engine.lock().unwrap();
+  let was_scanning = engine
+    .status(&scan_id)
+    .is_ok_and(|status| status.state == "scanning");
+  let status = engine.finish_app_scan(&scan_id, result, origin, locations, bundle_info);
+  drop(engine);
+  if was_scanning {
+    if let Ok(status) = status {
+      let kind = if status.state == "ready" {
+        "scan.completed"
+      } else {
+        "scan.updated"
+      };
+      let _ = bundle
+        .events
+        .publish(json!({ "kind": kind, "status": status }));
+    }
+  }
 }
 
 fn submit_engine_reply(
@@ -843,6 +1004,10 @@ fn submit_engine_reply(
         "app cleanup is dispatched before the engine lock",
       ))
     }
+    SubmitRequest::AppScanStart { .. } => Err(problem_value(
+      "InternalError",
+      "app scans are dispatched before the engine lock",
+    )),
   })();
   reply
     .send(match value {
@@ -1244,6 +1409,7 @@ mod tests {
     assert_eq!(capabilities["scan"]["cancel"], true);
     assert_eq!(capabilities["scan"]["discovery"], true);
     assert_eq!(capabilities["scan"]["appAudit"], true);
+    assert_eq!(capabilities["scan"]["appScan"], true);
     assert_eq!(capabilities["scan"]["maxConcurrent"], 1);
     assert_eq!(capabilities["cleanup"]["plan"], true);
     assert_eq!(capabilities["cleanup"]["execute"], true);
@@ -1690,7 +1856,7 @@ mod tests {
     );
     let plan = |state: &mut crate::app_cleanup::AppCleanupState,
                 req: crate::app_cleanup::AppCleanupPlanRequest| {
-      crate::app_cleanup::plan_app_cleanup(state, &snapshot, &req)
+      crate::app_cleanup::plan_app_cleanup(state, &snapshot, &req, &[])
     };
     let base = |paths: Vec<String>| crate::app_cleanup::AppCleanupPlanRequest {
       audit_id: "audit_abcdef1234567890abcdef".into(),
@@ -1785,6 +1951,7 @@ mod tests {
           parent.to_string_lossy().into_owned(),
         ],
       },
+      &[],
     )
     .unwrap();
     let entries = value["entries"].as_array().unwrap();
@@ -1822,6 +1989,7 @@ mod tests {
         app_id: "app1".into(),
         paths: vec![target.to_string_lossy().into_owned()],
       },
+      &[],
     )
     .unwrap()["planId"]
       .as_str()
@@ -1871,8 +2039,8 @@ mod tests {
       paths: vec![target.to_string_lossy().into_owned()],
     };
     let mut state = crate::app_cleanup::AppCleanupState::default();
-    let plan_id = crate::app_cleanup::plan_app_cleanup(&mut state, &snapshot, &request).unwrap()
-      ["planId"]
+    let plan_id = crate::app_cleanup::plan_app_cleanup(&mut state, &snapshot, &request, &[])
+      .unwrap()["planId"]
       .as_str()
       .unwrap()
       .to_string();
@@ -1893,8 +2061,8 @@ mod tests {
     assert_eq!(problem["problem"]["code"], "StalePlan");
 
     // confirm:false refuses before the plan is even looked up.
-    let plan_id = crate::app_cleanup::plan_app_cleanup(&mut state, &snapshot, &request).unwrap()
-      ["planId"]
+    let plan_id = crate::app_cleanup::plan_app_cleanup(&mut state, &snapshot, &request, &[])
+      .unwrap()["planId"]
       .as_str()
       .unwrap()
       .to_string();
@@ -1942,6 +2110,7 @@ mod tests {
         app_id: "app1".into(),
         paths: vec![target.to_string_lossy().into_owned()],
       },
+      &[],
     )
     .unwrap()["planId"]
       .as_str()
@@ -2005,6 +2174,7 @@ mod tests {
           app_id: "app1".into(),
           paths: vec![target.to_string_lossy().into_owned()],
         },
+        &[],
       )
       .unwrap()["planId"]
         .as_str()
@@ -2061,7 +2231,7 @@ mod tests {
         Ok(())
       });
       std::thread::spawn(move || {
-        super::submit_app_cleanup_reply(&bundle, request, &channel).unwrap();
+        super::submit_app_cleanup_reply(&bundle, &[], request, &channel).unwrap();
       });
       done_rx
         .recv_timeout(Duration::from_secs(10))
@@ -2117,6 +2287,46 @@ mod tests {
     assert_eq!(reply["ok"], false);
     assert_eq!(reply["problem"]["problem"]["code"], "NotFound");
     std::fs::remove_dir_all(&root).unwrap();
+  }
+
+  #[test]
+  fn app_scan_start_matches_the_closed_ipc_contract() {
+    let request: SubmitRequest = serde_json::from_value(serde_json::json!({
+      "kind": "appScanStart",
+      "auditId": "audit_abcdef1234567890abcdef",
+      "appId": "codex-cli",
+    }))
+    .unwrap();
+    assert!(matches!(
+      request,
+      SubmitRequest::AppScanStart { request } if request.app_id == "codex-cli"
+    ));
+    // The engine request shape is closed: unknown fields never pass.
+    assert!(serde_json::from_value::<SubmitRequest>(serde_json::json!({
+      "kind": "appScanStart",
+      "auditId": "audit_abcdef1234567890abcdef",
+      "appId": "codex-cli",
+      "paths": ["/tmp/a"],
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<SubmitRequest>(serde_json::json!({
+      "kind": "appScanStart",
+      "appId": "codex-cli",
+    }))
+    .is_err());
+    // Engine submits never route to app cleanup and vice versa.
+    let result = submit_engine_reply(
+      &mut crate::engine::EngineStore::new(Vec::new()),
+      &crate::events::EventSink::new(),
+      serde_json::from_value(serde_json::json!({
+        "kind": "appScanStart",
+        "auditId": "audit_abcdef1234567890abcdef",
+        "appId": "codex-cli",
+      }))
+      .unwrap(),
+      &tauri::ipc::Channel::<serde_json::Value>::new(|_| Ok(())),
+    );
+    assert!(result.is_ok());
   }
 
   #[test]

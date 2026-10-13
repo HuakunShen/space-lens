@@ -26,8 +26,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::app_cleanup_policy::{ManifestError, PolicyError};
 use crate::engine::{CleanupOutcome, EntryFingerprint, FailedEntry, PlanEntry, TrashedEntry};
-use space_lens::{scan_directory, IgnoredMode, ScanOptions};
 
 /// One successful audit's authorization state. Replaced atomically per audit;
 /// a failed audit never publishes a snapshot.
@@ -74,6 +74,8 @@ pub struct StoredPlan {
   pub targets: Vec<CleanupTarget>,
   /// Private recursive manifest: canonical path string -> (len, mtime_ms).
   pub manifest: HashMap<String, (u64, i64)>,
+  /// Configured roots pinned at plan time for the execute-time recheck.
+  pub configured_roots: Vec<PathBuf>,
   pub created_at: Instant,
 }
 
@@ -85,8 +87,9 @@ pub struct CleanupTarget {
   pub fingerprint: EntryFingerprint,
 }
 
-/// Cap for the private recursive manifest across one plan.
-pub const MAX_MANIFEST_ENTRIES: usize = 100_000;
+/// Cap for the private recursive manifest across one plan (re-exported from
+/// the shared policy module so both cleanup routes cite one bound).
+pub use crate::app_cleanup_policy::MAX_MANIFEST_ENTRIES;
 /// Plan lifetime, matching the engine's 10-minute enforcement.
 const PLAN_TTL_SECS: u64 = 600;
 /// Live plans retained per session.
@@ -151,108 +154,46 @@ fn iso_of(when: SystemTime) -> String {
   format!("{year:04}-{month:02}-{d:02}T{h:02}:{m:02}:{s:02}.{millis:03}Z")
 }
 
-/// Fail closed if a path or any ancestor component was replaced by a link,
-/// the canonical form drifted from the registered string, or the destination
-/// sits under `Group Containers`. Returns live metadata on success.
+/// Fail-closed path probe shared with the engine route: every ancestor
+/// component must be link-free, the canonical form must equal the registered
+/// string, and `Group Containers` destinations are refused.
 fn safe_target_metadata(path: &Path) -> Option<std::fs::Metadata> {
-  // Every component from the filesystem root: any symlink rejects the target.
-  // (Audit locations live under home, but bundles may not; walking from root
-  // covers both without needing a home prefix.)
-  let mut prefix = PathBuf::new();
-  for component in path.components() {
-    prefix.push(component);
-    let metadata = std::fs::symlink_metadata(&prefix).ok()?;
-    if metadata.file_type().is_symlink() {
-      return None;
-    }
-  }
-  let canonical = std::fs::canonicalize(path).ok()?;
-  if canonical != path {
-    return None;
-  }
-  if canonical
-    .components()
-    .any(|component| component.as_os_str() == "Group Containers")
-  {
-    return None;
-  }
-  std::fs::symlink_metadata(path).ok()
+  crate::app_cleanup_policy::strict_target_metadata(path)
 }
 
 fn fingerprint_of(metadata: &std::fs::Metadata) -> EntryFingerprint {
-  let mtime_ms = metadata
-    .modified()
-    .ok()
-    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-    .map(|duration| duration.as_millis() as f64)
-    .unwrap_or(0.0);
-  EntryFingerprint {
-    size: metadata.len(),
-    mtime_ms,
-  }
+  let (size, mtime_ms) = crate::app_cleanup_policy::fingerprint_parts(metadata);
+  EntryFingerprint { size, mtime_ms }
 }
 
-fn manifest_stamp(metadata: &std::fs::Metadata) -> (u64, i64) {
-  let mtime_ms = metadata
-    .modified()
-    .ok()
-    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-    .map(|duration| duration.as_millis() as i64)
-    .unwrap_or(0);
-  (metadata.len(), mtime_ms)
-}
-
-#[derive(Debug, PartialEq)]
-enum ManifestError {
-  TooLarge,
-  Unverifiable,
-}
-
-/// Recursive walk collecting (len, mtime_ms) for the target and every
-/// descendant. Symlinks are recorded but never followed or descended into.
-/// Any unreadable directory or vanished entry fails the whole walk: cleanup
-/// must never infer completeness from a partial listing.
 fn collect_manifest(
   target: &Path,
   manifest: &mut HashMap<String, (u64, i64)>,
 ) -> Result<(), ManifestError> {
-  fn push(
-    path: &Path,
-    metadata: &std::fs::Metadata,
-    manifest: &mut HashMap<String, (u64, i64)>,
-  ) -> Result<(), ManifestError> {
-    if manifest.len() >= MAX_MANIFEST_ENTRIES {
-      return Err(ManifestError::TooLarge);
-    }
-    manifest.insert(
-      path.to_string_lossy().into_owned(),
-      manifest_stamp(metadata),
-    );
-    Ok(())
-  }
+  crate::app_cleanup_policy::collect_manifest(target, manifest)
+}
 
-  let root_meta = std::fs::symlink_metadata(target).map_err(|_| ManifestError::Unverifiable)?;
-  if root_meta.file_type().is_symlink() {
-    return Err(ManifestError::Unverifiable);
-  }
-  push(target, &root_meta, manifest)?;
-  if !root_meta.is_dir() {
-    return Ok(());
-  }
-  let mut stack = vec![target.to_path_buf()];
-  while let Some(dir) = stack.pop() {
-    let entries = std::fs::read_dir(&dir).map_err(|_| ManifestError::Unverifiable)?;
-    for entry in entries {
-      let entry = entry.map_err(|_| ManifestError::Unverifiable)?;
-      let path = entry.path();
-      let metadata = std::fs::symlink_metadata(&path).map_err(|_| ManifestError::Unverifiable)?;
-      push(&path, &metadata, manifest)?;
-      if metadata.is_dir() && !metadata.file_type().is_symlink() {
-        stack.push(path);
-      }
-    }
-  }
-  Ok(())
+/// Map a shared-policy refusal onto this arm's JSON problem envelope.
+fn policy_problem(error: PolicyError) -> Value {
+  problem_value(error.code, error.message)
+}
+
+/// Paths owned by every app EXCEPT `app_id` in this generation: the
+/// cross-app overlap boundary (A5), computed before any per-app filtering.
+fn other_app_paths(snapshot: &AuditSnapshot, app_id: &str) -> Vec<PathBuf> {
+  snapshot
+    .locations_by_app
+    .iter()
+    .filter(|(id, _)| id.as_str() != app_id)
+    .flat_map(|(_, paths)| paths.iter().cloned())
+    .chain(
+      snapshot
+        .app_paths
+        .iter()
+        .filter(|(id, _)| id.as_str() != app_id)
+        .map(|(_, path)| path.clone()),
+    )
+    .collect()
 }
 
 #[derive(Serialize)]
@@ -271,11 +212,16 @@ struct AppCleanupPlanResponse {
 
 /// Stage whole audited locations of one app in one audit generation for
 /// trash cleanup. Never touches the engine lock; the caller holds only the
-/// app-audit snapshot (cloned) and the app-cleanup state.
+/// app-audit snapshot (cloned) and the app-cleanup state. Authorization uses
+/// the shared policy module (A5): exact location allow-list, bundle
+/// containment both ways, cross-app overlap, configured-root refusal, and
+/// fail-closed path probes. Sizes are the freshly measured physical union of
+/// the retained targets (A2), never audit-time partitions.
 pub fn plan_app_cleanup(
   state: &mut AppCleanupState,
   snapshot: &AuditSnapshot,
   req: &AppCleanupPlanRequest,
+  configured_roots: &[PathBuf],
 ) -> Result<Value, Value> {
   if req.audit_id != snapshot.audit_id {
     return Err(problem_value(
@@ -337,8 +283,23 @@ pub fn plan_app_cleanup(
     }
   }
   // Fail closed per the audit path-safety rules before measuring anything.
+  // Shared-policy authorization per target (A3/A5): synthetic identifiers
+  // first (before any filesystem access), then bundle containment both ways,
+  // cross-app overlap, and the configured-root refusal.
+  let bundle = snapshot.app_paths.get(&req.app_id);
+  let others = other_app_paths(snapshot, &req.app_id);
+  let own: Vec<PathBuf> = reported.clone();
   let mut fingerprints: HashMap<PathBuf, EntryFingerprint> = HashMap::new();
   for target in &retained {
+    if let Err(error) = crate::app_cleanup_policy::authorize_target(
+      target,
+      &own,
+      &others,
+      bundle.map(PathBuf::as_path),
+      configured_roots,
+    ) {
+      return Err(policy_problem(error));
+    }
     let metadata = safe_target_metadata(target).ok_or_else(|| {
       problem_value(
         "StalePlan",
@@ -350,27 +311,23 @@ pub fn plan_app_cleanup(
     })?;
     fingerprints.insert(target.clone(), fingerprint_of(&metadata));
   }
-  // ONE shared-inode pass, deepest-first: partition sizes with no double
-  // counting (they were pruned above, so plain partitions are right).
-  let mut deepest = retained.clone();
-  deepest.sort_by(|a, b| {
-    b.components()
-      .count()
-      .cmp(&a.components().count())
-      .then_with(|| a.cmp(b))
-  });
-  let nodes = scan_directory(ScanOptions {
-    directories: deepest,
-    ignore_hidden: false,
-    full_path: true,
-    respect_gitignore: false,
-    ignored_mode: IgnoredMode::Exclude,
-    follow_symlinks: false,
-  });
-  let mut sizes: HashMap<PathBuf, u64> = HashMap::with_capacity(nodes.len());
-  for node in nodes {
-    sizes.insert(node.path.clone(), node.size);
-  }
+  // Fresh physical union over the retained top-most targets (A2): one
+  // protected traversal, shared inodes counted once, unreadable targets fail.
+  let sizes = match crate::app_cleanup_policy::measure_physical_union(&retained) {
+    Ok(sizes) => sizes,
+    Err(ManifestError::TooLarge) => {
+      return Err(problem_value(
+        "InvalidRequest",
+        "location too large to verify safely",
+      ));
+    }
+    Err(ManifestError::Unverifiable) => {
+      return Err(problem_value(
+        "InvalidRequest",
+        "location cannot be measured safely; re-run the audit",
+      ));
+    }
+  };
   let mut targets: Vec<CleanupTarget> = Vec::with_capacity(retained.len());
   for target in &retained {
     let Some(size) = sizes.get(target).copied() else {
@@ -459,6 +416,7 @@ pub fn plan_app_cleanup(
       app_id: req.app_id.clone(),
       targets,
       manifest,
+      configured_roots: configured_roots.to_vec(),
       created_at: Instant::now(),
     },
   );
@@ -525,6 +483,23 @@ pub fn execute_app_cleanup(
         ),
       ));
     }
+    // Shared-policy recheck against the current generation (A3/A5): bundle
+    // containment both ways, cross-app overlap, configured-root refusal.
+    let others = other_app_paths(snapshot, &stored.app_id);
+    let own: Vec<PathBuf> = snapshot
+      .locations_by_app
+      .get(&stored.app_id)
+      .cloned()
+      .unwrap_or_default();
+    if let Err(error) = crate::app_cleanup_policy::authorize_target(
+      &target.path,
+      &own,
+      &others,
+      snapshot.app_paths.get(&stored.app_id).map(PathBuf::as_path),
+      &stored.configured_roots,
+    ) {
+      return Err(policy_problem(error));
+    }
     if safe_target_metadata(&target.path).is_none() {
       return Err(problem_value(
         "StalePlan",
@@ -575,12 +550,31 @@ pub fn execute_app_cleanup(
     bytes_freed: 0,
     failed: Vec::new(),
   };
+  // Authorization inputs for the just-before-delete recheck (A4): ownership
+  // boundaries from the current generation, roots pinned at plan time.
+  let recheck_own: Vec<PathBuf> = snapshot
+    .locations_by_app
+    .get(&stored.app_id)
+    .cloned()
+    .unwrap_or_default();
+  let recheck_others = other_app_paths(snapshot, &stored.app_id);
+  let recheck_bundle = snapshot.app_paths.get(&stored.app_id).map(PathBuf::as_path);
   for target in &stored.targets {
-    // Immediate recheck just before this target's delete; drift marks that
-    // entry failed and continues with the rest.
-    let fresh = safe_target_metadata(&target.path)
-      .map(|metadata| fingerprint_of(&metadata) == target.fingerprint)
-      .unwrap_or(false);
+    // Immediate recheck just before this target's delete: authorization +
+    // path walk + fingerprint. Drift marks that entry failed and continues
+    // with the rest.
+    let authorized = crate::app_cleanup_policy::authorize_target(
+      &target.path,
+      &recheck_own,
+      &recheck_others,
+      recheck_bundle,
+      &stored.configured_roots,
+    )
+    .is_ok();
+    let fresh = authorized
+      && safe_target_metadata(&target.path)
+        .map(|metadata| fingerprint_of(&metadata) == target.fingerprint)
+        .unwrap_or(false);
     if !fresh {
       outcome.failed.push(FailedEntry {
         path: target.path_string.clone(),
@@ -615,6 +609,14 @@ pub fn reveal_app_location(
   app_id: &str,
   path: &str,
 ) -> Result<Value, Value> {
+  // Synthetic identifiers are rejected BEFORE any filesystem access (A10):
+  // they name no real path and must never reach canonicalize or Finder.
+  if crate::app_cleanup_policy::is_virtual_app_str(path) {
+    return Err(problem_value(
+      "Forbidden",
+      "only audited locations of the selected app can be revealed",
+    ));
+  }
   let Some(snapshot) = snapshot else {
     return Err(problem_value(
       "Forbidden",
