@@ -6,6 +6,7 @@ import type {
   AppCleanupPlanRequest,
   AppIcon,
   AppIconRequest,
+  AppScanStartRequest,
   Capabilities,
   ChildrenPage,
   ChildrenPageRequest,
@@ -144,6 +145,13 @@ export function createTauriService(ports: TauriPorts): WorkbenchService {
           ...(localOnly === undefined ? {} : { localOnly }),
         },
       })
+    },
+    async startAppScan(body: AppScanStartRequest) {
+      return invokeReply<ScanSession>(
+        'sl_submit',
+        { request: { kind: 'appScanStart', auditId: body.auditId, appId: body.appId } },
+        DISCOVERY_REPLY_TIMEOUT_MS,
+      )
     },
     async scanStatus(scanId: string) {
       return invokeReply<ScanStatus>('sl_read', { request: { method: 'scanStatus', scanId } })

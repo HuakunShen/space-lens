@@ -6,6 +6,7 @@ import type {
   AppCleanupPlanRequest,
   AppIconRequest,
   AppIcon,
+  AppScanStartRequest,
   Capabilities,
   ChildrenPageRequest,
   CleanupExecuteRequest,
@@ -42,6 +43,9 @@ export interface WorkbenchService {
    * older hosts predate the endpoint and answer 404. */
   volumes?(): Promise<VolumesResponse>
   startScan(body: ScanStartRequest): Promise<ScanSession>
+  /** V3 app scan: an app becomes a virtual-root session. Optional: older
+   * hosts (and the HTTP host this round) predate the submit arm. */
+  startAppScan?(body: AppScanStartRequest): Promise<ScanSession>
   listScans?(): Promise<ScanStatus[]>
   scanStatus(scanId: string): Promise<ScanStatus>
   cancelScan(scanId: string): Promise<ScanStatus>
