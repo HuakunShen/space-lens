@@ -133,6 +133,99 @@ it('preserves typed discovery failures from the native nested problem envelope',
   expect(result).toMatchObject({ code: 'StaleSnapshot', message: 'scan again' })
 })
 
+it('sends closed app cleanup plan/execute IPC requests through the channel', async () => {
+  let receive: (message: unknown) => void = () => {}
+  const requests: unknown[] = []
+  const plan = {
+    planId: 'plan_abcdef1234567890',
+    auditId: 'audit_abcdef1234567890abcdef',
+    appId: 'codex-cli',
+    mode: 'trash',
+    entries: [],
+    totalSize: 0,
+    errors: [],
+    createdAt: '2026-10-13T00:00:00.000Z',
+    expiresAt: '2026-10-13T00:10:00.000Z',
+  }
+  const outcome = { trashed: [], bytesFreed: 0, failed: [] }
+  const results: unknown[] = [plan, outcome]
+  const ports: TauriPorts = {
+    createChannel(callback) {
+      receive = callback
+      return 'channel'
+    },
+    async invoke(command, payload) {
+      if (command === 'sl_connect') return { sessionId: 'session_1' }
+      requests.push({ command, ...payload })
+      receive({ ok: true, result: results[requests.length - 1] })
+      return undefined
+    },
+  }
+  const service = createTauriService(ports)
+  expect(
+    await service.appCleanupPlan!({
+      auditId: 'audit_abcdef1234567890abcdef',
+      appId: 'codex-cli',
+      paths: ['/tmp/a'],
+    }),
+  ).toEqual(plan)
+  expect(await service.appCleanupExecute!({ planId: 'plan_abcdef1234567890', confirm: true })).toEqual(outcome)
+  expect(requests).toEqual([
+    {
+      command: 'sl_submit',
+      sessionId: 'session_1',
+      reply: 'channel',
+      request: {
+        kind: 'appCleanupPlan',
+        auditId: 'audit_abcdef1234567890abcdef',
+        appId: 'codex-cli',
+        paths: ['/tmp/a'],
+      },
+    },
+    {
+      command: 'sl_submit',
+      sessionId: 'session_1',
+      reply: 'channel',
+      request: { kind: 'appCleanupExecute', planId: 'plan_abcdef1234567890', confirm: true },
+    },
+  ])
+})
+
+it('sends closed reveal IPC requests and preserves typed app cleanup failures', async () => {
+  let receive: (message: unknown) => void = () => {}
+  const requests: unknown[] = []
+  const ports: TauriPorts = {
+    createChannel(callback) {
+      receive = callback
+      return 'channel'
+    },
+    async invoke(command, payload) {
+      if (command === 'sl_connect') return { sessionId: 'session_1' }
+      requests.push({ command, ...payload })
+      if (requests.length === 1) receive({ ok: true, result: { revealed: true } })
+      else
+        receive({
+          ok: false,
+          problem: { problem: { code: 'StalePlan', message: 'plan expired', retryable: false } },
+        })
+      return undefined
+    },
+  }
+  const service = createTauriService(ports)
+  expect(await service.revealAppLocation!({ appId: 'codex-cli', path: '/tmp/a' })).toEqual({ revealed: true })
+  expect(requests[0]).toEqual({
+    command: 'sl_host_request',
+    sessionId: 'session_1',
+    reply: 'channel',
+    request: { kind: 'revealPath', appId: 'codex-cli', path: '/tmp/a' },
+  })
+  const failure = await service
+    .appCleanupExecute!({ planId: 'plan_abcdef1234567890', confirm: true })
+    .catch((error: unknown) => error)
+  expect(failure).toBeInstanceOf(TauriProblemError)
+  expect(failure).toMatchObject({ code: 'StalePlan', message: 'plan expired' })
+})
+
 it('keeps a background discovery request pending beyond the ordinary one-minute reply timeout', async () => {
   vi.useFakeTimers()
   try {

@@ -86,6 +86,12 @@
                 "none",
                 "trash"
               ]
+            },
+            "appPlan": {
+              "type": "boolean"
+            },
+            "appExecute": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -99,6 +105,9 @@
           "type": "object",
           "properties": {
             "folderPicker": {
+              "type": "boolean"
+            },
+            "appLocationReveal": {
               "type": "boolean"
             }
           },
@@ -2205,6 +2214,10 @@
         },
         "truncated": {
           "type": "boolean"
+        },
+        "auditId": {
+          "type": "string",
+          "pattern": "^audit_[0-9a-zA-Z]{8,64}$"
         }
       },
       "required": [
@@ -2476,6 +2489,170 @@
         "trashed",
         "bytesFreed",
         "failed"
+      ],
+      "additionalProperties": false
+    },
+    "AppCleanupPlanRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "auditId": {
+          "type": "string",
+          "pattern": "^audit_[0-9a-zA-Z]{8,64}$"
+        },
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "paths": {
+          "minItems": 1,
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        }
+      },
+      "required": [
+        "auditId",
+        "appId",
+        "paths"
+      ],
+      "additionalProperties": false
+    },
+    "AppCleanupPlan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "planId": {
+          "type": "string",
+          "pattern": "^plan_[0-9a-zA-Z]{8,64}$"
+        },
+        "auditId": {
+          "type": "string",
+          "pattern": "^audit_[0-9a-zA-Z]{8,64}$"
+        },
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "mode": {
+          "type": "string",
+          "const": "trash"
+        },
+        "entries": {
+          "maxItems": 200,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "reason": {
+                "type": "string"
+              },
+              "preset": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ignored": {
+                "type": "boolean"
+              },
+              "fingerprint": {
+                "type": "object",
+                "properties": {
+                  "size": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "mtimeMs": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "size",
+                  "mtimeMs"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "path",
+              "size",
+              "reason",
+              "preset",
+              "ignored",
+              "fingerprint"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "totalSize": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+        }
+      },
+      "required": [
+        "planId",
+        "auditId",
+        "appId",
+        "mode",
+        "entries",
+        "totalSize",
+        "errors",
+        "createdAt",
+        "expiresAt"
+      ],
+      "additionalProperties": false
+    },
+    "AppCleanupExecuteRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "planId": {
+          "type": "string",
+          "pattern": "^plan_[0-9a-zA-Z]{8,64}$"
+        },
+        "confirm": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "planId",
+        "confirm"
       ],
       "additionalProperties": false
     },

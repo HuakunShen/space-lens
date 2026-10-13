@@ -1,4 +1,11 @@
 import type {
+  AppAuditRequest,
+  AppAuditReport,
+  AppCleanupExecuteRequest,
+  AppCleanupPlan,
+  AppCleanupPlanRequest,
+  AppIconRequest,
+  AppIcon,
   Capabilities,
   ChildrenPageRequest,
   CleanupExecuteRequest,
@@ -14,10 +21,6 @@ import type {
   CleanupPlan,
   DiscoveryRequest,
   DiscoveryPage,
-  AppAuditRequest,
-  AppAuditReport,
-  AppIconRequest,
-  AppIcon,
   TreeSlice,
 } from '@space-lens/contract'
 
@@ -49,6 +52,13 @@ export interface WorkbenchService {
   appIcon?(body: AppIconRequest): Promise<AppIcon>
   plan(body: { scanId: string; nodeIds: string[] }): Promise<CleanupPlan>
   execute(body: CleanupExecuteRequest): Promise<CleanupOutcome>
+  /** V2 app-scoped cleanup: stages whole audited locations of one app in one
+   * audit generation. Optional: older hosts predate the submit arms. */
+  appCleanupPlan?(body: AppCleanupPlanRequest): Promise<AppCleanupPlan>
+  appCleanupExecute?(body: AppCleanupExecuteRequest): Promise<CleanupOutcome>
+  /** Reveals an allow-listed audited app location in Finder. Optional: older
+   * hosts predate the host request. */
+  revealAppLocation?(body: { appId: string; path: string }): Promise<{ revealed: boolean }>
   /**
    * Opens the host's own folder picker and answers the one absolute path
    * chosen, or `null` for a cancelled dialog. The affordance is gated by the

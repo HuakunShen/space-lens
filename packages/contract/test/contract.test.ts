@@ -4,6 +4,11 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import {
+  AppAuditReportSchema,
+  AppCleanupExecuteRequestSchema,
+  AppCleanupPlanRequestSchema,
+  AppCleanupPlanSchema,
+  AuditIdSchema,
   buildContractArtifacts,
   CleanupExecuteRequestSchema,
   CleanupPlanRequestSchema,
@@ -121,6 +126,99 @@ describe('cleanup contract', () => {
   })
 })
 
+describe('app audit report contract', () => {
+  it('accepts the optional auditId and rejects malformed ids', () => {
+    const base = {
+      platform: 'macos',
+      generatedAt: '2026-10-13T00:00:00.000Z',
+      apps: [],
+      totalApps: 0,
+      truncated: false,
+    }
+    // Older hosts omit auditId: still parses.
+    expect(AppAuditReportSchema.parse(base)).toEqual(base)
+    expect(
+      AppAuditReportSchema.parse({ ...base, auditId: 'audit_abcdef1234567890abcdef' }).auditId,
+    ).toBe('audit_abcdef1234567890abcdef')
+    for (const auditId of ['audit_short', 'audit_', 'plain-id', 'audit_abcdef!', '']) {
+      expect(AppAuditReportSchema.safeParse({ ...base, auditId }).success).toBe(false)
+    }
+    expect(AuditIdSchema.safeParse('audit_ABCDEFGH12345678').success).toBe(true)
+    expect(AuditIdSchema.safeParse('audit_abc').success).toBe(false)
+  })
+})
+
+describe('app cleanup contract', () => {
+  const entry = {
+    path: '/tmp/app-cache',
+    size: 4096,
+    reason: 'staged app location',
+    preset: null,
+    ignored: false,
+    fingerprint: { size: 128, mtimeMs: 1728000000000 },
+  }
+  const plan = {
+    planId: 'plan_abcdef1234567890',
+    auditId: 'audit_abcdef1234567890abcdef',
+    appId: 'codex-cli',
+    mode: 'trash',
+    entries: [entry],
+    totalSize: 4096,
+    errors: [],
+    createdAt: '2026-10-13T00:00:00.000Z',
+    expiresAt: '2026-10-13T00:10:00.000Z',
+  }
+
+  it('bounds plan requests and keeps them closed', () => {
+    expect(
+      AppCleanupPlanRequestSchema.parse({
+        auditId: 'audit_abcdef1234567890abcdef',
+        appId: 'codex-cli',
+        paths: ['/tmp/a'],
+      }),
+    ).toEqual({
+      auditId: 'audit_abcdef1234567890abcdef',
+      appId: 'codex-cli',
+      paths: ['/tmp/a'],
+    })
+    for (const invalid of [
+      { auditId: 'audit_abcdef1234567890abcdef', appId: 'codex-cli', paths: [] },
+      { auditId: 'audit_short', appId: 'codex-cli', paths: ['/tmp/a'] },
+      { auditId: 'audit_abcdef1234567890abcdef', appId: '', paths: ['/tmp/a'] },
+      { auditId: 'audit_abcdef1234567890abcdef', appId: 'codex-cli', paths: ['/tmp/a'], scanId: 'scan_x' },
+      { auditId: 'audit_abcdef1234567890abcdef', appId: 'codex-cli' },
+    ]) {
+      expect(AppCleanupPlanRequestSchema.safeParse(invalid).success).toBe(false)
+    }
+    expect(
+      AppCleanupPlanRequestSchema.safeParse({
+        auditId: 'audit_abcdef1234567890abcdef',
+        appId: 'codex-cli',
+        paths: Array.from({ length: 201 }, (_, i) => `/tmp/p${i}`),
+      }).success,
+    ).toBe(false)
+  })
+
+  it('requires the literal confirm for app execute', () => {
+    expect(
+      AppCleanupExecuteRequestSchema.safeParse({ planId: 'plan_abcdef1234567890', confirm: true }).success,
+    ).toBe(true)
+    expect(
+      AppCleanupExecuteRequestSchema.safeParse({ planId: 'plan_abcdef1234567890', confirm: false }).success,
+    ).toBe(false)
+    expect(AppCleanupExecuteRequestSchema.safeParse({ planId: 'plan_abcdef1234567890' }).success).toBe(false)
+  })
+
+  it('parses a scanId-free app plan and rejects engine-shaped fields', () => {
+    expect(AppCleanupPlanSchema.parse(plan)).toEqual(plan)
+    // No fabricated scanId: engine-shaped extras are rejected by strictObject.
+    expect(AppCleanupPlanSchema.safeParse({ ...plan, scanId: 'scan_abcdefgh' }).success).toBe(false)
+    expect(AppCleanupPlanSchema.safeParse({ ...plan, mode: 'permanent' }).success).toBe(false)
+    expect(
+      AppCleanupPlanSchema.safeParse({ ...plan, entries: Array.from({ length: 201 }, () => entry) }).success,
+    ).toBe(false)
+  })
+})
 describe('tree slice contract', () => {
   it('parses a recursive slice', () => {
     const slice = {

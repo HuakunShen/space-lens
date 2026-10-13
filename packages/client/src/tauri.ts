@@ -1,4 +1,11 @@
 import type {
+  AppAuditReport,
+  AppAuditRequest,
+  AppCleanupExecuteRequest,
+  AppCleanupPlan,
+  AppCleanupPlanRequest,
+  AppIcon,
+  AppIconRequest,
   Capabilities,
   ChildrenPage,
   ChildrenPageRequest,
@@ -7,10 +14,6 @@ import type {
   CleanupPlan,
   DiscoveryPage,
   DiscoveryRequest,
-  AppAuditReport,
-  AppAuditRequest,
-  AppIcon,
-  AppIconRequest,
   Health,
   Problem,
   RootsResponse,
@@ -191,6 +194,21 @@ export function createTauriService(ports: TauriPorts): WorkbenchService {
     async execute(body: CleanupExecuteRequest) {
       return invokeReply<CleanupOutcome>('sl_submit', {
         request: { kind: 'cleanupExecute', planId: body.planId, confirm: body.confirm },
+      })
+    },
+    async appCleanupPlan(body: AppCleanupPlanRequest) {
+      return invokeReply<AppCleanupPlan>('sl_submit', {
+        request: { kind: 'appCleanupPlan', auditId: body.auditId, appId: body.appId, paths: body.paths },
+      })
+    },
+    async appCleanupExecute(body: AppCleanupExecuteRequest) {
+      return invokeReply<CleanupOutcome>('sl_submit', {
+        request: { kind: 'appCleanupExecute', planId: body.planId, confirm: body.confirm },
+      })
+    },
+    async revealAppLocation(body: { appId: string; path: string }) {
+      return invokeReply<{ revealed: boolean }>('sl_host_request', {
+        request: { kind: 'revealPath', appId: body.appId, path: body.path },
       })
     },
     async pickFolder(title?: string) {

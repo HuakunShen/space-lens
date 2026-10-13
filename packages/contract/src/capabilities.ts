@@ -18,10 +18,16 @@ export const CapabilitiesSchema = z.strictObject({
     plan: z.boolean(),
     execute: z.boolean(),
     mode: z.enum(CLEANUP_MODES),
+    /** V2 app-scoped cleanup plan/execute submit arms (audit-generation
+     * authorized, outside the engine). Absent on older hosts. */
+    appPlan: z.boolean().optional(),
+    appExecute: z.boolean().optional(),
   }),
   host: z.strictObject({
     /** Native folder pickers exist only in desktop/webview hosts, never over HTTP. */
     folderPicker: z.boolean(),
+    /** Finder reveal of an allow-listed audited app location. Absent on older hosts. */
+    appLocationReveal: z.boolean().optional(),
   }),
   icloud: z.enum(['unavailable']),
 })

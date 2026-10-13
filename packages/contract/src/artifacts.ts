@@ -1,6 +1,9 @@
 import { z } from 'zod'
 import { CapabilitiesSchema, HealthSchema } from './capabilities.ts'
 import {
+  AppCleanupExecuteRequestSchema,
+  AppCleanupPlanRequestSchema,
+  AppCleanupPlanSchema,
   CleanupExecuteRequestSchema,
   CleanupOutcomeSchema,
   CleanupPlanRequestSchema,
@@ -55,6 +58,9 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   CleanupPlan: CleanupPlanSchema,
   CleanupExecuteRequest: CleanupExecuteRequestSchema,
   CleanupOutcome: CleanupOutcomeSchema,
+  AppCleanupPlanRequest: AppCleanupPlanRequestSchema,
+  AppCleanupPlan: AppCleanupPlanSchema,
+  AppCleanupExecuteRequest: AppCleanupExecuteRequestSchema,
   SessionExchangeRequest: SessionExchangeRequestSchema,
   Session: SessionSchema,
   EventEnvelope: EventEnvelopeSchema,

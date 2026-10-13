@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AuditIdSchema } from './apps.ts'
 import { PROBLEM_CODES } from './problem.ts'
 import { ScanIdSchema } from './scan.ts'
 
@@ -83,6 +84,42 @@ export const CleanupOutcomeSchema = z.strictObject({
 })
 
 export type CleanupOutcome = z.infer<typeof CleanupOutcomeSchema>
+
+/**
+ * V2 app-scoped cleanup: stages whole audited locations only. Every path must
+ * exactly match a location reported for the app in the given audit generation;
+ * authorization is the per-generation `auditId`, not a scanId. PlanEntry and
+ * EntryFingerprint are reused verbatim; no scanId is fabricated.
+ */
+export const AppCleanupPlanRequestSchema = z.strictObject({
+  auditId: AuditIdSchema,
+  appId: z.string().min(1).max(128),
+  paths: z.array(PathSchema).min(1).max(200),
+})
+
+export type AppCleanupPlanRequest = z.infer<typeof AppCleanupPlanRequestSchema>
+
+export const AppCleanupExecuteRequestSchema = z.strictObject({
+  planId: PlanIdSchema,
+  /** Must be the literal `true`. A default, a missing field, or `false` refuses. */
+  confirm: z.literal(true),
+})
+
+export type AppCleanupExecuteRequest = z.infer<typeof AppCleanupExecuteRequestSchema>
+
+export const AppCleanupPlanSchema = z.strictObject({
+  planId: PlanIdSchema,
+  auditId: AuditIdSchema,
+  appId: z.string().min(1).max(128),
+  mode: z.literal('trash'),
+  entries: z.array(PlanEntrySchema).max(200),
+  totalSize: UintSchema,
+  errors: z.array(z.string()),
+  createdAt: IsoDateTimeSchema,
+  expiresAt: IsoDateTimeSchema,
+})
+
+export type AppCleanupPlan = z.infer<typeof AppCleanupPlanSchema>
 
 /**
  * A staged cleanup entry. The collector lives in the client; the host only

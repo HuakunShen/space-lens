@@ -51,8 +51,17 @@ export const AppAuditReportSchema = z.strictObject({
   apps: z.array(AppAuditEntrySchema).max(1000),
   totalApps: z.number().int().nonnegative(),
   truncated: z.boolean(),
+  /** Opaque per-generation authorization token minted by the desktop host.
+   * Optional so older hosts that predate V2 still parse. */
+  auditId: z
+    .string()
+    .regex(/^audit_[0-9a-zA-Z]{8,64}$/)
+    .optional(),
 })
 export type AppAuditReport = z.infer<typeof AppAuditReportSchema>
+
+export const AuditIdSchema = z.string().regex(/^audit_[0-9a-zA-Z]{8,64}$/)
+export type AuditId = z.infer<typeof AuditIdSchema>
 
 export const AppIconRequestSchema = z.strictObject({ appPath: z.string().min(1).max(4096) })
 export type AppIconRequest = z.infer<typeof AppIconRequestSchema>
