@@ -1,4 +1,5 @@
 use anyhow::Result;
+use base64::Engine as _;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use space_lens::cloud::{
   build_eviction_plan, execute_eviction_plan, inspect_item, EvictionOutcome, EvictionPlan,
@@ -10,6 +11,7 @@ use space_lens::{
   IgnoredMode, LocalScanCancellation, LocalScanProgress, LocalScanReport, RemovalPlan, ScanNode,
   ScanOptions,
 };
+use spacelens_app_audit::{audit_installed_apps, AppAuditOptions};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
@@ -36,6 +38,10 @@ enum Command {
   DirtyGit(DirtyGitArgs),
   #[command(name = "icloud")]
   ICloud(ICloudArgs),
+  #[command(name = "app-audit")]
+  AppAudit(AppAuditArgs),
+  #[command(name = "app-icon")]
+  AppIcon(AppIconArgs),
   #[cfg(feature = "mcp")]
   Mcp,
 }
@@ -148,6 +154,28 @@ struct DirtyGitArgs {
   follow_symlinks: bool,
 }
 
+#[derive(Debug, Args)]
+struct AppAuditArgs {
+  #[arg(long = "min-size", default_value_t = 0)]
+  min_size: u64,
+  #[arg(long, conflicts_with = "no_heuristic", help = "Include apps without curated catalog entries (default on)")]
+  all: bool,
+  #[arg(long = "no-heuristic", conflicts_with = "all", help = "Exclude apps without curated catalog entries")]
+  no_heuristic: bool,
+  #[arg(long, default_value_t = 500)]
+  limit: usize,
+  #[arg(long, value_name = "PATH")]
+  home: Option<PathBuf>,
+  #[arg(long)]
+  json: bool,
+}
+
+#[derive(Debug, Args)]
+struct AppIconArgs {
+  #[arg(long, value_name = "PATH")]
+  path: PathBuf,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum IgnoredModeArg {
   Exclude,
@@ -170,6 +198,8 @@ fn main() -> Result<()> {
     Command::Clean(args) => run_clean(args),
     Command::DirtyGit(args) => run_dirty_git(args),
     Command::ICloud(args) => run_icloud(args),
+    Command::AppAudit(args) => run_app_audit(args),
+    Command::AppIcon(args) => run_app_icon(args),
     #[cfg(feature = "mcp")]
     Command::Mcp => mcp::run(),
   }
@@ -477,6 +507,87 @@ fn run_dirty_git(args: DirtyGitArgs) -> Result<()> {
   Ok(())
 }
 
+fn new_audit_id() -> String {
+  use std::collections::hash_map::DefaultHasher;
+  use std::hash::{Hash, Hasher};
+  use std::time::{SystemTime, UNIX_EPOCH};
+  static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+  let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+  let now = SystemTime::now()
+    .duration_since(UNIX_EPOCH)
+    .unwrap_or_default();
+  let pid = std::process::id();
+  // `audit_` + 24 hex chars (hex is alphanumeric, satisfying the contract
+  // regex `audit_[0-9a-zA-Z]{8,64}`); the counter keeps ids unique even when
+  // two audits share a timestamp. Mirrors the desktop host's generator.
+  let mut first = DefaultHasher::new();
+  (now.as_secs(), now.subsec_nanos(), pid, counter).hash(&mut first);
+  let mut second = DefaultHasher::new();
+  (counter, pid, now.subsec_nanos(), now.as_secs()).hash(&mut second);
+  format!(
+    "audit_{:016x}{:08x}",
+    first.finish(),
+    second.finish() & 0xFFFF_FFFF
+  )
+}
+
+fn run_app_audit(args: AppAuditArgs) -> Result<()> {
+  if args.limit == 0 || args.limit > 1000 {
+    anyhow::bail!("app-audit limit must be between 1 and 1000");
+  }
+  let options = AppAuditOptions {
+    min_size: args.min_size,
+    include_heuristic: !args.no_heuristic,
+    limit: args.limit,
+    home: args.home,
+  };
+  let report =
+    audit_installed_apps(&options).map_err(|error| anyhow::anyhow!("app audit failed: {error}"))?;
+  let audit_id = new_audit_id();
+  let mut value = serde_json::to_value(&report)?;
+  value
+    .as_object_mut()
+    .ok_or_else(|| anyhow::anyhow!("audit report did not serialize to an object"))?
+    .insert("auditId".to_string(), serde_json::Value::String(audit_id.clone()));
+  if args.json {
+    print_json(&value)?;
+  } else {
+    let apps = value
+      .get("apps")
+      .and_then(|apps| apps.as_array())
+      .cloned()
+      .unwrap_or_default();
+    println!(
+      "app audit {}: {} apps (showing {})",
+      audit_id,
+      value.get("totalApps").and_then(|v| v.as_u64()).unwrap_or(0),
+      apps.len()
+    );
+    for app in &apps {
+      println!(
+        "{}\t{}\t{}",
+        app.get("totalSize").and_then(|v| v.as_u64()).unwrap_or(0),
+        app.get("name").and_then(|v| v.as_str()).unwrap_or("?"),
+        app.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+      );
+    }
+  }
+  Ok(())
+}
+
+fn run_app_icon(args: AppIconArgs) -> Result<()> {
+  let png = spacelens_app_audit::app_icon_png(&args.path);
+  let Some(png) = png else {
+    anyhow::bail!("no icon available for this app: {}", args.path.display());
+  };
+  let data_url = format!(
+    "data:image/png;base64,{}",
+    base64::engine::general_purpose::STANDARD.encode(&png)
+  );
+  print_json(&serde_json::json!({ "dataUrl": data_url }))?;
+  Ok(())
+}
+
 fn print_tree(node: &ScanNode, indent: usize) {
   let prefix = "  ".repeat(indent);
   println!("{prefix}{}\t{}", node.name, format_bytes(node.size));
@@ -555,7 +666,7 @@ impl From<PresetArg> for CleanupPreset {
 
 #[cfg(test)]
 mod tests {
-  use super::{format_bytes, Cli, Command, ICloudCommand};
+  use super::{format_bytes, new_audit_id, Cli, Command, ICloudCommand};
   use clap::Parser;
   use std::path::Path;
 
@@ -605,5 +716,60 @@ mod tests {
         command: ICloudCommand::Evict(args),
       }) if !args.execute
     ));
+  }
+
+  #[test]
+  fn parses_app_audit_defaults_and_heuristic_switches() {
+    let cli = Cli::try_parse_from(["spacelens", "app-audit", "--json"]).unwrap();
+    assert!(matches!(
+      cli.command,
+      Command::AppAudit(args) if args.min_size == 0 && !args.no_heuristic && !args.all && args.limit == 500 && args.json && args.home.is_none()
+    ));
+    let cli = Cli::try_parse_from([
+      "spacelens",
+      "app-audit",
+      "--min-size",
+      "1024",
+      "--no-heuristic",
+      "--limit",
+      "10",
+      "--json",
+    ])
+    .unwrap();
+    assert!(matches!(
+      cli.command,
+      Command::AppAudit(args) if args.min_size == 1024 && args.no_heuristic && args.limit == 10 && args.json
+    ));
+    let cli = Cli::try_parse_from(["spacelens", "app-audit", "--all", "--json"]).unwrap();
+    assert!(matches!(
+      cli.command,
+      Command::AppAudit(args) if args.all && !args.no_heuristic
+    ));
+    // --all and --no-heuristic conflict.
+    assert!(Cli::try_parse_from(["spacelens", "app-audit", "--all", "--no-heuristic"]).is_err());
+  }
+
+  #[test]
+  fn parses_app_icon_path() {
+    let cli = Cli::try_parse_from(["spacelens", "app-icon", "--path", "/Applications/Foo.app"]).unwrap();
+    assert!(matches!(
+      cli.command,
+      Command::AppIcon(args) if args.path == Path::new("/Applications/Foo.app")
+    ));
+    assert!(Cli::try_parse_from(["spacelens", "app-icon"]).is_err());
+  }
+
+  #[test]
+  fn audit_ids_match_the_contract_shape() {
+    for _ in 0..16 {
+      let id = new_audit_id();
+      assert!(id.starts_with("audit_"), "id: {id}");
+      let suffix = &id["audit_".len()..];
+      assert!(
+        (8..=64).contains(&suffix.len()) && suffix.chars().all(|c| c.is_ascii_alphanumeric()),
+        "id: {id}"
+      );
+    }
+    assert_ne!(new_audit_id(), new_audit_id());
   }
 }
