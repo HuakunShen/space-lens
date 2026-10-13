@@ -17,6 +17,8 @@ use space_lens::local_scan::{
 };
 use space_lens::{scan_directory, IgnoredMode, ScanNode, ScanOptions};
 
+use crate::app_cleanup_policy as policy;
+
 // ---------------------------------------------------------------- wire types
 
 #[derive(Serialize, Clone, Debug)]
@@ -94,6 +96,8 @@ pub struct ScanStatus {
   pub coverage: Option<ScanCoverage>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub volumes: Option<Vec<ScanVolume>>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub app: Option<AppScanOrigin>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -103,6 +107,27 @@ pub struct ScanSession {
   pub root_ids: Vec<String>,
   pub created_at: String,
   pub label: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub app: Option<AppScanOrigin>,
+}
+
+/// Pinned app-scan origin (§3.2, additive): which app, under which name, in
+/// which audit generation a virtual-root session was started.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppScanOrigin {
+  pub app_id: String,
+  pub app_name: String,
+  pub audit_id: String,
+}
+
+/// Closed request starting an app scan: an audit generation plus an app id.
+/// The locations come from the pinned audit snapshot, never from the caller.
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppScanStartRequest {
+  pub audit_id: String,
+  pub app_id: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -488,6 +513,16 @@ struct ScanRecord {
   // Lease for a prepared/running worker. Cancellation keeps it occupied;
   // only finish_local_scan releases it after the actual walk has returned.
   active_worker: Option<LocalScanCancellation>,
+  // App-scan session origin (None for path scans). The pinned audit context
+  // (A7): cloned once at prepare time; finish/plan/execute consume only this
+  // and never reread current audit state.
+  app_origin: Option<AppScanOrigin>,
+  app_context: Option<AppScanContext>,
+  virtual_root_id: Option<String>,
+  bundle_node_id: Option<String>,
+  /// Per location-root completeness evidence (A1/R2): canonical location
+  /// path string -> whole-folder cleanable. Absent entries count as false.
+  app_folder_cleanable: HashMap<String, bool>,
 }
 
 /// Prepared under a short lock, executed with all filesystem work outside it.
@@ -514,11 +549,46 @@ fn problem(code: &str, message: impl Into<String>) -> EngineProblem {
   }
 }
 
+/// Immutable pinned context for one app-scan session (A7): the exact audit
+/// generation, app identity, canonical location set, bundle leaf, and the
+/// cross-app ownership boundary. Cloned ONCE under the audit lock at prepare;
+/// finish/plan/execute consume only this.
+#[derive(Clone, Debug)]
+pub struct AppScanContext {
+  pub audit_id: String,
+  pub app_id: String,
+  pub app_name: String,
+  pub generated_at: String,
+  /// Pinned exact location paths: directories walk, files become stat leaves.
+  pub dir_locations: Vec<PathBuf>,
+  pub file_locations: Vec<PathBuf>,
+  /// Canonical bundle path plus its audit-time installed size (display only;
+  /// never trashed). `None` for CLI entries.
+  pub bundle: Option<(PathBuf, u64)>,
+  /// Locations owned by OTHER apps in the pinned generation (A5 boundary).
+  pub other_app_paths: Vec<PathBuf>,
+}
+
+impl AppScanContext {
+  /// Every real root this scan is authorized to serve (dirs + files).
+  pub fn own_locations(&self) -> Vec<PathBuf> {
+    self
+      .dir_locations
+      .iter()
+      .chain(self.file_locations.iter())
+      .cloned()
+      .collect()
+  }
+}
+
 /// The whole desktop engine behind one session.
 pub struct EngineStore {
   roots: Vec<PathBuf>,
   scans: HashMap<String, ScanRecord>,
   plans: HashMap<String, (CleanupPlan, std::time::Instant)>,
+  /// Private recursive manifests for app-scan plans (A4), keyed by plan id
+  /// and consumed atomically with the plan.
+  app_manifests: HashMap<String, HashMap<String, (u64, i64)>>,
 }
 
 impl EngineStore {
@@ -527,6 +597,7 @@ impl EngineStore {
       roots,
       scans: HashMap::new(),
       plans: HashMap::new(),
+      app_manifests: HashMap::new(),
     }
   }
 
@@ -660,6 +731,14 @@ impl EngineStore {
     }
     let mut resolved = Vec::with_capacity(request.paths.len());
     for path in &request.paths {
+      // Synthetic app identifiers name no filesystem path (A10): reject
+      // before any filesystem access.
+      if policy::is_virtual_app_str(path) {
+        return Err(problem(
+          "InvalidRequest",
+          "synthetic app paths cannot be scanned as folders; start an app scan instead",
+        ));
+      }
       let canonical = fs::canonicalize(path)
         .map_err(|_| problem("InvalidRequest", format!("path does not exist: {path}")))?;
       let allowed = self.roots.iter().any(|root| {
@@ -732,12 +811,14 @@ impl EngineStore {
       updated_at: now_iso(),
       coverage: None,
       volumes: None,
+      app: None,
     };
     let session = ScanSession {
       scan_id: scan_id.clone(),
       root_ids: root_ids.clone(),
       created_at,
       label,
+      app: None,
     };
     self.scans.insert(
       scan_id,
@@ -751,6 +832,11 @@ impl EngineStore {
         local_only: false,
         gitignore_classified: request.respect_gitignore,
         active_worker: None,
+        app_origin: None,
+        app_context: None,
+        virtual_root_id: None,
+        bundle_node_id: None,
+        app_folder_cleanable: HashMap::new(),
       },
     );
     Ok(session)
@@ -790,6 +876,14 @@ impl EngineStore {
       .collect();
     let mut resolved = Vec::<PathBuf>::new();
     for path in &request.paths {
+      // Synthetic app identifiers name no filesystem path (A10): reject
+      // before any filesystem access; app scans route through app identity.
+      if policy::is_virtual_app_str(path) {
+        return Err(problem(
+          "InvalidRequest",
+          "synthetic app paths cannot be scanned as folders; start an app scan instead",
+        ));
+      }
       let root = lexical_absolute(Path::new(path))?;
       if !served.iter().any(|served| root.starts_with(served)) {
         return Err(problem(
@@ -814,6 +908,7 @@ impl EngineStore {
       root_ids: Vec::new(),
       created_at: now_iso(),
       label: label.clone(),
+      app: None,
     };
     let cancellation = LocalScanCancellation::default();
     let status = ScanStatus {
@@ -829,6 +924,7 @@ impl EngineStore {
       updated_at: now_iso(),
       coverage: None,
       volumes: None,
+      app: None,
     };
     self.scans.insert(
       scan_id.clone(),
@@ -842,6 +938,11 @@ impl EngineStore {
         local_only: true,
         gitignore_classified: request.respect_gitignore,
         active_worker: Some(cancellation.clone()),
+        app_origin: None,
+        app_context: None,
+        virtual_root_id: None,
+        bundle_node_id: None,
+        app_folder_cleanable: HashMap::new(),
       },
     );
     Ok((
@@ -940,6 +1041,503 @@ impl EngineStore {
     record.status.current_path = None;
     record.status.updated_at = now_iso();
     Ok(record.status.clone())
+  }
+
+  /// Starts an app scan: validates the closed request against the pinned
+  /// audit snapshot, clones the snapshot ONCE into an immutable
+  /// [`AppScanContext`] stored on the record (A7), and prepares a protected
+  /// walk over the app's DIRECTORY locations only. File locations (R1) and
+  /// the bundle leaf never enter the walker; `finish_app_scan` injects them
+  /// as synthetic leaves. Only a short lock is held; the walk runs outside it.
+  pub fn prepare_app_scan(
+    &mut self,
+    req: AppScanStartRequest,
+    snap: &crate::app_cleanup::AuditSnapshot,
+    report: &spacelens_app_audit::AppAuditReport,
+  ) -> EngineResult<(ScanSession, LocalScanTask)> {
+    if req.app_id.is_empty() || req.app_id.len() > 128 {
+      return Err(problem(
+        "InvalidRequest",
+        "appId must be between 1 and 128 characters",
+      ));
+    }
+    if !policy::valid_audit_id(&req.audit_id) {
+      return Err(problem("InvalidRequest", "auditId is misshaped"));
+    }
+    if self
+      .scans
+      .values()
+      .any(|record| record.active_worker.is_some() || record.status.state == "scanning")
+    {
+      return Err(problem(
+        "LimitExceeded",
+        "at most one native scan may run at once",
+      ));
+    }
+    // Pinned generation: the request must name the snapshot's own audit id.
+    // A re-audit mints a fresh id, so stale requests fail here and live
+    // sessions keep browsing their pinned generation (§1Q3).
+    if req.audit_id != snap.audit_id {
+      return Err(problem(
+        "InvalidRequest",
+        "audit is stale; re-run the audit",
+      ));
+    }
+    let entry = report
+      .apps
+      .iter()
+      .find(|app| app.id == req.app_id)
+      .ok_or_else(|| {
+        problem(
+          "Forbidden",
+          "only audited apps of the current generation can be scanned",
+        )
+      })?;
+    if entry.name.is_empty() || entry.name.len() > 256 {
+      return Err(problem("InvalidRequest", "audited app name is misshaped"));
+    }
+    let reported: Vec<PathBuf> = snap
+      .locations_by_app
+      .get(&req.app_id)
+      .cloned()
+      .unwrap_or_default();
+    if reported.len() > 200 {
+      return Err(problem(
+        "InvalidRequest",
+        "app reports more locations than can be scanned",
+      ));
+    }
+    // The bundle is an audit-size synthetic leaf, never a walk input; its
+    // canonical path comes from the snapshot allow-list (reveal-grade).
+    let bundle = snap
+      .app_paths
+      .get(&req.app_id)
+      .map(|path| (path.clone(), entry.installed_size));
+    if reported.is_empty() && bundle.is_none() {
+      return Err(problem(
+        "InvalidRequest",
+        "app has no measurable storage in this audit generation",
+      ));
+    }
+    // Every location must sit under the roots this session serves (lexical,
+    // like path scans). The bundle is excluded: it may live outside the
+    // served roots (`/Applications`) and is never scanned.
+    let served: Vec<PathBuf> = self
+      .roots
+      .iter()
+      .filter_map(|root| lexical_absolute(root).ok())
+      .collect();
+    for location in &reported {
+      let absolute = lexical_absolute(location)?;
+      if !served.iter().any(|root| absolute.starts_with(root)) {
+        return Err(problem(
+          "Forbidden",
+          "app location is outside the roots this desktop session serves",
+        ));
+      }
+    }
+    // Split directory/file roots (R1/A9): files are excluded from the
+    // walker's directories and become stat-based leaves at finish. Anything
+    // that is not a plain regular file today (missing, link, dir, special)
+    // goes to the walker, which classifies it into complete/partial/skipped
+    // nodes with coverage evidence.
+    let mut dir_locations = Vec::new();
+    let mut file_locations = Vec::new();
+    for location in reported {
+      let is_file = fs::symlink_metadata(&location)
+        .is_ok_and(|metadata| metadata.is_file() && !metadata.file_type().is_symlink());
+      if is_file {
+        if !file_locations.contains(&location) {
+          file_locations.push(location);
+        }
+      } else if !dir_locations.contains(&location) {
+        dir_locations.push(location);
+      }
+    }
+    let other_app_paths: Vec<PathBuf> = snap
+      .locations_by_app
+      .iter()
+      .filter(|(id, _)| id.as_str() != req.app_id)
+      .flat_map(|(_, paths)| paths.iter().cloned())
+      .chain(
+        snap
+          .app_paths
+          .iter()
+          .filter(|(id, _)| id.as_str() != req.app_id)
+          .map(|(_, path)| path.clone()),
+      )
+      .collect();
+    let origin = AppScanOrigin {
+      app_id: req.app_id.clone(),
+      app_name: entry.name.clone(),
+      audit_id: req.audit_id.clone(),
+    };
+    let context = AppScanContext {
+      audit_id: req.audit_id.clone(),
+      app_id: req.app_id.clone(),
+      app_name: entry.name.clone(),
+      generated_at: report.generated_at.clone(),
+      dir_locations: dir_locations.clone(),
+      file_locations: file_locations.clone(),
+      bundle: bundle.clone(),
+      other_app_paths,
+    };
+    let scan_id = new_id("scan_");
+    let created_at = now_iso();
+    let session = ScanSession {
+      scan_id: scan_id.clone(),
+      root_ids: Vec::new(),
+      created_at,
+      label: Some(entry.name.clone()),
+      app: Some(origin.clone()),
+    };
+    let cancellation = LocalScanCancellation::default();
+    let status = ScanStatus {
+      scan_id: scan_id.clone(),
+      state: "scanning".into(),
+      message: format!(
+        "Scanning app storage for {} with cloud downloads blocked",
+        entry.name
+      ),
+      progress: None,
+      current_path: None,
+      bytes_scanned: 0,
+      entries_scanned: 0,
+      root_ids: Vec::new(),
+      label: Some(entry.name.clone()),
+      updated_at: now_iso(),
+      coverage: None,
+      volumes: None,
+      app: Some(origin),
+    };
+    self.scans.insert(
+      scan_id.clone(),
+      ScanRecord {
+        session: session.clone(),
+        status,
+        index: HashMap::new(),
+        root_ids: Vec::new(),
+        ignore_hidden: false,
+        discovery: HashMap::new(),
+        local_only: true,
+        gitignore_classified: true,
+        active_worker: Some(cancellation.clone()),
+        app_origin: session.app.clone(),
+        app_context: Some(context),
+        virtual_root_id: None,
+        bundle_node_id: None,
+        app_folder_cleanable: HashMap::new(),
+      },
+    );
+    Ok((
+      session,
+      LocalScanTask {
+        scan_id,
+        options: ScanOptions {
+          directories: dir_locations,
+          ignore_hidden: false,
+          full_path: true,
+          respect_gitignore: true,
+          ignored_mode: IgnoredMode::Summarize,
+          follow_symlinks: false,
+        },
+        cancellation,
+      },
+    ))
+  }
+
+  /// Completes an app scan: depth-shifts the walker index under a synthetic
+  /// virtual root, injects stat-based file leaves (R1) and the audit-size
+  /// bundle leaf, and records per-root completeness evidence (A1/R2) derived
+  /// from the walker's own coverage issues. Consumes only the pinned context
+  /// stored at prepare (A7): the passed origin/locations/bundle (captured at
+  /// prepare time, never reread from current audit state) are cross-checked
+  /// against it and never trusted on their own.
+  #[allow(clippy::too_many_arguments)]
+  pub fn finish_app_scan(
+    &mut self,
+    scan_id: &str,
+    result: std::io::Result<LocalScanReport>,
+    origin: AppScanOrigin,
+    locations: Vec<PathBuf>,
+    bundle: Option<(PathBuf, u64, String)>,
+  ) -> EngineResult<ScanStatus> {
+    let record = self
+      .scans
+      .get_mut(scan_id)
+      .ok_or_else(|| problem("NotFound", "scan vanished"))?;
+    let context = record
+      .app_context
+      .clone()
+      .ok_or_else(|| problem("InvalidRequest", "not an app scan"))?;
+    // Cross-check the prepare-time captures against the pinned context; any
+    // drift fails closed instead of indexing untrusted inputs.
+    let stored_origin = record
+      .app_origin
+      .clone()
+      .ok_or_else(|| problem("InternalError", "app scan lost its origin"))?;
+    if stored_origin != origin
+      || context.audit_id != origin.audit_id
+      || context.app_id != origin.app_id
+    {
+      return Err(problem("InternalError", "app scan context mismatch"));
+    }
+    let mut expected: Vec<PathBuf> = context.own_locations();
+    expected.sort();
+    let mut given = locations;
+    given.sort();
+    if expected != given {
+      return Err(problem("InternalError", "app scan locations mismatch"));
+    }
+    let expected_bundle = context.bundle.clone();
+    let given_bundle = bundle.map(|(path, size, _)| (path, size));
+    if expected_bundle != given_bundle {
+      return Err(problem("InternalError", "app scan bundle mismatch"));
+    }
+    if record.status.state != "scanning" {
+      return Ok(record.status.clone());
+    }
+    record.active_worker = None;
+    match result {
+      Ok(report) => {
+        Self::index_app_report(record, &context, &report);
+        Ok(record.status.clone())
+      }
+      Err(error) => {
+        record.status.state = if error.kind() == std::io::ErrorKind::Interrupted {
+          "cancelled"
+        } else {
+          "failed"
+        }
+        .into();
+        record.status.message = format!("App scan stopped: {error}");
+        record.status.current_path = None;
+        record.status.updated_at = now_iso();
+        Ok(record.status.clone())
+      }
+    }
+  }
+
+  /// Index one finished walker report under the pinned context. Pure
+  /// index surgery: virtual root + file/bundle leaves, depth shifts,
+  /// evidence, totals.
+  fn index_app_report(record: &mut ScanRecord, context: &AppScanContext, report: &LocalScanReport) {
+    let origin = record.app_origin.clone().unwrap_or(AppScanOrigin {
+      app_id: context.app_id.clone(),
+      app_name: context.app_name.clone(),
+      audit_id: context.audit_id.clone(),
+    });
+    let (virtual_id, virtual_path) = app_virtual_ids(&context.audit_id, &context.app_id);
+    let authorized: HashSet<PathBuf> = context.own_locations().into_iter().collect();
+
+    let mut index = HashMap::new();
+    let mut child_ids: Vec<String> = Vec::new();
+    let mut evidence: HashMap<String, bool> = HashMap::new();
+    let mut locations_size = 0u64;
+
+    // Directory locations: the walker index, depth-shifted to 1.
+    for node in &report.nodes {
+      let path_string = node.path.to_string_lossy().into_owned();
+      let id = walk_local_index(node, Some(virtual_id.clone()), 1, &mut index);
+      child_ids.push(id);
+      let path = PathBuf::from(&path_string);
+      let cleanable = if context.dir_locations.contains(&path) {
+        policy::location_folder_cleanable(
+          &path,
+          &report.coverage.issues,
+          &authorized,
+          report.coverage.issues_truncated,
+        )
+      } else {
+        false
+      };
+      evidence.insert(path_string.clone(), cleanable);
+      if let Some(entry) = index.values().find(|entry| entry.path == path_string) {
+        locations_size = locations_size.saturating_add(entry.size);
+      }
+    }
+    // Directory locations the walker never returned (vanished between
+    // prepare and walk): skipped placeholders so evidence-driven guards see
+    // them as contents-only at best.
+    for location in &context.dir_locations {
+      let path_string = location.to_string_lossy().into_owned();
+      if index.values().any(|entry| entry.path == path_string) {
+        continue;
+      }
+      let id = node_id_of(&path_string);
+      index.insert(
+        id.clone(),
+        IndexEntry {
+          id: id.clone(),
+          name: location
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path_string.clone()),
+          path: path_string.clone(),
+          size: 0,
+          depth: 1,
+          ignored: false,
+          collapsed: false,
+          parent: Some(virtual_id.clone()),
+          child_ids: Vec::new(),
+          fingerprint: None,
+          cleanup: None,
+          logical_size: Some(0),
+          is_directory: Some(true),
+          scan_state: Some("skipped".into()),
+          skip_reason: Some("not-found".into()),
+        },
+      );
+      child_ids.push(id);
+      evidence.insert(path_string, false);
+    }
+
+    // File locations (R1/A9): stat-based single-file leaves, never walker
+    // output. A stat failure becomes a skipped leaf (refused at plan).
+    for location in &context.file_locations {
+      let path_string = location.to_string_lossy().into_owned();
+      let id = node_id_of(&path_string);
+      let leaf = match fs::symlink_metadata(location) {
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+          let size = metadata.len();
+          locations_size = locations_size.saturating_add(size);
+          evidence.insert(path_string.clone(), true);
+          IndexEntry {
+            id: id.clone(),
+            name: location
+              .file_name()
+              .map(|name| name.to_string_lossy().into_owned())
+              .unwrap_or_else(|| path_string.clone()),
+            path: path_string,
+            size,
+            depth: 1,
+            ignored: false,
+            collapsed: false,
+            parent: Some(virtual_id.clone()),
+            child_ids: Vec::new(),
+            fingerprint: None,
+            cleanup: None,
+            logical_size: Some(size),
+            is_directory: Some(false),
+            scan_state: Some("complete".into()),
+            skip_reason: None,
+          }
+        }
+        _ => {
+          evidence.insert(path_string.clone(), false);
+          IndexEntry {
+            id: id.clone(),
+            name: location
+              .file_name()
+              .map(|name| name.to_string_lossy().into_owned())
+              .unwrap_or_else(|| path_string.clone()),
+            path: path_string,
+            size: 0,
+            depth: 1,
+            ignored: false,
+            collapsed: false,
+            parent: Some(virtual_id.clone()),
+            child_ids: Vec::new(),
+            fingerprint: None,
+            cleanup: None,
+            logical_size: Some(0),
+            is_directory: Some(false),
+            scan_state: Some("skipped".into()),
+            skip_reason: Some("not-found".into()),
+          }
+        }
+      };
+      index.insert(id.clone(), leaf);
+      child_ids.push(id);
+    }
+
+    // Bundle leaf (A3): audit-size, never scanned, never cleanable. When the
+    // bundle overlaps a location subtree its bytes are already inside the
+    // walker measurement, so no separate leaf is injected (no double count);
+    // the guard still refuses every bundle-overlapping target.
+    let mut bundle_node_id = None;
+    let mut bundle_size = 0u64;
+    if let Some((bundle_path, installed_size)) = &context.bundle {
+      let overlaps = context
+        .own_locations()
+        .iter()
+        .any(|location| policy::bundle_overlap(location, bundle_path));
+      if !overlaps {
+        let path_string = bundle_path.to_string_lossy().into_owned();
+        let id = app_bundle_id(&path_string);
+        index.insert(
+          id.clone(),
+          IndexEntry {
+            id: id.clone(),
+            name: bundle_path
+              .file_name()
+              .map(|name| name.to_string_lossy().into_owned())
+              .unwrap_or_else(|| path_string.clone()),
+            path: path_string,
+            size: *installed_size,
+            depth: 1,
+            ignored: false,
+            collapsed: false,
+            parent: Some(virtual_id.clone()),
+            child_ids: Vec::new(),
+            fingerprint: None,
+            cleanup: None,
+            logical_size: Some(*installed_size),
+            is_directory: Some(true),
+            scan_state: Some("complete".into()),
+            skip_reason: None,
+          },
+        );
+        child_ids.push(id.clone());
+        bundle_node_id = Some(id);
+        bundle_size = *installed_size;
+      }
+    }
+
+    child_ids.sort();
+    child_ids.dedup();
+    let virtual_size = locations_size.saturating_add(bundle_size);
+    index.insert(
+      virtual_id.clone(),
+      IndexEntry {
+        id: virtual_id.clone(),
+        name: context.app_name.clone(),
+        path: virtual_path,
+        size: virtual_size,
+        depth: 0,
+        ignored: false,
+        collapsed: false,
+        parent: None,
+        child_ids,
+        fingerprint: None,
+        cleanup: None,
+        logical_size: Some(virtual_size),
+        is_directory: Some(true),
+        scan_state: Some("complete".into()),
+        skip_reason: None,
+      },
+    );
+
+    record.status.bytes_scanned = virtual_size;
+    record.status.entries_scanned = index.len();
+    record.status.state = "ready".into();
+    record.status.message = format!(
+      "App scan complete · {} skipped · {} denied",
+      report.coverage.skipped_count, report.coverage.denied_count
+    );
+    record.status.coverage = Some(report.coverage.clone());
+    record.status.volumes = Some(report.volumes.clone());
+    record.status.app = Some(origin.clone());
+    record.session.app = Some(origin);
+    record.root_ids = vec![virtual_id.clone()];
+    record.session.root_ids = vec![virtual_id.clone()];
+    record.status.root_ids = vec![virtual_id.clone()];
+    record.virtual_root_id = Some(virtual_id);
+    record.bundle_node_id = bundle_node_id;
+    record.app_folder_cleanable = evidence;
+    record.index = index;
+    record.status.current_path = None;
+    record.status.updated_at = now_iso();
   }
 
   pub fn cancel_scan(&mut self, scan_id: &str) -> EngineResult<ScanStatus> {
@@ -1072,7 +1670,24 @@ impl EngineStore {
       }
       // Pure in-memory classification of the measured report; the derived
       // items add no index entries, so browse topology stays untouched.
-      let items = protected_discovery_items(&record.index);
+      // App scans additionally drop the audit-size bundle leaf: it is display
+      // metadata, never a cleanup candidate.
+      let mut items = protected_discovery_items(&record.index);
+      if let Some(bundle_id) = record.bundle_node_id.clone() {
+        for rows in items.values_mut() {
+          rows.retain(|item| item.node.id != bundle_id);
+        }
+      }
+      if let Some(bundle) = record
+        .app_context
+        .as_ref()
+        .and_then(|context| context.bundle.clone().map(|(path, _)| path))
+      {
+        let bundle_string = bundle.to_string_lossy().into_owned();
+        for rows in items.values_mut() {
+          rows.retain(|item| item.node.path != bundle_string);
+        }
+      }
       return Ok(PreparedDiscovery::Ready(DiscoveryData {
         index: HashMap::new(),
         items,
@@ -1137,6 +1752,15 @@ impl EngineStore {
   }
 
   pub fn plan(&mut self, request: &CleanupPlanRequest) -> EngineResult<CleanupPlan> {
+    // App scans branch to the pinned-context route; path scans keep the
+    // verbatim flow below (no loosening).
+    let is_app_scan = self
+      .scans
+      .get(request.scan_id.as_str())
+      .is_some_and(|record| record.app_context.is_some());
+    if is_app_scan {
+      return self.plan_app_scan(request);
+    }
     let record = self.ready(request.scan_id.as_str())?;
     let scan_roots: Vec<PathBuf> = record
       .root_ids
@@ -1243,6 +1867,182 @@ impl EngineStore {
     Ok(plan)
   }
 
+  /// App-scan planning: authorizes every staged node against the pinned
+  /// context (A5/A7), enforces per-root completeness evidence for folder-level
+  /// staging (A1), measures the pruned union's physical sizes (A2), and
+  /// captures a bounded recursive manifest per retained target for the
+  /// execute-time verification (A4).
+  fn plan_app_scan(&mut self, request: &CleanupPlanRequest) -> EngineResult<CleanupPlan> {
+    let record = self.ready(request.scan_id.as_str())?;
+    let context = record
+      .app_context
+      .clone()
+      .ok_or_else(|| problem("InternalError", "app scan lost its context"))?;
+    let own = context.own_locations();
+    let mut selected: Vec<(IndexEntry, EntryFingerprint)> = Vec::new();
+    for node_id in &request.node_ids {
+      let entry = record.index.get(node_id).ok_or_else(|| {
+        problem(
+          "InvalidRequest",
+          format!("plan references unknown node {node_id}"),
+        )
+      })?;
+      let path = PathBuf::from(&entry.path);
+      // Shared-policy authorization (A3/A5), synthetic identifiers first.
+      guard_app_cleanup(&path, record, &self.roots)?;
+      // Scan-state rule with the A1 evidence exception: a location root is
+      // whole-folder stageable only when its coverage evidence is complete
+      // (nested `separate-root` partitions accepted); `skipped` is refused
+      // everywhere and `partial` below depth 1 stays refused.
+      let is_location_root = own.iter().any(|location| location == &path);
+      if matches!(entry.scan_state.as_deref(), Some("skipped")) {
+        return Err(problem(
+          "InvalidRequest",
+          format!(
+            "path was skipped during the scan; cleanup needs a complete entry: {}",
+            entry.path
+          ),
+        ));
+      }
+      if is_location_root {
+        let cleanable = record
+          .app_folder_cleanable
+          .get(&entry.path)
+          .copied()
+          .unwrap_or(false);
+        if !cleanable {
+          return Err(problem(
+            "InvalidRequest",
+            format!(
+              "location was partially scanned; only its fully measured contents can be staged: {}",
+              entry.path
+            ),
+          ));
+        }
+      } else if matches!(entry.scan_state.as_deref(), Some("partial")) {
+        return Err(problem(
+          "InvalidRequest",
+          format!(
+            "path was skipped or partially scanned; cleanup needs a complete entry: {}",
+            entry.path
+          ),
+        ));
+      }
+      // Fail-closed probe (shared strict gate): symlink/escape drift, Group
+      // Containers, and missing paths all refuse before measuring.
+      let metadata = policy::strict_target_metadata(&path).ok_or_else(|| {
+        problem(
+          "StalePlan",
+          format!(
+            "path is missing, outside the scan roots, or traverses a symbolic link: {}",
+            entry.path
+          ),
+        )
+      })?;
+      let current = fingerprint_of(&metadata);
+      // Protected index entries carry no scan-time fingerprint, so the fresh
+      // measurement becomes the plan baseline and execute re-verifies it.
+      let baseline = match entry.fingerprint.clone() {
+        Some(fingerprint) if fingerprint != current => {
+          return Err(problem(
+            "StaleSnapshot",
+            format!("path changed since scanning: {}; scan again", entry.path),
+          ));
+        }
+        Some(fingerprint) => fingerprint,
+        None => current,
+      };
+      selected.push((entry.clone(), baseline));
+    }
+    // Prune staged targets to top-most ancestors (mirror the path-scan drop).
+    selected.sort_by(|a, b| {
+      Path::new(&a.0.path)
+        .components()
+        .count()
+        .cmp(&Path::new(&b.0.path).components().count())
+        .then_with(|| a.0.path.cmp(&b.0.path))
+    });
+    let mut retained: Vec<(IndexEntry, EntryFingerprint)> = Vec::new();
+    for candidate in selected {
+      if retained
+        .iter()
+        .any(|planned| Path::new(&candidate.0.path).starts_with(&planned.0.path))
+      {
+        continue;
+      }
+      retained.push(candidate);
+    }
+    // Physical union (A2): freshly measured file bytes with shared inodes
+    // counted once — never index partitions. Unreadable targets fail closed.
+    let retained_paths: Vec<PathBuf> = retained
+      .iter()
+      .map(|(entry, _)| PathBuf::from(&entry.path))
+      .collect();
+    let sizes = policy::measure_physical_union(&retained_paths).map_err(|error| match error {
+      policy::ManifestError::TooLarge => {
+        problem("InvalidRequest", "location too large to verify safely")
+      }
+      policy::ManifestError::Unverifiable => problem(
+        "StalePlan",
+        "location cannot be measured safely; scan again",
+      ),
+    })?;
+    // Bounded recursive manifest per retained target (A4), verified again
+    // before the first delete at execute time.
+    let mut manifest: HashMap<String, (u64, i64)> = HashMap::new();
+    for path in &retained_paths {
+      match policy::collect_manifest(path, &mut manifest) {
+        Ok(()) => {}
+        Err(policy::ManifestError::TooLarge) => {
+          return Err(problem(
+            "InvalidRequest",
+            "location too large to verify safely",
+          ));
+        }
+        Err(policy::ManifestError::Unverifiable) => {
+          return Err(problem(
+            "StalePlan",
+            "locations changed since the scan; scan again",
+          ));
+        }
+      }
+    }
+    let entries: Vec<PlanEntry> = retained
+      .iter()
+      .map(|(entry, fingerprint)| {
+        let size = sizes
+          .get(&PathBuf::from(&entry.path))
+          .copied()
+          .unwrap_or(entry.size);
+        PlanEntry {
+          path: entry.path.clone(),
+          size,
+          reason: if entry.ignored { "ignored" } else { "staged" }.into(),
+          preset: None,
+          ignored: entry.ignored,
+          fingerprint: fingerprint.clone(),
+        }
+      })
+      .collect();
+    let total_size = entries.iter().map(|entry| entry.size).sum();
+    let plan = CleanupPlan {
+      plan_id: new_id("plan_"),
+      scan_id: request.scan_id.clone(),
+      mode: "trash".into(),
+      total_size,
+      errors: Vec::new(),
+      entries,
+      created_at: now_iso(),
+      expires_at: now_iso(),
+    };
+    self.app_manifests.insert(plan.plan_id.clone(), manifest);
+    self.plans.insert(
+      plan.plan_id.clone(),
+      (plan.clone(), std::time::Instant::now()),
+    );
+    Ok(plan)
+  }
+
   /// Moves every planned path to the OS trash after re-verifying all
   /// fingerprints. One mismatch fails the whole plan closed.
   pub fn execute(&mut self, request: &CleanupExecuteRequest) -> EngineResult<CleanupOutcome> {
@@ -1258,6 +2058,16 @@ impl EngineStore {
         "StalePlan",
         "plan expired; plan again from a fresh scan",
       ));
+    }
+    // App-scan plans carry a private manifest and branch to the pinned-context
+    // route; path plans keep the verbatim flow below.
+    let is_app_scan = self
+      .scans
+      .get(plan.scan_id.as_str())
+      .is_some_and(|record| record.app_context.is_some());
+    if is_app_scan {
+      let manifest = self.app_manifests.remove(&request.plan_id);
+      return self.execute_app_scan(plan, manifest);
     }
     let mut changed = 0usize;
     let record = self.ready(&plan.scan_id)?;
@@ -1304,6 +2114,127 @@ impl EngineStore {
           code: "Unavailable".into(),
           message: format!("trash failed: {error}"),
         }),
+      }
+    }
+    Ok(outcome)
+  }
+
+  /// App-scan execute (A4): consumes the plan atomically, re-verifies
+  /// authorization + fingerprints + the private recursive manifest BEFORE the
+  /// first delete, then trashes with an immediate per-target recheck
+  /// (authorization + path walk + fingerprint) just before each delete. Drift
+  /// at the per-target recheck marks that entry failed and continues.
+  /// Outcome bytes are the plan's physical sizes (A2). A successful cleanup
+  /// marks the session so the UI can offer a rescan (A11).
+  fn execute_app_scan(
+    &mut self,
+    plan: CleanupPlan,
+    manifest: Option<HashMap<String, (u64, i64)>>,
+  ) -> EngineResult<CleanupOutcome> {
+    let record = self.ready(&plan.scan_id)?;
+    let context = record
+      .app_context
+      .clone()
+      .ok_or_else(|| problem("InternalError", "app scan lost its context"))?;
+    let stored = manifest.ok_or_else(|| problem("InternalError", "app plan lost its manifest"))?;
+    let own = context.own_locations();
+    let bundle = context.bundle.clone().map(|(path, _)| path);
+    let bundle_ref = bundle.as_deref();
+    // Verify-all-before-first-delete: authorization, then fingerprints.
+    let mut changed = 0usize;
+    for entry in &plan.entries {
+      let path = Path::new(&entry.path);
+      policy::authorize_target(
+        path,
+        &own,
+        &context.other_app_paths,
+        bundle_ref,
+        &self.roots,
+      )
+      .map_err(|error| problem(error.code, error.message))?;
+      let matches = policy::strict_target_metadata(path)
+        .map(|metadata| fingerprint_of(&metadata) == entry.fingerprint)
+        .unwrap_or(false);
+      if !matches {
+        changed += 1;
+      }
+    }
+    if changed > 0 {
+      return Err(problem(
+        "StalePlan",
+        format!(
+          "{changed} of {} entries changed since the plan was made",
+          plan.entries.len()
+        ),
+      ));
+    }
+    // Manifest re-verification before the FIRST trash call: a changed
+    // grandchild can leave top-level fingerprints untouched.
+    let mut current: HashMap<String, (u64, i64)> = HashMap::new();
+    for entry in &plan.entries {
+      if policy::collect_manifest(Path::new(&entry.path), &mut current).is_err() {
+        return Err(problem(
+          "StalePlan",
+          "locations changed since the plan was made; plan again",
+        ));
+      }
+    }
+    if current != stored {
+      return Err(problem(
+        "StalePlan",
+        "locations changed since the plan was made; plan again",
+      ));
+    }
+    let mut outcome = CleanupOutcome {
+      trashed: Vec::new(),
+      bytes_freed: 0,
+      failed: Vec::new(),
+    };
+    for entry in &plan.entries {
+      let path = Path::new(&entry.path);
+      // Immediate per-target recheck just before this target's delete.
+      let authorized = policy::authorize_target(
+        path,
+        &own,
+        &context.other_app_paths,
+        bundle_ref,
+        &self.roots,
+      )
+      .is_ok();
+      let fresh = authorized
+        && policy::strict_target_metadata(path)
+          .map(|metadata| fingerprint_of(&metadata) == entry.fingerprint)
+          .unwrap_or(false);
+      if !fresh {
+        outcome.failed.push(FailedEntry {
+          path: entry.path.clone(),
+          code: "StalePlan".into(),
+          message: format!("path changed before deletion: {}", entry.path),
+        });
+        continue;
+      }
+      match trash::delete(&entry.path) {
+        Ok(()) => {
+          outcome.bytes_freed += entry.size;
+          outcome.trashed.push(TrashedEntry {
+            path: entry.path.clone(),
+            size: entry.size,
+          });
+        }
+        Err(error) => outcome.failed.push(FailedEntry {
+          path: entry.path.clone(),
+          code: "Unavailable".into(),
+          message: format!("trash failed: {error}"),
+        }),
+      }
+    }
+    if !outcome.trashed.is_empty() {
+      if let Some(record) = self.scans.get_mut(&plan.scan_id) {
+        record.status.message = format!(
+          "{} · cleanup done; rescan recommended",
+          record.status.message
+        );
+        record.status.updated_at = now_iso();
       }
     }
     Ok(outcome)
@@ -1396,6 +2327,74 @@ fn guard_cleanup_roots(
     ));
   }
   Ok(())
+}
+
+/// App-scan cleanup guard (amendments A3/A5): the virtual root and the bundle
+/// are refused, location roots ARE cleanable (inversion of the scan-root
+/// rule), and descendants must sit under one pinned location. Bundle
+/// protection is containment-both-ways; cross-app ownership overlap and the
+/// configured-root refusal come from the shared policy module. Everything is
+/// derived from the record's pinned context — never current audit state.
+fn guard_app_cleanup(
+  path: &Path,
+  record: &ScanRecord,
+  configured_roots: &[PathBuf],
+) -> EngineResult<()> {
+  let context = record
+    .app_context
+    .as_ref()
+    .ok_or_else(|| problem("InvalidRequest", "not an app scan"))?;
+  // Synthetic identifiers never reach the shared policy's path logic without
+  // an explicit early refusal here (A10).
+  if is_virtual_app_path(path) {
+    return Err(problem(
+      "Forbidden",
+      "the app virtual root cannot be cleaned up",
+    ));
+  }
+  let own = context.own_locations();
+  let bundle = context.bundle.as_ref().map(|(path, _)| path.as_path());
+  policy::authorize_target(
+    path,
+    &own,
+    &context.other_app_paths,
+    bundle,
+    configured_roots,
+  )
+  .map_err(|error| problem(error.code, error.message))
+}
+
+/// True for synthetic `app-storage:` identifiers, which never name a
+/// filesystem path and must be rejected before any filesystem access.
+fn is_virtual_app_path(path: &Path) -> bool {
+  policy::is_virtual_app_path(path)
+}
+
+/// Pinned virtual conventions (§3.2): `approot_` + sha1 hex[..24] id and the
+/// matching `app-storage:` path for one audit generation + app id.
+fn app_virtual_ids(audit_id: &str, app_id: &str) -> (String, String) {
+  let mut hasher = Sha1::new();
+  hasher.update(format!("app-scan:{audit_id}:{app_id}").as_bytes());
+  let hex: String = hasher
+    .finalize()
+    .iter()
+    .take(12)
+    .map(|byte| format!("{byte:02x}"))
+    .collect();
+  (format!("approot_{hex}"), format!("app-storage:{hex}"))
+}
+
+/// Pinned bundle-leaf convention (§3.2): `appbundle_` + sha1(bundlePath)[..24].
+fn app_bundle_id(bundle_path: &str) -> String {
+  let mut hasher = Sha1::new();
+  hasher.update(bundle_path.as_bytes());
+  let hex: String = hasher
+    .finalize()
+    .iter()
+    .take(12)
+    .map(|byte| format!("{byte:02x}"))
+    .collect();
+  format!("appbundle_{hex}")
 }
 
 fn fingerprint_of(metadata: &fs::Metadata) -> EntryFingerprint {
