@@ -112,6 +112,22 @@ export function auditFixtureActive(): boolean {
   return typeof window !== 'undefined' && window.location.hash.includes('audit-fixture')
 }
 
+/** Tiny placeholder logos so fixture screenshots look representative; real
+ * logos come from the Tauri appIcon channel (icns -> png), which a browser
+ * fixture cannot reach. Keyed by the fixture report's appPath values. */
+const fixtureIcons: Record<string, string> = {
+  '/Applications/Claude.app':
+    'data:image/svg+xml;utf8,' +
+    encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#d97757"/><g stroke="#fff" stroke-width="4" stroke-linecap="round"><path d="M32 14v36M14 32h36M19 19l26 26M45 19L19 45"/></g></svg>',
+    ),
+  '/Applications/Xcode.app':
+    'data:image/svg+xml;utf8,' +
+    encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#1478f0"/><circle cx="32" cy="32" r="17" fill="none" stroke="#fff" stroke-width="4"/><path d="M20 44 44 20" stroke="#fff" stroke-width="5" stroke-linecap="round"/></svg>',
+    ),
+}
+
 /** Installs fixture capabilities + service into the workbench state. */
 export function installAuditFixture(workbench: {
   capabilities: unknown
@@ -139,7 +155,11 @@ export function installAuditFixture(workbench: {
     plan: () => Promise.reject(new Error('fixture host cannot plan engine cleanup')),
     execute: () => Promise.reject(new Error('fixture host cannot execute cleanup')),
     appAudit: () => delay(JSON.parse(JSON.stringify(fixtureReport))),
-    appIcon: () => delay(null),
+    appIcon: (body: { appPath: string }) => {
+      const url = fixtureIcons[body.appPath]
+      // Contract shape: AppIcon = { dataUrl } (the page wrapper unwraps it).
+      return delay(url ? { dataUrl: url } : null)
+    },
     appCleanupPlan: (body: { paths: string[] }) =>
       Promise.reject({
         problem: {
