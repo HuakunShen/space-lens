@@ -23,6 +23,10 @@ export { default as DriveList } from './components/lens/DriveList.svelte'
 
 export { default as DiscoveryList } from './components/lens/DiscoveryList.svelte'
 export { default as AppAuditList } from './components/lens/AppAuditList.svelte'
+export { default as AppAuditCard } from './components/lens/AppAuditCard.svelte'
+export { default as AppAuditDrawer } from './components/lens/AppAuditDrawer.svelte'
+export { default as AppLocationRow } from './components/lens/AppLocationRow.svelte'
+export { default as AppCleanupDialog } from './components/lens/AppCleanupDialog.svelte'
 export { default as AppearancePanel } from './components/lens/AppearancePanel.svelte'
 
 // App-shell components (connection + feedback)

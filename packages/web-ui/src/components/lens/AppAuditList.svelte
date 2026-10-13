@@ -1,16 +1,27 @@
 <script lang="ts">
+  import { tick, untrack } from 'svelte'
   import { Copy, LoaderCircle, RefreshCw, Search } from '@lucide/svelte'
-  import type { AppAuditEntry, AppAuditReport } from '@space-lens/contract'
+  import type {
+    AppAuditEntry,
+    AppAuditReport,
+    AppCleanupPlan,
+    CleanupOutcome,
+  } from '@space-lens/contract'
   import { formatBytes } from '../../lib/format'
   import {
+    appTreeSlice,
     classificationBadge,
     classificationLabel,
-    initialsFor,
-    largestLocation,
     matchesQuery,
     purgeableTotal,
+    validateStagedAgainstReport,
   } from '../../lib/app-audit'
+  import { DEFAULT_CHART_MODE, DEFAULT_TREEMAP_DENSITY } from '../../lib/chart-mode'
+  import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
   import LensSelect from './LensSelect.svelte'
+  import AppAuditCard from './AppAuditCard.svelte'
+  import AppAuditDrawer from './AppAuditDrawer.svelte'
+  import AppCleanupDialog from './AppCleanupDialog.svelte'
   import { Button } from '../ui/button/index'
   import { Input } from '../ui/input/index'
 
@@ -20,10 +31,15 @@
     error: string | null
     minSize: number
     disabled?: boolean
+    cleanupAvailable?: boolean
+    revealAvailable?: boolean
     onRefresh: () => void
     onMinSize: (value: number) => void
     onCopy: (path: string) => void
     onIcon?: (appPath: string) => Promise<string | null>
+    onReveal?: (appId: string, path: string) => void
+    onCleanupPlan?: (appId: string, paths: string[]) => Promise<AppCleanupPlan>
+    onCleanupExecute?: (planId: string) => Promise<CleanupOutcome>
   }
   let {
     report,
@@ -31,10 +47,15 @@
     error,
     minSize,
     disabled = false,
+    cleanupAvailable = false,
+    revealAvailable = false,
     onRefresh,
     onMinSize,
     onCopy,
     onIcon,
+    onReveal,
+    onCleanupPlan,
+    onCleanupExecute,
   }: Props = $props()
 
   const sizeOptions = [
@@ -46,6 +67,20 @@
   let query = $state('')
   let viewMode = $state<'cards' | 'list'>('cards')
   let selectedId = $state<string | null>(null)
+  // Staging is per-app and never pre-selected: nothing is staged until the
+  // user checks a location row. There is no "select all" affordance.
+  let staged = $state<Map<string, Set<string>>>(new Map())
+  let prunedNotice = $state<string | null>(null)
+
+  let dialogOpen = $state(false)
+  let dialogPlan = $state<AppCleanupPlan | null>(null)
+  let dialogOutcome = $state<CleanupOutcome | null>(null)
+  let dialogError = $state<string | null>(null)
+  let appPlanning = $state(false)
+  let appDeleting = $state(false)
+
+  let chartMode = $state<ChartMode>(DEFAULT_CHART_MODE)
+  let treemapDensity = $state<TreemapDensity>(DEFAULT_TREEMAP_DENSITY)
 
   let appCount = $derived(report?.apps.length ?? 0)
   let grandTotal = $derived(report?.apps.reduce((total, app) => total + app.totalSize, 0) ?? 0)
@@ -53,79 +88,156 @@
   let reclaimableTotal = $derived(purgeableTotal(reclaimable))
   let filtered = $derived((report?.apps ?? []).filter((app) => matchesQuery(app, query)))
   let selected = $derived(report?.apps.find((app) => app.id === selectedId) ?? null)
+  let selectedStaged = $derived(selectedId ? (staged.get(selectedId) ?? new Set<string>()) : new Set<string>())
+  let tree = $derived(selected ? appTreeSlice(selected) : null)
+  let dialogStaged = $derived(
+    selected
+      ? selected.locations
+          .filter((location) => selectedStaged.has(location.path))
+          .map((location) => ({ path: location.path, size: location.size }))
+      : [],
+  )
+  let dialogStagedTotal = $derived(dialogStaged.reduce((total, row) => total + row.size, 0))
 
-  /** One muted summary line per card: the largest location, or the count. */
-  function cardSummary(app: AppAuditEntry): string {
-    const top = largestLocation(app)
-    if (top) return `${top.label ?? 'Largest location'} · ${formatBytes(top.size)}`
-    return `${app.locations.length} locations`
+  // Refresh swaps the report without clearing it, so re-validate staged
+  // paths against the new generation: vanished apps/paths drop out.
+  $effect(() => {
+    const current = report
+    untrack(() => {
+      if (!current) return
+      let before = 0
+      for (const paths of staged.values()) before += paths.size
+      const validated = validateStagedAgainstReport(staged, current)
+      let after = 0
+      for (const paths of validated.values()) after += paths.size
+      if (after !== before || validated.size !== staged.size) {
+        staged = validated
+        prunedNotice =
+          after < before
+            ? `${before - after} staged path${before - after === 1 ? '' : 's'} no longer reported — removed.`
+            : null
+      } else {
+        prunedNotice = null
+      }
+    })
+  })
+
+  function openCard(id: string): void {
+    if (selectedId === id) {
+      closeDrawer()
+      return
+    }
+    selectedId = id
+    // Swapping apps closes the confirm dialog; staging is per-app and stays.
+    dialogOpen = false
+    dialogPlan = null
+    dialogOutcome = null
+    dialogError = null
+    void tick().then(() => {
+      document.querySelector<HTMLElement>('[data-drawer-close]')?.focus()
+    })
   }
 
-  // Lazy app icons: a per-path promise cache plus a tiny queue so at most
-  // four icon fetches are in flight. Entries without an app path, CLI
-  // entries, and null results all fall back to the letter avatar.
-  const ICON_CONCURRENCY = 4
-  const iconCache = new Map<string, Promise<string | null>>()
-  const queuedPaths = new Set<string>()
-  const iconQueue: string[] = []
-  let iconInFlight = 0
-  let iconState = $state<Record<string, { status: 'loading' | 'ready' | 'failed'; url: string | null }>>({})
-
-  function pumpIconQueue(): void {
-    if (!onIcon) return
-    const fetcher = onIcon
-    while (iconInFlight < ICON_CONCURRENCY && iconQueue.length > 0) {
-      const path = iconQueue.shift() as string
-      if (iconCache.has(path)) continue
-      iconInFlight += 1
-      const task = Promise.resolve()
-        .then(() => fetcher(path))
-        .then(
-          (url) => {
-            iconState = { ...iconState, [path]: url ? { status: 'ready', url } : { status: 'failed', url: null } }
-            return url
-          },
-          () => {
-            iconState = { ...iconState, [path]: { status: 'failed', url: null } }
-            return null
-          },
-        )
-        .finally(() => {
-          iconInFlight -= 1
-          pumpIconQueue()
-        })
-      iconCache.set(path, task)
+  function closeDrawer(): void {
+    const id = selectedId
+    selectedId = null
+    if (id) {
+      void tick().then(() => {
+        document.getElementById(`app-card-${id}`)?.focus()
+      })
     }
   }
 
-  function ensureIcon(path: string | null, kind: AppAuditEntry['kind']): void {
-    if (!report || !onIcon || !path || kind === 'cli') return
-    if (iconCache.has(path) || queuedPaths.has(path)) return
-    queuedPaths.add(path)
-    iconQueue.push(path)
-    iconState = { ...iconState, [path]: { status: 'loading', url: null } }
-    pumpIconQueue()
+  function toggleStage(path: string): void {
+    const id = selectedId
+    if (!id || appPlanning || appDeleting) return
+    const next = new Map(staged)
+    const paths = new Set(next.get(id) ?? [])
+    if (paths.has(path)) paths.delete(path)
+    else paths.add(path)
+    if (paths.size === 0) next.delete(id)
+    else next.set(id, paths)
+    staged = next
+    prunedNotice = null
   }
 
-  $effect(() => {
-    if (!report || viewMode !== 'cards' || !onIcon) return
-    for (const app of filtered) ensureIcon(app.appPath, app.kind)
-  })
-</script>
+  function clearStaged(): void {
+    const id = selectedId
+    if (!id) return
+    const next = new Map(staged)
+    next.delete(id)
+    staged = next
+    prunedNotice = null
+  }
 
-{#snippet appIcon(app: AppAuditEntry)}
-  {@const state = app.appPath ? iconState[app.appPath] : undefined}
-  {#if state?.status === 'ready' && state.url}
-    <img src={state.url} alt="" class="size-12 shrink-0 rounded-lg object-contain" />
-  {:else if state?.status === 'failed' || app.kind === 'cli' || !app.appPath}
-    <div
-      class="flex size-12 shrink-0 items-center justify-center rounded-lg bg-muted font-semibold text-muted-foreground"
-      aria-hidden="true">{initialsFor(app.name)}</div
-    >
-  {:else}
-    <div class="size-12 shrink-0 animate-pulse rounded-lg bg-muted" aria-hidden="true"></div>
-  {/if}
-{/snippet}
+  function openReview(): void {
+    dialogPlan = null
+    dialogOutcome = null
+    dialogError = null
+    dialogOpen = true
+  }
+
+  function resetDialog(): void {
+    dialogOpen = false
+    dialogPlan = null
+    dialogOutcome = null
+    dialogError = null
+  }
+
+  async function planFromStaged(): Promise<void> {
+    const id = selectedId
+    if (!id || !onCleanupPlan || appPlanning || appDeleting) return
+    const paths = [...(staged.get(id) ?? [])]
+    if (paths.length === 0) return
+    appPlanning = true
+    dialogError = null
+    try {
+      dialogPlan = await onCleanupPlan(id, paths)
+    } catch (planError) {
+      dialogError = planError instanceof Error ? planError.message : String(planError)
+    } finally {
+      appPlanning = false
+    }
+  }
+
+  async function confirmDelete(): Promise<void> {
+    const plan = dialogPlan
+    if (!plan || !onCleanupExecute || appDeleting) return
+    appDeleting = true
+    dialogError = null
+    try {
+      dialogOutcome = await onCleanupExecute(plan.planId)
+      const trashed = new Set(dialogOutcome.trashed.map((item) => item.path))
+      const next = new Map<string, Set<string>>()
+      for (const [appId, paths] of staged) {
+        const kept = new Set([...paths].filter((path) => !trashed.has(path)))
+        if (kept.size > 0) next.set(appId, kept)
+      }
+      staged = next
+    } catch (executeError) {
+      dialogError = executeError instanceof Error ? executeError.message : String(executeError)
+    } finally {
+      appDeleting = false
+    }
+  }
+
+  function backToReview(): void {
+    dialogPlan = null
+    dialogOutcome = null
+    dialogError = null
+  }
+
+  function removeStaged(path: string): void {
+    const id = selectedId
+    if (!id) return
+    const next = new Map(staged)
+    const paths = new Set(next.get(id) ?? [])
+    paths.delete(path)
+    if (paths.size === 0) next.delete(id)
+    else next.set(id, paths)
+    staged = next
+  }
+</script>
 
 {#snippet locationList(app: AppAuditEntry)}
   <ul class="mt-3 space-y-2">
@@ -160,7 +272,7 @@
   </ul>
 {/snippet}
 
-<section class="discovery-view" aria-label="App storage" aria-busy={loading}>
+<section class="discovery-view audit-root" aria-label="App storage" aria-busy={loading}>
   <div class="discovery-heading">
     <div>
       <span class="section-eyebrow">DISCOVER & REVIEW</span>
@@ -217,71 +329,30 @@
       <p>{error}</p>
       <Button variant="outline" size="sm" onclick={onRefresh}>Try again</Button>
     </div>{/if}
-  <div class="discovery-rows">
-    {#if report}
-      {#if viewMode === 'cards' && selected}
-        <div class="mb-3 rounded-lg border bg-card p-4" role="region" aria-label={`Details for ${selected.name}`}>
-          <div class="mb-3">
-            <Button variant="outline" size="sm" onclick={() => (selectedId = null)} aria-label="Back to app grid"
-              >← Back</Button
-            >
-          </div>
-          <div class="flex items-start justify-between gap-3">
-            <div class="flex min-w-0 items-start gap-3">
-              {@render appIcon(selected)}
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <strong class="text-sm">{selected.name}</strong>
-                  <span
-                    class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                    >{selected.kind === 'app' ? 'App' : 'CLI'}</span
-                  >
-                  {#if selected.source === 'catalog'}<span
-                      class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                      title="Curated entry with human-reviewed location notes">Known</span
-                    >{/if}
-                </div>
-                {#if selected.installedSize > 0}<p class="mt-1 text-xs text-muted-foreground">
-                    includes {formatBytes(selected.installedSize)} app bundle
-                  </p>{/if}
+  <div class="audit-split">
+    <div class="audit-list">
+      <div class="discovery-rows">
+        {#if report}
+          {#if viewMode === 'cards'}
+            {#if filtered.length > 0}
+              <div class="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" aria-label="Apps">
+                {#each filtered as app (app.id)}
+                  <AppAuditCard entry={app} active={app.id === selectedId} onOpen={openCard} onIcon={onIcon} />
+                {/each}
               </div>
-            </div>
-            <span class="shrink-0 text-sm font-semibold tabular-nums">{formatBytes(selected.totalSize)}</span>
-          </div>
-          {#if selected.bundleId}<button
-              type="button"
-              class="mt-1 block truncate font-mono text-xs text-muted-foreground hover:text-foreground"
-              title="Copy bundle identifier"
-              onclick={() => onCopy(selected.bundleId ?? '')}>{selected.bundleId}</button
-            >{/if}
-          {#if selected.appPath}<div class="mt-1 flex min-w-0 items-center gap-1">
-              <span class="min-w-0 flex-1 truncate font-mono text-xs" title={selected.appPath}>{selected.appPath}</span>
-              <button
-                class="toolbar-icon"
-                type="button"
-                onclick={() => selected.appPath && onCopy(selected.appPath)}
-                aria-label={`Copy path of ${selected.name}`}
-                title="Copy path"><Copy size={14} /></button
-              >
-            </div>{/if}
-          {@render locationList(selected)}
-        </div>
-      {/if}
-      {#if viewMode === 'cards'}
-        {#if filtered.length > 0}
-          <div class="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" aria-label="Apps">
+            {:else}
+              <div class="discovery-empty">
+                <Search size={28} /><strong>No matching apps</strong>
+                <p>Try a different search or size filter.</p>
+              </div>
+            {/if}
+          {:else}
             {#each filtered as app (app.id)}
-              <button
-                type="button"
-                class="flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-left hover:ring-1 hover:ring-ring"
-                aria-label={`Show details for ${app.name}`}
-                onclick={() => (selectedId = app.id)}
-              >
-                <div class="flex w-full items-start gap-3">
-                  {@render appIcon(app)}
-                  <div class="min-w-0 flex-1">
-                    <strong class="block truncate text-sm" title={app.name}>{app.name}</strong>
-                    <div class="mt-1 flex flex-wrap items-center gap-1">
+              <article class="rounded-lg border bg-card p-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <strong class="text-sm">{app.name}</strong>
                       <span
                         class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                         >{app.kind === 'app' ? 'App' : 'CLI'}</span
@@ -291,75 +362,78 @@
                           title="Curated entry with human-reviewed location notes">Known</span
                         >{/if}
                     </div>
+                    {#if app.installedSize > 0}<p class="mt-1 text-xs text-muted-foreground">
+                        includes {formatBytes(app.installedSize)} app bundle
+                      </p>{/if}
+                    {#if app.bundleId}<button
+                        type="button"
+                        class="mt-1 block truncate font-mono text-xs text-muted-foreground hover:text-foreground"
+                        title="Copy bundle identifier"
+                        onclick={() => onCopy(app.bundleId ?? '')}>{app.bundleId}</button
+                      >{/if}
+                    {#if app.appPath}<div class="mt-1 flex min-w-0 items-center gap-1">
+                        <span class="min-w-0 flex-1 truncate font-mono text-xs" title={app.appPath}>{app.appPath}</span>
+                        <button
+                          class="toolbar-icon"
+                          type="button"
+                          onclick={() => app.appPath && onCopy(app.appPath)}
+                          aria-label={`Copy path of ${app.name}`}
+                          title="Copy path"><Copy size={14} /></button
+                        >
+                      </div>{/if}
                   </div>
                   <span class="shrink-0 text-sm font-semibold tabular-nums">{formatBytes(app.totalSize)}</span>
                 </div>
-                <p class="w-full truncate text-xs text-muted-foreground" title={cardSummary(app)}>{cardSummary(app)}</p>
-              </button>
+                {@render locationList(app)}
+              </article>
             {/each}
-          </div>
-        {:else}
-          <div class="discovery-empty">
-            <Search size={28} /><strong>No matching apps</strong>
-            <p>Try a different search or size filter.</p>
-          </div>
-        {/if}
-      {:else}
-        {#each filtered as app (app.id)}
-          <article class="rounded-lg border bg-card p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <strong class="text-sm">{app.name}</strong>
-                  <span
-                    class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                    >{app.kind === 'app' ? 'App' : 'CLI'}</span
-                  >
-                  {#if app.source === 'catalog'}<span
-                      class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                      title="Curated entry with human-reviewed location notes">Known</span
-                    >{/if}
-                </div>
-                {#if app.installedSize > 0}<p class="mt-1 text-xs text-muted-foreground">
-                    includes {formatBytes(app.installedSize)} app bundle
-                  </p>{/if}
-                {#if app.bundleId}<button
-                    type="button"
-                    class="mt-1 block truncate font-mono text-xs text-muted-foreground hover:text-foreground"
-                    title="Copy bundle identifier"
-                    onclick={() => onCopy(app.bundleId ?? '')}>{app.bundleId}</button
-                  >{/if}
-                {#if app.appPath}<div class="mt-1 flex min-w-0 items-center gap-1">
-                    <span class="min-w-0 flex-1 truncate font-mono text-xs" title={app.appPath}>{app.appPath}</span>
-                    <button
-                      class="toolbar-icon"
-                      type="button"
-                      onclick={() => app.appPath && onCopy(app.appPath)}
-                      aria-label={`Copy path of ${app.name}`}
-                      title="Copy path"><Copy size={14} /></button
-                    >
-                  </div>{/if}
+            {#if filtered.length === 0}
+              <div class="discovery-empty">
+                <Search size={28} /><strong>No matching apps</strong>
+                <p>Try a different search or size filter.</p>
               </div>
-              <span class="shrink-0 text-sm font-semibold tabular-nums">{formatBytes(app.totalSize)}</span>
-            </div>
-            {@render locationList(app)}
-          </article>
-        {/each}
-        {#if filtered.length === 0}
-          <div class="discovery-empty">
-            <Search size={28} /><strong>No matching apps</strong>
-            <p>Try a different search or size filter.</p>
-          </div>
+            {/if}
+          {/if}
         {/if}
-      {/if}
+        {#if !report && !loading && !error}<div class="discovery-empty">
+            <RefreshCw size={28} /><strong>No audit yet</strong>
+            <p>Refresh to enumerate installed apps and their scattered storage.</p>
+          </div>{/if}
+        {#if loading}<div class="discovery-loading" role="status">
+            <LoaderCircle size={18} class="animate-spin" /> Auditing installed apps…
+          </div>{/if}
+      </div>
+    </div>
+    {#if selectedId !== null}
+      <AppAuditDrawer
+        entry={selected}
+        tree={tree}
+        treeLoading={false}
+        treeError={null}
+        staged={selectedStaged}
+        planning={appPlanning}
+        deleting={appDeleting}
+        disabled={disabled}
+        {cleanupAvailable}
+        {revealAvailable}
+        {chartMode}
+        {treemapDensity}
+        confirmOpen={dialogOpen}
+        notice={prunedNotice}
+        onClose={closeDrawer}
+        onToggleStage={toggleStage}
+        onClearStaged={clearStaged}
+        onReview={openReview}
+        onCopy={onCopy}
+        onReveal={(path) => {
+          const id = selectedId
+          if (id) onReveal?.(id, path)
+        }}
+        onModeChange={(mode) => (chartMode = mode)}
+        onDensityChange={(density) => (treemapDensity = density)}
+        onIcon={onIcon}
+      />
     {/if}
-    {#if !report && !loading && !error}<div class="discovery-empty">
-        <RefreshCw size={28} /><strong>No audit yet</strong>
-        <p>Refresh to enumerate installed apps and their scattered storage.</p>
-      </div>{/if}
-    {#if loading}<div class="discovery-loading" role="status">
-        <LoaderCircle size={18} class="animate-spin" /> Auditing installed apps…
-      </div>{/if}
   </div>
   {#if report}<p class="discovery-footnote">
       Reclaimable classes: {formatBytes(reclaimableTotal)}
@@ -368,4 +442,23 @@
         where macOS restricts reads.</span
       >
     </p>{/if}
+  <AppCleanupDialog
+    open={dialogOpen}
+    appName={selected?.name ?? ''}
+    staged={dialogStaged}
+    stagedTotal={dialogStagedTotal}
+    plan={dialogPlan}
+    outcome={dialogOutcome}
+    error={dialogError}
+    planning={appPlanning}
+    deleting={appDeleting}
+    disabled={disabled}
+    {cleanupAvailable}
+    onClose={resetDialog}
+    onRemove={removeStaged}
+    onPlan={() => void planFromStaged()}
+    onConfirm={() => void confirmDelete()}
+    onBackToReview={backToReview}
+    onClear={clearStaged}
+  />
 </section>
