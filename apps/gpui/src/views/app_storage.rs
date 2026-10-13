@@ -208,12 +208,21 @@ impl AppStorageView {
     let (tx, rx) = channel::bounded::<AuditMsg>(1);
     cx.background_spawn(async move {
       // Only plain data crosses here: the future must stay Send.
-      #[cfg(unix)]
+      #[cfg(target_os = "macos")]
       {
         // The audit runs kuntu's rayon-parallel scan in-process and would
         // otherwise saturate every core while the UI thread tries to render
-        // (hovering the sidebar entry lagged for the whole audit). Nicing the
-        // background worker down keeps the UI responsive.
+        // (hovering the sidebar entry lagged for the whole audit). The macOS
+        // QoS class demotes ONLY this thread; the UI thread keeps its
+        // user-interactive scheduling. This is the per-thread mechanism the
+        // process-wide setpriority cannot provide.
+        unsafe {
+          libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0);
+        }
+      }
+      #[cfg(all(unix, not(target_os = "macos")))]
+      {
+        // Best available on non-macOS unix: nice the process down.
         unsafe {
           libc::setpriority(libc::PRIO_PROCESS, 0, 10);
         }
