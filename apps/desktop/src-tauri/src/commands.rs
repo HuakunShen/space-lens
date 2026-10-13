@@ -12,6 +12,9 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 
+use crate::app_cleanup::{
+  AppCleanupExecuteRequest, AppCleanupPlanRequest, AppCleanupState, AuditSnapshot,
+};
 use crate::engine::{
   default_discovery_limit, run_discovery, ChildrenPageRequest, CleanupExecuteRequest,
   CleanupPlanRequest, DiscoveryData, DiscoveryInput, DiscoveryKind, DiscoveryPage,
@@ -35,18 +38,26 @@ pub struct SessionBundle {
   // Only app-audit and app-icon requests wait here; ordinary reads never
   // acquire it.
   pub app_audit: Mutex<AppAuditState>,
+  // Only app-cleanup plan/execute requests wait here; ordinary submits never
+  // acquire it, and app cleanup never acquires the engine lock.
+  pub app_cleanup: Mutex<AppCleanupState>,
 }
 
-/// Per-session app-audit state: the icon allow-list plus the icon cache.
+/// Per-session app-audit state: the icon allow-list plus the icon cache plus
+/// the current audit-generation authorization snapshot.
 ///
 /// `known_paths` accumulates the canonical `.app` bundle paths of every audit
 /// this session has run; icons are served only for those paths, so a raw IPC
 /// caller cannot turn `appIcon` into an arbitrary-file read. `icons` caches
 /// successful data URLs by canonical path; icon misses are never cached.
+/// `audit` is the latest successful audit's snapshot (id, report, exact
+/// per-app locations); cleanup and reveal authorize against it alone, and a
+/// failed audit never replaces it.
 #[derive(Default)]
 pub struct AppAuditState {
   known_paths: std::collections::HashSet<PathBuf>,
   icons: std::collections::HashMap<PathBuf, String>,
+  pub audit: Option<AuditSnapshot>,
 }
 
 pub struct AppState {
@@ -97,6 +108,7 @@ fn connect_window_session(window_label: &str, state: &AppState) -> Value {
       events: EventSink::new(),
       discovery: Mutex::new(()),
       app_audit: Mutex::new(AppAuditState::default()),
+      app_cleanup: Mutex::new(AppCleanupState::default()),
     }),
   );
   session_metadata(&session_id)
@@ -123,8 +135,8 @@ fn capabilities_json() -> Value {
       "apiMajor": API_MAJOR,
       "contractVersion": CONTRACT_VERSION,
       "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true },
-      "cleanup": { "plan": true, "execute": true, "mode": "trash" },
-      "host": { "folderPicker": true },
+      "cleanup": { "plan": true, "execute": true, "mode": "trash", "appPlan": true, "appExecute": true },
+      "host": { "folderPicker": true, "appLocationReveal": true },
       "icloud": "unavailable",
   })
 }
@@ -296,6 +308,14 @@ pub enum SubmitRequest {
     #[serde(flatten)]
     request: CleanupExecuteRequest,
   },
+  AppCleanupPlan {
+    #[serde(flatten)]
+    request: AppCleanupPlanRequest,
+  },
+  AppCleanupExecute {
+    #[serde(flatten)]
+    request: AppCleanupExecuteRequest,
+  },
 }
 
 #[derive(Deserialize)]
@@ -307,6 +327,7 @@ pub enum SubmitRequest {
 )]
 pub enum HostRequest {
   PickDirectory { title: Option<String> },
+  RevealPath { app_id: String, path: String },
 }
 
 // -------------------------------------------------------------------- reads
@@ -461,12 +482,26 @@ pub async fn sl_read(
 /// (mirroring `read_discovery`). The contract bounds `limit` to 1..=1000;
 /// enforce it here so a raw IPC caller cannot request beyond that shape.
 /// Successful audits extend the session's icon allow-list (`known_paths`;
-/// audits accumulate, never clear) with every reported `.app` bundle path.
+/// audits accumulate, never clear) with every reported `.app` bundle path AND
+/// atomically publish a new `AuditSnapshot` (fresh `audit_id`, exact per-app
+/// locations) that app cleanup and reveal authorize against. A failed audit
+/// returns without touching the published snapshot; the report JSON carries
+/// the generation's `auditId` top-level.
 fn read_app_audit(
   bundle: &SessionBundle,
   min_size: u64,
   include_heuristic: bool,
   limit: usize,
+) -> Result<Value, Value> {
+  read_app_audit_inner(bundle, min_size, include_heuristic, limit, None)
+}
+
+fn read_app_audit_inner(
+  bundle: &SessionBundle,
+  min_size: u64,
+  include_heuristic: bool,
+  limit: usize,
+  home: Option<PathBuf>,
 ) -> Result<Value, Value> {
   if limit == 0 || limit > 1000 {
     return Err(problem_value(
@@ -479,19 +514,63 @@ fn read_app_audit(
     min_size,
     include_heuristic,
     limit,
-    home: None,
+    home,
   };
   let report = spacelens_app_audit::audit_installed_apps(&options)
     .map_err(|error| problem_value("InternalError", error))?;
+  publish_audit_snapshot(&mut state, &report)
+}
+
+/// Publish one successful audit's authorization snapshot: fresh `audit_id`,
+/// exact per-app locations, icon allow-list accumulation, and the report
+/// serialized ONCE (the snapshot keeps the Value the reply returns, so the
+/// wire report and the authorization source always agree). Callers only reach
+/// here after a successful audit, so a failed audit never publishes.
+fn publish_audit_snapshot(
+  state: &mut AppAuditState,
+  report: &spacelens_app_audit::AppAuditReport,
+) -> Result<Value, Value> {
+  let audit_id = crate::app_cleanup::new_audit_id();
+  let mut locations_by_app: std::collections::HashMap<String, Vec<PathBuf>> =
+    std::collections::HashMap::new();
+  let mut app_paths: std::collections::HashMap<String, PathBuf> = std::collections::HashMap::new();
   for app in &report.apps {
+    locations_by_app.insert(
+      app.id.clone(),
+      app
+        .locations
+        .iter()
+        .map(|location| PathBuf::from(&location.path))
+        .collect(),
+    );
     let Some(app_path) = app.app_path.as_deref() else {
       continue;
     };
     if let Ok(canonical) = std::fs::canonicalize(app_path) {
-      state.known_paths.insert(canonical);
+      state.known_paths.insert(canonical.clone());
+      app_paths.insert(app.id.clone(), canonical);
     }
   }
-  serde_json::to_value(report).map_err(|error| problem_value("InternalError", error))
+  // Serialize the report ONCE: the snapshot keeps this Value and the reply
+  // returns it, so the wire report and the authorization source agree.
+  let mut value =
+    serde_json::to_value(report).map_err(|error| problem_value("InternalError", error))?;
+  value
+    .as_object_mut()
+    .ok_or_else(|| {
+      problem_value(
+        "InternalError",
+        "audit report did not serialize to an object",
+      )
+    })?
+    .insert("auditId".to_string(), Value::String(audit_id.clone()));
+  state.audit = Some(AuditSnapshot {
+    audit_id,
+    report: value.clone(),
+    locations_by_app,
+    app_paths,
+  });
+  Ok(value)
 }
 
 /// Standalone icon read: serves a downscaled PNG data URL for one audited app.
@@ -629,6 +708,9 @@ pub async fn sl_submit(
         }
         Ok(())
       }
+      SubmitRequest::AppCleanupPlan { .. } | SubmitRequest::AppCleanupExecute { .. } => {
+        submit_app_cleanup_reply(&bundle, request, &reply)
+      }
       request => {
         let mut engine = bundle.engine.lock().unwrap();
         submit_engine_reply(&mut engine, &bundle.events, request, &reply)
@@ -682,6 +764,56 @@ fn run_local_scan_task(bundle: &SessionBundle, task: LocalScanTask) {
   }
 }
 
+/// App-scoped cleanup dispatch: clones the current audit snapshot under a
+/// short app-audit lock, then works only against the app-cleanup state. The
+/// engine lock is never taken on this path.
+fn submit_app_cleanup_plan(
+  bundle: &SessionBundle,
+  request: AppCleanupPlanRequest,
+) -> Result<Value, Value> {
+  let snapshot = bundle.app_audit.lock().unwrap().audit.clone();
+  let Some(snapshot) = snapshot else {
+    return Err(problem_value(
+      "InvalidRequest",
+      "audit is stale; re-run the audit",
+    ));
+  };
+  let mut cleanup = bundle.app_cleanup.lock().unwrap();
+  crate::app_cleanup::plan_app_cleanup(&mut cleanup, &snapshot, &request)
+}
+
+fn submit_app_cleanup_execute(
+  bundle: &SessionBundle,
+  request: AppCleanupExecuteRequest,
+) -> Result<Value, Value> {
+  let snapshot = bundle.app_audit.lock().unwrap().audit.clone();
+  let mut cleanup = bundle.app_cleanup.lock().unwrap();
+  crate::app_cleanup::execute_app_cleanup(&mut cleanup, snapshot.as_ref(), &request)
+}
+
+fn submit_app_cleanup_reply(
+  bundle: &SessionBundle,
+  request: SubmitRequest,
+  reply: &Channel<Value>,
+) -> Result<(), Value> {
+  // Rejected plans/executions reply through the Channel like every engine
+  // failure — they never escape the command and never touch the engine.
+  let value: Result<Value, Value> = match request {
+    SubmitRequest::AppCleanupPlan { request } => submit_app_cleanup_plan(bundle, request),
+    SubmitRequest::AppCleanupExecute { request } => submit_app_cleanup_execute(bundle, request),
+    _ => Err(problem_value(
+      "InternalError",
+      "engine submits never route to app cleanup",
+    )),
+  };
+  reply
+    .send(match value {
+      Ok(value) => json!({ "ok": true, "result": value }),
+      Err(problem) => json!({ "ok": false, "problem": problem }),
+    })
+    .map_err(|error| problem_value("InternalError", error))
+}
+
 fn submit_engine_reply(
   engine: &mut EngineStore,
   events: &EventSink,
@@ -704,6 +836,12 @@ fn submit_engine_reply(
     SubmitRequest::CleanupExecute { request } => {
       serde_json::to_value(engine.execute(&request).map_err(problem_to_value)?)
         .map_err(|error| problem_value("InternalError", error))
+    }
+    SubmitRequest::AppCleanupPlan { .. } | SubmitRequest::AppCleanupExecute { .. } => {
+      Err(problem_value(
+        "InternalError",
+        "app cleanup is dispatched before the engine lock",
+      ))
     }
   })();
   reply
@@ -732,7 +870,12 @@ pub async fn sl_host_request(
       let _ = reply.send(json!({ "ok": false, "problem": problem }));
       return Ok(());
     }
-    let value: Value = match request {
+    let sessions = state.sessions.lock().unwrap();
+    let bundle = sessions.get(&session_id).cloned().ok_or_else(
+      || json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}),
+    )?;
+    drop(sessions);
+    let value: Result<Value, Value> = match request {
       HostRequest::PickDirectory { title } => {
         use tauri_plugin_dialog::DialogExt;
         let _ = title;
@@ -740,12 +883,21 @@ pub async fn sl_host_request(
         // thread): the dialog is modal to this window and the
         // WebView stays alive throughout.
         let picked = app.dialog().file().blocking_pick_folder();
-        json!({
+        Ok(json!({
             "picked": picked.map(|path| path.to_string()),
-        })
+        }))
+      }
+      HostRequest::RevealPath { app_id, path } => {
+        // Allow-listed against the current audit generation only; anything
+        // else is Forbidden, never a raw filesystem reveal.
+        let snapshot = bundle.app_audit.lock().unwrap().audit.clone();
+        crate::app_cleanup::reveal_app_location(snapshot.as_ref(), &app_id, &path)
       }
     };
-    let _ = reply.send(json!({ "ok": true, "result": value }));
+    let _ = reply.send(match value {
+      Ok(value) => json!({ "ok": true, "result": value }),
+      Err(problem) => json!({ "ok": false, "problem": problem }),
+    });
     Ok(())
   });
   handle
@@ -1044,6 +1196,7 @@ mod tests {
       events: crate::events::EventSink::new(),
       discovery: std::sync::Mutex::new(()),
       app_audit: std::sync::Mutex::new(super::AppAuditState::default()),
+      app_cleanup: std::sync::Mutex::new(crate::app_cleanup::AppCleanupState::default()),
     };
     super::run_local_scan_task(&bundle, task);
     let status = bundle
@@ -1094,8 +1247,11 @@ mod tests {
     assert_eq!(capabilities["scan"]["maxConcurrent"], 1);
     assert_eq!(capabilities["cleanup"]["plan"], true);
     assert_eq!(capabilities["cleanup"]["execute"], true);
+    assert_eq!(capabilities["cleanup"]["appPlan"], true);
+    assert_eq!(capabilities["cleanup"]["appExecute"], true);
     assert_eq!(capabilities["cleanup"]["mode"], "trash");
     assert_eq!(capabilities["host"]["folderPicker"], true);
+    assert_eq!(capabilities["host"]["appLocationReveal"], true);
   }
 
   #[test]
@@ -1151,6 +1307,7 @@ mod tests {
       events: crate::events::EventSink::new(),
       discovery: Mutex::new(()),
       app_audit: Mutex::new(super::AppAuditState::default()),
+      app_cleanup: Mutex::new(crate::app_cleanup::AppCleanupState::default()),
     });
     let walks = Arc::new(AtomicUsize::new(0));
     let (started_tx, started_rx) = mpsc::channel();
@@ -1345,6 +1502,7 @@ mod tests {
       events: crate::events::EventSink::new(),
       discovery: std::sync::Mutex::new(()),
       app_audit: std::sync::Mutex::new(super::AppAuditState::default()),
+      app_cleanup: std::sync::Mutex::new(crate::app_cleanup::AppCleanupState::default()),
     };
     let problem = super::read_app_icon(&bundle, &probe.to_string_lossy()).unwrap_err();
     assert_eq!(problem["problem"]["code"], "Forbidden");
@@ -1363,5 +1521,739 @@ mod tests {
     let problem = super::read_app_icon(&bundle, &probe.to_string_lossy()).unwrap_err();
     assert_eq!(problem["problem"]["code"], "NotFound");
     std::fs::remove_file(&probe).unwrap();
+  }
+
+  // ------------------------------------------------- app storage v2 fixtures
+
+  fn app_cleanup_temp_root(tag: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("sl-app-cleanup-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    // Canonicalize up front so expected paths match the canonical strings the
+    // snapshot and plan traffic in.
+    root.canonicalize().unwrap()
+  }
+
+  fn app_cleanup_bundle() -> super::SessionBundle {
+    super::SessionBundle {
+      window_label: "fixture".into(),
+      engine: std::sync::Mutex::new(crate::engine::EngineStore::new(Vec::new())),
+      events: crate::events::EventSink::new(),
+      discovery: std::sync::Mutex::new(()),
+      app_audit: std::sync::Mutex::new(super::AppAuditState::default()),
+      app_cleanup: std::sync::Mutex::new(crate::app_cleanup::AppCleanupState::default()),
+    }
+  }
+
+  fn app_cleanup_snapshot(
+    audit_id: &str,
+    locations: &[(&str, Vec<std::path::PathBuf>)],
+    bundles: &[(&str, std::path::PathBuf)],
+  ) -> crate::app_cleanup::AuditSnapshot {
+    crate::app_cleanup::AuditSnapshot {
+      audit_id: audit_id.into(),
+      report: serde_json::json!({}),
+      locations_by_app: locations
+        .iter()
+        .map(|(app, paths)| (app.to_string(), paths.clone()))
+        .collect(),
+      app_paths: bundles
+        .iter()
+        .map(|(app, path)| (app.to_string(), path.clone()))
+        .collect(),
+    }
+  }
+
+  fn synthetic_audit_report(
+    entries: Vec<(String, Option<String>, Vec<String>)>,
+  ) -> spacelens_app_audit::AppAuditReport {
+    spacelens_app_audit::AppAuditReport {
+      platform: "test".into(),
+      generated_at: "2026-10-13T00:00:00Z".into(),
+      apps: entries
+        .into_iter()
+        .map(
+          |(id, app_path, locations)| spacelens_app_audit::AppAuditEntry {
+            id: id.clone(),
+            name: id,
+            kind: spacelens_app_audit::AppKind::App,
+            source: spacelens_app_audit::AuditSource::Heuristic,
+            bundle_id: None,
+            app_path,
+            installed_size: 0,
+            total_size: 0,
+            locations: locations
+              .into_iter()
+              .map(|path| spacelens_app_audit::AppAuditLocation {
+                path,
+                label: None,
+                classification: spacelens_app_audit::Classification::Cache,
+                purgeable: true,
+                comment: None,
+                size: 0,
+                source: spacelens_app_audit::AuditSource::Heuristic,
+              })
+              .collect(),
+          },
+        )
+        .collect(),
+      total_apps: 0,
+      truncated: false,
+    }
+  }
+
+  #[test]
+  fn audit_publish_swaps_snapshot_with_fresh_id_and_locations() {
+    let root = app_cleanup_temp_root("snapshot");
+    let location = root.join("cache");
+    std::fs::create_dir_all(&location).unwrap();
+    std::fs::write(location.join("blob.bin"), vec![b'x'; 4096]).unwrap();
+    let bundle_path = root.join("Fixture.app");
+    std::fs::create_dir_all(&bundle_path).unwrap();
+    let location_string = location.to_string_lossy().into_owned();
+    let bundle_string = bundle_path.to_string_lossy().into_owned();
+
+    let mut state = super::AppAuditState::default();
+    // A refused audit publishes nothing.
+    assert!(state.audit.is_none());
+    let first = super::publish_audit_snapshot(
+      &mut state,
+      &synthetic_audit_report(vec![(
+        "app1".into(),
+        Some(bundle_string.clone()),
+        vec![location_string.clone()],
+      )]),
+    )
+    .unwrap();
+    let first_id = first["auditId"].as_str().unwrap().to_string();
+    assert!(first_id.starts_with("audit_"));
+    assert!(first_id.len() > "audit_".len() + 8);
+    let snapshot = state.audit.clone().expect("snapshot published");
+    assert_eq!(snapshot.audit_id, first_id);
+    assert_eq!(snapshot.report, first);
+    assert_eq!(
+      snapshot.locations_by_app["app1"],
+      vec![std::path::PathBuf::from(&location_string)]
+    );
+    assert_eq!(
+      snapshot.app_paths["app1"],
+      std::fs::canonicalize(&bundle_path).unwrap()
+    );
+    assert!(state
+      .known_paths
+      .contains(&std::fs::canonicalize(&bundle_path).unwrap()));
+
+    // A second generation replaces the first atomically with a fresh id.
+    let second = super::publish_audit_snapshot(
+      &mut state,
+      &synthetic_audit_report(vec![("app1".into(), None, vec![location_string.clone()])]),
+    )
+    .unwrap();
+    let second_id = second["auditId"].as_str().unwrap();
+    assert_ne!(second_id, first_id);
+    let snapshot = state.audit.clone().expect("snapshot replaced");
+    assert_eq!(snapshot.audit_id, second_id);
+    assert_eq!(snapshot.report, second);
+    // The icon allow-list accumulates across generations (unchanged behavior).
+    assert!(state
+      .known_paths
+      .contains(&std::fs::canonicalize(&bundle_path).unwrap()));
+    std::fs::remove_dir_all(&root).unwrap();
+  }
+
+  #[test]
+  fn failed_audit_never_publishes_a_snapshot() {
+    let bundle = app_cleanup_bundle();
+    let problem = super::read_app_audit_inner(&bundle, 0, true, 0, None).unwrap_err();
+    assert_eq!(problem["problem"]["code"], "InvalidRequest");
+    assert!(bundle.app_audit.lock().unwrap().audit.is_none());
+  }
+
+  #[test]
+  fn app_cleanup_plan_refuses_foreign_and_misshaped_requests() {
+    let root = app_cleanup_temp_root("refusals");
+    let app1_loc = root.join("app1-cache");
+    let app2_loc = root.join("app2-cache");
+    for dir in [&app1_loc, &app2_loc] {
+      std::fs::create_dir_all(dir).unwrap();
+      std::fs::write(dir.join("blob.bin"), vec![b'x'; 1024]).unwrap();
+    }
+    let bundle_path = root.join("App1.app");
+    std::fs::create_dir_all(&bundle_path).unwrap();
+    let snapshot = app_cleanup_snapshot(
+      "audit_abcdef1234567890abcdef",
+      &[
+        ("app1", vec![app1_loc.clone()]),
+        ("app2", vec![app2_loc.clone()]),
+      ],
+      &[("app1", bundle_path.clone())],
+    );
+    let plan = |state: &mut crate::app_cleanup::AppCleanupState,
+                req: crate::app_cleanup::AppCleanupPlanRequest| {
+      crate::app_cleanup::plan_app_cleanup(state, &snapshot, &req)
+    };
+    let base = |paths: Vec<String>| crate::app_cleanup::AppCleanupPlanRequest {
+      audit_id: "audit_abcdef1234567890abcdef".into(),
+      app_id: "app1".into(),
+      paths,
+    };
+
+    let mut state = crate::app_cleanup::AppCleanupState::default();
+    // Stale generation.
+    let problem = plan(
+      &mut state,
+      crate::app_cleanup::AppCleanupPlanRequest {
+        audit_id: "audit_000000000000000000000000".into(),
+        ..base(vec![app1_loc.to_string_lossy().into_owned()])
+      },
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "InvalidRequest");
+    // Arbitrary path: never reported.
+    let problem = plan(
+      &mut state,
+      base(vec![root.join("elsewhere").to_string_lossy().into_owned()]),
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "Forbidden");
+    // Bundle path: allow-listed for icons/reveal, never stageable.
+    let problem = plan(
+      &mut state,
+      base(vec![bundle_path.to_string_lossy().into_owned()]),
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "Forbidden");
+    // Another app's location.
+    let problem = plan(
+      &mut state,
+      base(vec![app2_loc.to_string_lossy().into_owned()]),
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "Forbidden");
+    // Unknown app id.
+    let problem = plan(
+      &mut state,
+      crate::app_cleanup::AppCleanupPlanRequest {
+        app_id: "nope".into(),
+        ..base(vec![app1_loc.to_string_lossy().into_owned()])
+      },
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "Forbidden");
+    // Shape bounds: empty/oversized paths and app ids.
+    for bad in [
+      base(Vec::new()),
+      base(vec!["/tmp/x".into(); 201]),
+      crate::app_cleanup::AppCleanupPlanRequest {
+        app_id: String::new(),
+        ..base(vec![app1_loc.to_string_lossy().into_owned()])
+      },
+    ] {
+      assert_eq!(
+        plan(&mut state, bad).unwrap_err()["problem"]["code"],
+        "InvalidRequest"
+      );
+    }
+    assert!(crate::app_cleanup::plan_count_for_test(&state) == 0);
+    std::fs::remove_dir_all(&root).unwrap();
+  }
+
+  #[test]
+  fn app_cleanup_plan_prunes_nested_staging() {
+    let root = app_cleanup_temp_root("nesting");
+    let parent = root.join("parent");
+    let child = parent.join("child");
+    std::fs::create_dir_all(&child).unwrap();
+    std::fs::write(parent.join("top.bin"), vec![b'x'; 4096]).unwrap();
+    std::fs::write(child.join("nested.bin"), vec![b'y'; 4096]).unwrap();
+    let snapshot = app_cleanup_snapshot(
+      "audit_abcdef1234567890abcdef",
+      &[("app1", vec![parent.clone(), child.clone()])],
+      &[],
+    );
+    let mut state = crate::app_cleanup::AppCleanupState::default();
+    // Child listed first proves the shallow-first sort, not input order, wins.
+    let value = crate::app_cleanup::plan_app_cleanup(
+      &mut state,
+      &snapshot,
+      &crate::app_cleanup::AppCleanupPlanRequest {
+        audit_id: "audit_abcdef1234567890abcdef".into(),
+        app_id: "app1".into(),
+        paths: vec![
+          child.to_string_lossy().into_owned(),
+          parent.to_string_lossy().into_owned(),
+          parent.to_string_lossy().into_owned(),
+        ],
+      },
+    )
+    .unwrap();
+    let entries = value["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1, "covered descendant must be pruned");
+    assert_eq!(entries[0]["path"], parent.to_string_lossy().as_ref());
+    assert_eq!(entries[0]["reason"], "staged app location");
+    assert_eq!(entries[0]["preset"], serde_json::Value::Null);
+    assert_eq!(entries[0]["ignored"], false);
+    assert_eq!(value["mode"], "trash");
+    assert_eq!(value["auditId"], "audit_abcdef1234567890abcdef");
+    assert_eq!(value["appId"], "app1");
+    assert!(value["planId"].as_str().unwrap().starts_with("plan_"));
+    assert!(value["expiresAt"].as_str().unwrap() > value["createdAt"].as_str().unwrap());
+    assert_eq!(value["totalSize"], entries[0]["size"]);
+    std::fs::remove_dir_all(&root).unwrap();
+  }
+
+  #[test]
+  fn app_cleanup_manifest_drift_fails_stale_and_consumes_the_plan() {
+    let root = app_cleanup_temp_root("drift");
+    let target = root.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("data.bin"), vec![b'x'; 4096]).unwrap();
+    let snapshot = app_cleanup_snapshot(
+      "audit_abcdef1234567890abcdef",
+      &[("app1", vec![target.clone()])],
+      &[],
+    );
+    let mut state = crate::app_cleanup::AppCleanupState::default();
+    let plan_id = crate::app_cleanup::plan_app_cleanup(
+      &mut state,
+      &snapshot,
+      &crate::app_cleanup::AppCleanupPlanRequest {
+        audit_id: "audit_abcdef1234567890abcdef".into(),
+        app_id: "app1".into(),
+        paths: vec![target.to_string_lossy().into_owned()],
+      },
+    )
+    .unwrap()["planId"]
+      .as_str()
+      .unwrap()
+      .to_string();
+    // Grow a grandchild: the target directory's own size/mtime may not move,
+    // but the recursive manifest must catch the drift.
+    std::fs::write(target.join("data.bin"), vec![b'x'; 8192]).unwrap();
+    let problem = crate::app_cleanup::execute_app_cleanup(
+      &mut state,
+      Some(&snapshot),
+      &crate::app_cleanup::AppCleanupExecuteRequest {
+        plan_id: plan_id.clone(),
+        confirm: true,
+      },
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "StalePlan");
+    // Consumed plans never run twice, even when the first run refused.
+    let replay = crate::app_cleanup::execute_app_cleanup(
+      &mut state,
+      Some(&snapshot),
+      &crate::app_cleanup::AppCleanupExecuteRequest {
+        plan_id,
+        confirm: true,
+      },
+    )
+    .unwrap_err();
+    assert_eq!(replay["problem"]["code"], "NotFound");
+    std::fs::remove_dir_all(&root).unwrap();
+  }
+
+  #[test]
+  fn app_cleanup_plan_expiry_and_confirm_are_enforced() {
+    let root = app_cleanup_temp_root("expiry");
+    let target = root.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("data.bin"), vec![b'x'; 1024]).unwrap();
+    let snapshot = app_cleanup_snapshot(
+      "audit_abcdef1234567890abcdef",
+      &[("app1", vec![target.clone()])],
+      &[],
+    );
+    let request = crate::app_cleanup::AppCleanupPlanRequest {
+      audit_id: "audit_abcdef1234567890abcdef".into(),
+      app_id: "app1".into(),
+      paths: vec![target.to_string_lossy().into_owned()],
+    };
+    let mut state = crate::app_cleanup::AppCleanupState::default();
+    let plan_id = crate::app_cleanup::plan_app_cleanup(&mut state, &snapshot, &request).unwrap()
+      ["planId"]
+      .as_str()
+      .unwrap()
+      .to_string();
+    crate::app_cleanup::backdate_plan_for_test(
+      &mut state,
+      &plan_id,
+      std::time::Duration::from_secs(601),
+    );
+    let problem = crate::app_cleanup::execute_app_cleanup(
+      &mut state,
+      Some(&snapshot),
+      &crate::app_cleanup::AppCleanupExecuteRequest {
+        plan_id,
+        confirm: true,
+      },
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "StalePlan");
+
+    // confirm:false refuses before the plan is even looked up.
+    let plan_id = crate::app_cleanup::plan_app_cleanup(&mut state, &snapshot, &request).unwrap()
+      ["planId"]
+      .as_str()
+      .unwrap()
+      .to_string();
+    let problem = crate::app_cleanup::execute_app_cleanup(
+      &mut state,
+      Some(&snapshot),
+      &crate::app_cleanup::AppCleanupExecuteRequest {
+        plan_id: plan_id.clone(),
+        confirm: false,
+      },
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "InvalidRequest");
+    // Unknown plans are NotFound.
+    let problem = crate::app_cleanup::execute_app_cleanup(
+      &mut state,
+      Some(&snapshot),
+      &crate::app_cleanup::AppCleanupExecuteRequest {
+        plan_id: "plan_0000000000000000".into(),
+        confirm: true,
+      },
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "NotFound");
+    std::fs::remove_dir_all(&root).unwrap();
+  }
+
+  #[test]
+  fn app_cleanup_execute_returns_the_engine_outcome_shape_and_replays_fail() {
+    let root = app_cleanup_temp_root("execute");
+    let target = root.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("data.bin"), vec![b'x'; 4096]).unwrap();
+    let snapshot = app_cleanup_snapshot(
+      "audit_abcdef1234567890abcdef",
+      &[("app1", vec![target.clone()])],
+      &[],
+    );
+    let mut state = crate::app_cleanup::AppCleanupState::default();
+    let plan_id = crate::app_cleanup::plan_app_cleanup(
+      &mut state,
+      &snapshot,
+      &crate::app_cleanup::AppCleanupPlanRequest {
+        audit_id: "audit_abcdef1234567890abcdef".into(),
+        app_id: "app1".into(),
+        paths: vec![target.to_string_lossy().into_owned()],
+      },
+    )
+    .unwrap()["planId"]
+      .as_str()
+      .unwrap()
+      .to_string();
+    let outcome = crate::app_cleanup::execute_app_cleanup(
+      &mut state,
+      Some(&snapshot),
+      &crate::app_cleanup::AppCleanupExecuteRequest {
+        plan_id: plan_id.clone(),
+        confirm: true,
+      },
+    )
+    .unwrap();
+    // Engine outcome shape field-for-field: { trashed, bytesFreed, failed }.
+    assert!(outcome.get("trashed").unwrap().is_array());
+    assert!(outcome.get("bytesFreed").unwrap().is_number());
+    assert!(outcome.get("failed").unwrap().is_array());
+    // Both endings are correct here: `trashed` when the test process may talk
+    // to Finder, a typed `failed` entry when it may not (headless CI) —
+    // mirroring the engine's real-trash fixture test.
+    let attempted =
+      outcome["trashed"].as_array().unwrap().len() + outcome["failed"].as_array().unwrap().len();
+    assert_eq!(attempted, 1);
+    if let Some(failure) = outcome["failed"].as_array().unwrap().first() {
+      assert_eq!(failure["code"], "Unavailable");
+    }
+    // One-shot plan.
+    let replay = crate::app_cleanup::execute_app_cleanup(
+      &mut state,
+      Some(&snapshot),
+      &crate::app_cleanup::AppCleanupExecuteRequest {
+        plan_id,
+        confirm: true,
+      },
+    )
+    .unwrap_err();
+    assert_eq!(replay["problem"]["code"], "NotFound");
+    let _ = std::fs::remove_dir_all(&root);
+  }
+
+  #[test]
+  fn app_cleanup_plan_map_evicts_the_oldest_beyond_eight() {
+    let root = app_cleanup_temp_root("evict");
+    let target = root.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("data.bin"), vec![b'x'; 1024]).unwrap();
+    let snapshot = app_cleanup_snapshot(
+      "audit_abcdef1234567890abcdef",
+      &[("app1", vec![target.clone()])],
+      &[],
+    );
+    let mut state = crate::app_cleanup::AppCleanupState::default();
+    let mut ids = Vec::new();
+    for _ in 0..9 {
+      let id = crate::app_cleanup::plan_app_cleanup(
+        &mut state,
+        &snapshot,
+        &crate::app_cleanup::AppCleanupPlanRequest {
+          audit_id: "audit_abcdef1234567890abcdef".into(),
+          app_id: "app1".into(),
+          paths: vec![target.to_string_lossy().into_owned()],
+        },
+      )
+      .unwrap()["planId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+      ids.push(id);
+    }
+    // The oldest plan was evicted; the newest still executes.
+    let evicted = crate::app_cleanup::execute_app_cleanup(
+      &mut state,
+      Some(&snapshot),
+      &crate::app_cleanup::AppCleanupExecuteRequest {
+        plan_id: ids[0].clone(),
+        confirm: true,
+      },
+    )
+    .unwrap_err();
+    assert_eq!(evicted["problem"]["code"], "NotFound");
+    let latest = ids.last().unwrap().clone();
+    let outcome = crate::app_cleanup::execute_app_cleanup(
+      &mut state,
+      Some(&snapshot),
+      &crate::app_cleanup::AppCleanupExecuteRequest {
+        plan_id: latest,
+        confirm: true,
+      },
+    )
+    .unwrap();
+    assert_eq!(
+      outcome["trashed"].as_array().unwrap().len() + outcome["failed"].as_array().unwrap().len(),
+      1
+    );
+    let _ = std::fs::remove_dir_all(&root);
+  }
+
+  #[test]
+  fn rejected_app_cleanup_replies_on_the_channel_without_the_engine_lock() {
+    use std::time::Duration;
+    let bundle = std::sync::Arc::new(app_cleanup_bundle());
+    // Hold the engine lock for the whole test: any engine-lock acquisition on
+    // the worker thread would deadlock and trip the timeout below.
+    let _engine_guard = bundle.engine.lock().unwrap();
+    let run_on_worker = |bundle: std::sync::Arc<super::SessionBundle>,
+                         request: super::SubmitRequest|
+     -> serde_json::Value {
+      let (done_tx, done_rx) = std::sync::mpsc::channel();
+      let channel = tauri::ipc::Channel::<serde_json::Value>::new(move |body| {
+        let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+          panic!("expected JSON channel reply")
+        };
+        done_tx
+          .send(serde_json::from_str::<serde_json::Value>(&json).unwrap())
+          .unwrap();
+        Ok(())
+      });
+      std::thread::spawn(move || {
+        super::submit_app_cleanup_reply(&bundle, request, &channel).unwrap();
+      });
+      done_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("app cleanup must reply without the engine lock")
+    };
+
+    // No audit yet: stale generation, straight to the channel.
+    let reply = run_on_worker(
+      bundle.clone(),
+      super::SubmitRequest::AppCleanupPlan {
+        request: crate::app_cleanup::AppCleanupPlanRequest {
+          audit_id: "audit_abcdef1234567890abcdef".into(),
+          app_id: "app1".into(),
+          paths: vec!["/tmp/x".into()],
+        },
+      },
+    );
+    assert_eq!(reply["ok"], false);
+    assert_eq!(reply["problem"]["problem"]["code"], "InvalidRequest");
+
+    // Publish a generation, then stage a foreign path: Forbidden, no engine.
+    let root = app_cleanup_temp_root("channel");
+    let allowed = root.join("allowed");
+    std::fs::create_dir_all(&allowed).unwrap();
+    bundle.app_audit.lock().unwrap().audit = Some(app_cleanup_snapshot(
+      "audit_abcdef1234567890abcdef",
+      &[("app1", vec![allowed])],
+      &[],
+    ));
+    let reply = run_on_worker(
+      bundle.clone(),
+      super::SubmitRequest::AppCleanupPlan {
+        request: crate::app_cleanup::AppCleanupPlanRequest {
+          audit_id: "audit_abcdef1234567890abcdef".into(),
+          app_id: "app1".into(),
+          paths: vec!["/tmp/foreign".into()],
+        },
+      },
+    );
+    assert_eq!(reply["ok"], false);
+    assert_eq!(reply["problem"]["problem"]["code"], "Forbidden");
+
+    // Unknown execute plan: NotFound, no engine.
+    let reply = run_on_worker(
+      bundle.clone(),
+      super::SubmitRequest::AppCleanupExecute {
+        request: crate::app_cleanup::AppCleanupExecuteRequest {
+          plan_id: "plan_0000000000000000".into(),
+          confirm: true,
+        },
+      },
+    );
+    assert_eq!(reply["ok"], false);
+    assert_eq!(reply["problem"]["problem"]["code"], "NotFound");
+    std::fs::remove_dir_all(&root).unwrap();
+  }
+
+  #[test]
+  fn app_cleanup_submit_and_reveal_match_the_closed_ipc_contract() {
+    let plan: super::SubmitRequest = serde_json::from_value(serde_json::json!({
+      "kind": "appCleanupPlan",
+      "auditId": "audit_abcdef1234567890abcdef",
+      "appId": "codex-cli",
+      "paths": ["/tmp/a"],
+    }))
+    .unwrap();
+    assert!(matches!(plan, super::SubmitRequest::AppCleanupPlan { .. }));
+    let execute: super::SubmitRequest = serde_json::from_value(serde_json::json!({
+      "kind": "appCleanupExecute", "planId": "plan_abcdef1234567890", "confirm": true,
+    }))
+    .unwrap();
+    assert!(matches!(
+      execute,
+      super::SubmitRequest::AppCleanupExecute { request } if request.confirm
+    ));
+    // Rust accepts a required boolean and refuses `false` at execute time
+    // (mirroring the engine); unknown fields never pass the closed union.
+    let refused: super::SubmitRequest = serde_json::from_value(serde_json::json!({
+      "kind": "appCleanupExecute", "planId": "plan_abcdef1234567890", "confirm": false,
+    }))
+    .unwrap();
+    assert!(matches!(
+      refused,
+      super::SubmitRequest::AppCleanupExecute { request } if !request.confirm
+    ));
+    assert!(
+      serde_json::from_value::<super::SubmitRequest>(serde_json::json!({
+        "kind": "appCleanupPlan",
+        "auditId": "audit_abcdef1234567890abcdef",
+        "appId": "codex-cli",
+        "paths": ["/tmp/a"],
+        "mode": "permanent",
+      }))
+      .is_err()
+    );
+    let reveal: super::HostRequest = serde_json::from_value(serde_json::json!({
+      "kind": "revealPath", "appId": "codex-cli", "path": "/tmp/a",
+    }))
+    .unwrap();
+    assert!(matches!(reveal, super::HostRequest::RevealPath { .. }));
+    assert!(
+      serde_json::from_value::<super::HostRequest>(serde_json::json!({
+        "kind": "revealPath", "appId": "codex-cli",
+      }))
+      .is_err()
+    );
+    assert!(
+      serde_json::from_value::<super::HostRequest>(serde_json::json!({
+        "kind": "revealPath", "appId": "codex-cli", "path": "/tmp/a", "extra": 1,
+      }))
+      .is_err()
+    );
+  }
+
+  #[test]
+  fn reveal_is_allow_listed_to_the_current_generation() {
+    let root = app_cleanup_temp_root("reveal");
+    let location = root.join("cache");
+    std::fs::create_dir_all(&location).unwrap();
+    std::fs::write(location.join("blob.bin"), b"data").unwrap();
+    let other = root.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    let bundle_path = root.join("App1.app");
+    std::fs::create_dir_all(&bundle_path).unwrap();
+    let snapshot = app_cleanup_snapshot(
+      "audit_abcdef1234567890abcdef",
+      &[
+        ("app1", vec![location.clone()]),
+        ("app2", vec![other.clone()]),
+      ],
+      &[("app1", bundle_path.clone())],
+    );
+    crate::app_cleanup::clear_revealed_for_test();
+
+    // No generation at all: Forbidden, never a raw reveal.
+    let problem =
+      crate::app_cleanup::reveal_app_location(None, "app1", &location.to_string_lossy())
+        .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "Forbidden");
+    // Foreign path (exists, but not this app's): Forbidden.
+    let problem =
+      crate::app_cleanup::reveal_app_location(Some(&snapshot), "app1", &other.to_string_lossy())
+        .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "Forbidden");
+    // Missing path: NotFound.
+    let problem = crate::app_cleanup::reveal_app_location(
+      Some(&snapshot),
+      "app1",
+      &root.join("missing").to_string_lossy(),
+    )
+    .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "NotFound");
+    // Audited location: revealed (the cfg(test) runner records, never spawns).
+    let ok =
+      crate::app_cleanup::reveal_app_location(Some(&snapshot), "app1", &location.to_string_lossy())
+        .unwrap();
+    assert_eq!(ok["revealed"], true);
+    // Bundle path: allowed for review (not for cleanup).
+    let ok = crate::app_cleanup::reveal_app_location(
+      Some(&snapshot),
+      "app1",
+      &bundle_path.to_string_lossy(),
+    )
+    .unwrap();
+    assert_eq!(ok["revealed"], true);
+    let revealed = crate::app_cleanup::revealed_for_test();
+    assert_eq!(revealed.len(), 2);
+    assert!(revealed.contains(&location));
+    assert!(revealed.contains(&bundle_path));
+    crate::app_cleanup::clear_revealed_for_test();
+    std::fs::remove_dir_all(&root).unwrap();
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn reveal_refuses_symlinked_locations() {
+    let root = app_cleanup_temp_root("reveal-link");
+    let location = root.join("cache");
+    std::fs::create_dir_all(&location).unwrap();
+    let link = root.join("link");
+    std::os::unix::fs::symlink(&location, &link).unwrap();
+    let snapshot = app_cleanup_snapshot(
+      "audit_abcdef1234567890abcdef",
+      &[("app1", vec![location])],
+      &[],
+    );
+    // A symlink leaf never resolves: NotFound, even when it points at real data.
+    let problem =
+      crate::app_cleanup::reveal_app_location(Some(&snapshot), "app1", &link.to_string_lossy())
+        .unwrap_err();
+    assert_eq!(problem["problem"]["code"], "NotFound");
+    assert!(crate::app_cleanup::revealed_for_test().is_empty());
+    std::fs::remove_dir_all(&root).unwrap();
   }
 }

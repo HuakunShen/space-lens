@@ -587,7 +587,7 @@ impl EngineStore {
           // twice in the list otherwise. Recovery/Preboot/VM are system
           // partitions with no user data to browse.
           .filter(|path| {
-            path.file_name().map_or(true, |name| {
+            path.file_name().is_none_or(|name| {
               !matches!(
                 name.to_string_lossy().as_ref(),
                 "Macintosh HD" | "Recovery" | "Preboot" | "VM" | "Boot" | "Home"

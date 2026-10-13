@@ -1,3 +1,4 @@
+pub mod app_cleanup;
 pub mod commands;
 pub mod engine;
 pub mod events;
