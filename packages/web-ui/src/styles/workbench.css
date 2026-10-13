@@ -822,10 +822,14 @@
   }
   /* The stage is flex:1 1 0% + min-height:0 by design — it only gets a real
      height from a bounded ancestor flex chain, which the workbench provides
-     and a drawer does not. Pin it here so the ring always has pixels. */
+     and a drawer does not. Size it from the drawer WIDTH instead so the chart
+     fills the rail (sunburst ring diameter = min(w,h)), capped so a very wide
+     rail cannot consume the whole panel. */
   .app-chart-slot .chart-stage {
     flex: 0 0 auto;
-    height: 190px;
+    aspect-ratio: 1 / 1;
+    max-height: 420px;
+    min-height: 220px;
   }
   .app-chart-loading {
     display: flex;
