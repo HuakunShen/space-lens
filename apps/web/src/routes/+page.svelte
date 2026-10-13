@@ -453,8 +453,30 @@
       glassAvailable = false
     }
   }
+  // The desktop shell's native host carries the macOS system accent; only
+  // then does the Accent (System/Default) setting mean anything.
+  let systemAccentAvailable = $state(false)
+  function refreshSystemAccentAvailable(): void {
+    try {
+      const host = (window as unknown as { __nativeHost?: { state?: { accent?: string } } }).__nativeHost
+      systemAccentAvailable = Boolean(host?.state?.accent)
+    } catch {
+      systemAccentAvailable = false
+    }
+  }
   $effect(() => {
-    if (settingsOpen) refreshGlassAvailable()
+    if (settingsOpen) {
+      refreshGlassAvailable()
+      refreshSystemAccentAvailable()
+    }
+  })
+  // Re-running the native apply() honours the persisted accent preference,
+  // so switching System/Default recolors immediately without a reload.
+  $effect(() => {
+    void appearance.accent
+    const host = (window as unknown as { __nativeHost?: { apply?: (state: unknown) => void; state?: unknown } })
+      .__nativeHost
+    host?.apply?.(host.state)
   })
   $effect(() => {
     const scanId = workbench.activeScanId
@@ -1743,6 +1765,8 @@
   mode={userPrefersMode.current}
   transparency={appearance.transparency}
   glassAvailable={glassAvailable}
+  accent={appearance.accent}
+  systemAccentAvailable={systemAccentAvailable}
   automaticStyle={automaticStyle === 'macos'
     ? 'macOS on this platform'
     : automaticStyle === 'windows'
@@ -1757,6 +1781,7 @@
   onDensity={(density) => (appearance.density = density)}
   onMode={setMode}
   onTransparency={(value) => (appearance.transparency = value)}
+  onAccent={(value) => (appearance.accent = value)}
   onCheckUpdates={__SPACLENS_DESKTOP__ ? () => void checkForAppUpdate((status) => (updateStatus = status)) : undefined}
   onInstallUpdate={__SPACLENS_DESKTOP__ ? () => void installAppUpdate((status) => (updateStatus = status)) : undefined}
 />

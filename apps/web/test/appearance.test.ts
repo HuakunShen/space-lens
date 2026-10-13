@@ -8,17 +8,27 @@ test('browser keeps web style while native hosts default to their platform', () 
   assert.equal(resolveStyle('windows', false, 'Macintosh'), 'windows')
 })
 test('corrupt or old stored preferences recover to defaults', () => {
-  assert.deepEqual(parseAppearance('not json'), { style: 'auto', density: 'compact', transparency: 'balanced' })
-  assert.deepEqual(parseAppearance('{"style":"broken","density":"broken","transparency":"broken"}'), {
+  assert.deepEqual(parseAppearance('not json'), {
     style: 'auto',
     density: 'compact',
     transparency: 'balanced',
+    accent: 'system',
   })
-  assert.deepEqual(parseAppearance('{"style":"macos","density":"comfortable","transparency":"glassy"}'), {
-    style: 'macos',
-    density: 'comfortable',
-    transparency: 'glassy',
+  assert.deepEqual(parseAppearance('{"style":"broken","density":"broken","transparency":"broken","accent":"broken"}'), {
+    style: 'auto',
+    density: 'compact',
+    transparency: 'balanced',
+    accent: 'system',
   })
+  assert.deepEqual(
+    parseAppearance('{"style":"macos","density":"comfortable","transparency":"glassy","accent":"default"}'),
+    {
+      style: 'macos',
+      density: 'comfortable',
+      transparency: 'glassy',
+      accent: 'default',
+    },
+  )
 })
 
 test('Linux desktop selects GNOME while browsers and Android keep Web', () => {
@@ -32,6 +42,7 @@ test('GNOME preference survives a reload', () => {
     style: 'linux',
     density: 'comfortable',
     transparency: 'balanced',
+    accent: 'system',
   })
 })
 
@@ -48,6 +59,20 @@ test('transparency parses strictly and defaults to balanced', () => {
 test('a stored appearance round-trips through JSON', () => {
   for (const transparency of ['solid', 'balanced', 'glassy'] as const) {
     const stored = JSON.stringify({ style: 'macos', density: 'comfortable', transparency })
-    assert.deepEqual(parseAppearance(stored), { style: 'macos', density: 'comfortable', transparency })
+    assert.deepEqual(parseAppearance(stored), {
+      style: 'macos',
+      density: 'comfortable',
+      transparency,
+      accent: 'system',
+    })
   }
+})
+
+test('accent parses strictly and defaults to system', () => {
+  assert.equal(parseAppearance('{"accent":"default"}').accent, 'default')
+  assert.equal(parseAppearance('{"accent":"system"}').accent, 'system')
+  // unknown values and legacy payloads without the key fall back to system
+  assert.equal(parseAppearance('{"accent":"hotdog"}').accent, 'system')
+  assert.equal(parseAppearance('{"style":"web"}').accent, 'system')
+  assert.equal(parseAppearance(null).accent, 'system')
 })

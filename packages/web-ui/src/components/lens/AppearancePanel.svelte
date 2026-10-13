@@ -12,6 +12,9 @@
     mode: 'system' | 'light' | 'dark'
     transparency?: 'solid' | 'balanced' | 'glassy'
     glassAvailable?: boolean
+    /** Where the accent color comes from; only meaningful with a native host. */
+    accent?: 'system' | 'default'
+    systemAccentAvailable?: boolean
     automaticStyle: string
     appVersion?: string
     update?: UpdateStatusShape
@@ -20,6 +23,7 @@
     onDensity: (density: Props['density']) => void
     onMode: (mode: Props['mode']) => void
     onTransparency?: (value: NonNullable<Props['transparency']>) => void
+    onAccent?: (value: NonNullable<Props['accent']>) => void
     onCheckUpdates?: () => void
     onInstallUpdate?: () => void
   }
@@ -30,6 +34,8 @@
     mode,
     transparency = 'balanced',
     glassAvailable = false,
+    accent = 'system',
+    systemAccentAvailable = false,
     automaticStyle,
     appVersion,
     update,
@@ -38,6 +44,7 @@
     onDensity,
     onMode,
     onTransparency,
+    onAccent,
     onCheckUpdates,
     onInstallUpdate,
   }: Props = $props()
@@ -49,6 +56,7 @@
     { id: 'linux', label: 'Linux', detail: 'GNOME header bar · roomy controls', icon: Monitor },
   ]
   const transparencyOptions: NonNullable<Props['transparency']>[] = ['solid', 'balanced', 'glassy']
+  const accentOptions: NonNullable<Props['accent']>[] = ['system', 'default']
   const segmentClass =
     'macos:rounded-[5px] macos:border-0 macos:py-1 macos:text-[13px] macos:data-[selected=true]:bg-background macos:data-[selected=true]:shadow-sm windows:relative windows:min-h-9 windows:border-0 windows:data-[selected=true]:bg-card windows:data-[selected=true]:shadow-none windows:data-[selected=true]:after:absolute windows:data-[selected=true]:after:bottom-0 windows:data-[selected=true]:after:left-1/4 windows:data-[selected=true]:after:w-1/2 windows:data-[selected=true]:after:h-0.5 windows:data-[selected=true]:after:bg-primary linux:min-h-10 linux:rounded-lg linux:border-0 linux:text-sm linux:data-[selected=true]:bg-background linux:data-[selected=true]:shadow-sm focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset'
   const updateLabel: Record<UpdateStatusShape['state'], string> = {
@@ -115,6 +123,27 @@
           </div>
           <p class="mt-1.5 text-xs text-muted-foreground">
             Applies to the workspace behind this panel.
+          </p>
+        {/if}
+        {#if systemAccentAvailable}
+          <div
+            class="setting-options macos:overflow-visible macos:gap-0.5 macos:border-0 macos:bg-muted macos:p-0.5 windows:clear-both windows:rounded-[4px] windows:border-0 windows:bg-muted linux:clear-both linux:gap-1 linux:border-0 linux:bg-muted linux:p-1"
+            role="group"
+            aria-label="Accent"
+          >
+            {#each accentOptions as option}
+              <button
+                class={segmentClass}
+                data-selected={accent === option}
+                class:selected={accent === option}
+                type="button"
+                aria-pressed={accent === option}
+                onclick={() => onAccent?.(option)}>{option}</button
+              >
+            {/each}
+          </div>
+          <p class="mt-1.5 text-xs text-muted-foreground">
+            System follows your macOS accent color; Default uses the app palette.
           </p>
         {/if}
       </fieldset>
