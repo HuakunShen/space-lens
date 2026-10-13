@@ -4,6 +4,7 @@
   import { nodeColor, nodeMutedColor, sunburstColor } from '../../lib/colors'
   import { formatBytes } from '../../lib/format'
   import { formatNodeSize } from '../../lib/node-size'
+  import { canCollectNode, collectRefusalReason, isAccountingLeaf, isAppBundleNode } from '../../lib/app-scan'
   import * as ContextMenu from '../ui/context-menu/index'
   import { Button } from '../ui/button/index'
   import { Checkbox } from '../ui/checkbox/index'
@@ -39,6 +40,22 @@
 
   function itemColor(item: TreeNodeSummary): string {
     return item.ignored ? nodeMutedColor(item.depth) : colorMode === 'sunburst' ? sunburstColor(item.id, item.depth, item.id, item.name) : nodeColor(item.id, item.depth, item.id, item.name)
+  }
+
+  // A8: one eligibility predicate drives every collect control. The button,
+  // the menu item and their labels stay in step via canCollectNode.
+  function collectDisabled(item: TreeNodeSummary): boolean {
+    return disabled || isCovered(item) || !canCollectNode(item)
+  }
+  function collectTitle(item: TreeNodeSummary): string {
+    if (isCovered(item)) return 'Included in a selected parent folder'
+    return collectRefusalReason(item) ?? collectLabel(item)
+  }
+  /** A11/A12 provenance subtitle for synthetic app-scan leaves. */
+  function itemSubtitle(item: TreeNodeSummary): string | null {
+    if (isAppBundleNode(item)) return 'App bundle · audit-time size'
+    if (isAccountingLeaf(item)) return "This folder's own files · counted in total"
+    return null
   }
 
   // One collector verb per row state: a collected row offers removal, the rest
@@ -93,24 +110,25 @@
               <button
                 class="min-w-0 text-left macos:[&>span:first-child]:text-[13px] macos:[&>span:nth-child(2)]:text-[11px] windows:[&>span:first-child]:text-sm windows:[&>span:nth-child(2)]:text-xs linux:[&>span:first-child]:text-sm linux:[&>span:nth-child(2)]:text-xs"
                 type="button"
-                disabled={item.scanState === 'skipped'}
+                disabled={item.scanState === 'skipped' || isAccountingLeaf(item)}
                 onclick={() => onOpen(item)}
               >
                 <span class="block truncate text-sm font-medium">{item.name}</span>
                 <span class="block truncate text-xs text-muted-foreground"
-                  >{item.skipReason === 'duplicate-directory'
-                    ? 'Alias · counted elsewhere'
-                    : item.scanState === 'skipped'
-                      ? `Not scanned · ${item.skipReason ?? 'unavailable'}`
-                      : item.scanState === 'partial'
-                        ? `${item.childCount.toLocaleString()} items · partial`
-                        : item.hasChildren
-                          ? `${item.childCount.toLocaleString()} ${item.childCount === 1 ? 'item' : 'items'}`
-                          : item.collapsed
-                            ? 'Summarized folder'
-                            : item.isDirectory
-                              ? 'Empty folder'
-                              : 'File'}</span
+                  >{itemSubtitle(item) ??
+                    (item.skipReason === 'duplicate-directory'
+                      ? 'Alias · counted elsewhere'
+                      : item.scanState === 'skipped'
+                        ? `Not scanned · ${item.skipReason ?? 'unavailable'}`
+                        : item.scanState === 'partial'
+                          ? `${item.childCount.toLocaleString()} items · partial`
+                          : item.hasChildren
+                            ? `${item.childCount.toLocaleString()} ${item.childCount === 1 ? 'item' : 'items'}`
+                            : item.collapsed
+                              ? 'Summarized folder'
+                              : item.isDirectory
+                                ? 'Empty folder'
+                                : 'File')}</span
                 >
               </button>
               <div class="child-size macos:text-[12px] windows:text-[13px] linux:text-[13px]">
@@ -129,10 +147,10 @@
               <div class="flex items-center gap-1">
                 <Checkbox
                   checked={isCollected(item)}
-                  disabled={disabled || isCovered(item) || item.scanState === 'skipped' || item.scanState === 'partial'}
+                  disabled={collectDisabled(item)}
                   onCheckedChange={() => toggle(item)}
                   aria-label={collectLabel(item)}
-                  title={isCovered(item) ? 'Included in a selected parent folder' : collectLabel(item)}
+                  title={collectTitle(item)}
                 />
                 <Button
                   variant="ghost"
@@ -140,7 +158,7 @@
                   type="button"
                   onclick={() => onOpen(item)}
                   aria-label={`Open ${item.name}`}
-                  disabled={item.scanState === 'skipped'}
+                  disabled={item.scanState === 'skipped' || isAccountingLeaf(item)}
                 >
                   <ChevronRight class="size-4" />
                 </Button>
@@ -150,13 +168,13 @@
         </ContextMenu.Trigger>
         <ContextMenu.Content>
           <ContextMenu.Item
-            disabled={disabled || isCovered(item) || item.scanState === 'skipped' || item.scanState === 'partial'}
+            disabled={collectDisabled(item)}
             onclick={() => toggle(item)}
           >
             {#if isCollected(item)}<Minus />{:else}<Plus />{/if}
             {collectLabel(item)}
           </ContextMenu.Item>
-          <ContextMenu.Item disabled={item.scanState === 'skipped'} onclick={() => onOpen(item)}>
+          <ContextMenu.Item disabled={item.scanState === 'skipped' || isAccountingLeaf(item)} onclick={() => onOpen(item)}>
             <FolderOpen />
             Open {item.name}
           </ContextMenu.Item>

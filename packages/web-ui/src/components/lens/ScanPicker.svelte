@@ -1,7 +1,12 @@
 <script lang="ts">
-  import { ArrowRight, FolderSearch, FolderOpen } from '@lucide/svelte'
+  import { ArrowRight, FolderSearch, FolderOpen, LoaderCircle, RefreshCw, Search } from '@lucide/svelte'
+  import type { AppAuditReport } from '@space-lens/contract'
   import type { ScanStatus, ScanTarget, ScanVolume } from '../../types'
+  import type { RecentAppEntry } from '../../lib/app-scan'
   import { formatBytes } from '../../lib/format'
+  import { matchesQuery } from '../../lib/app-audit'
+  import { initialsFor } from '../../lib/app-audit'
+  import { ensureIcon, readIcon, subscribeIcons } from '../../lib/app-icon-cache'
   import { scanTargetPaths } from '../../lib/scan-targets'
   import { Button } from '../ui/button/index'
   import LensToolbar from './LensToolbar.svelte'
@@ -34,6 +39,21 @@
     onPickFolder?: () => Promise<string | null>
     /** Where the window chrome sits; defaults follow the mode. */
     chromeInset?: string
+    /** V3 cached audit report for the Apps section; never auto-fetched. */
+    auditReport?: AppAuditReport | null
+    auditLoading?: boolean
+    auditError?: string | null
+    onRefreshAudit?: () => void
+    /** False on hosts without the appAudit capability (section hidden). */
+    auditSupported?: boolean
+    /** Whether the host can start virtual-root app scans. */
+    appScanSupported?: boolean
+    scanningAppId?: string | null
+    /** Client-side app-scan history incl. A11 provenance/stale flags. */
+    recentApps?: RecentAppEntry[]
+    onScanApp?: (appId: string) => void
+    onForgetApp?: (appId: string) => Promise<void> | void
+    onIcon?: (appPath: string) => Promise<string | null>
   }
 
   let {
@@ -53,9 +73,41 @@
     folderPicker = false,
     onPickFolder = undefined,
     chromeInset = undefined,
+    auditReport = null,
+    auditLoading = false,
+    auditError = null,
+    onRefreshAudit,
+    auditSupported = false,
+    appScanSupported = false,
+    scanningAppId = null,
+    recentApps = [],
+    onScanApp,
+    onForgetApp,
+    onIcon = undefined,
   }: Props = $props()
   let selectedId = $state('')
   let customPath = $state('')
+  let query = $state('')
+  let staleByApp = $derived(new Map((recentApps ?? []).map((entry) => [entry.appId, entry.stale === true])))
+  let filteredApps = $derived((auditReport?.apps ?? []).filter((app) => matchesQuery(app, query)))
+  let showApps = $derived(
+    auditSupported && (onScanApp !== undefined || (recentApps ?? []).length > 0 || auditReport !== null),
+  )
+  // App icons resolve through the shared cache; failures stay failed.
+  let iconTick = $state(0)
+  $effect(() => subscribeIcons(() => (iconTick += 1)))
+  $effect(() => {
+    if (!onIcon) return
+    for (const app of filteredApps) {
+      if (app.appPath && app.kind !== 'cli') ensureIcon(app.appPath, onIcon)
+    }
+  })
+  function appIconUrl(appPath: string | null, kind: string): string | null {
+    void iconTick
+    if (!appPath || kind === 'cli') return null
+    const cached = readIcon(appPath)
+    return cached?.status === 'ready' ? (cached.url ?? null) : null
+  }
   $effect(() => {
     if (initialPath) {
       customPath = initialPath
@@ -128,6 +180,10 @@
         {busy}
         {onForget}
         {onSettings}
+        query={query}
+        recentApps={recentApps ?? []}
+        onSelectApp={onScanApp}
+        onForgetApp={onForgetApp}
         onSelect={(target) => (selectedId = target.id)}
         onCustom={() => (selectedId = 'custom')}
       />
@@ -150,6 +206,14 @@
           </h1>
           <p class="mt-2 text-sm text-muted-foreground">Explore disk usage and find space to reclaim.</p>
         </header>
+        <label class="relative mb-4 flex items-center gap-2"
+          ><Search size={15} /><Input
+            type="search"
+            bind:value={query}
+            placeholder="Search locations and apps…"
+            aria-label="Search locations and apps"
+          /></label
+        >
         <form
           class="grid gap-6 web:rounded-xl web:border web:bg-card web:p-6 windows:rounded-lg windows:border windows:bg-card windows:p-6 linux:rounded-xl linux:border linux:bg-card linux:p-6"
           onsubmit={(event) => {
@@ -198,6 +262,125 @@
             >
           </div>
         </form>
+        {#if showApps}
+          <section class="picker-apps" aria-label="Apps">
+            <div class="mt-6 mb-2 flex items-center justify-between gap-2">
+              <h2 class="text-sm font-semibold">Apps</h2>
+              {#if auditReport}
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] text-muted-foreground" title={auditReport.generatedAt}
+                    >Audited {new Date(auditReport.generatedAt).toLocaleString()}</span
+                  >
+                  {#if onRefreshAudit}<Button
+                      variant="outline"
+                      size="sm"
+                      disabled={auditLoading || busy}
+                      onclick={onRefreshAudit}
+                      title="Refresh the app audit (takes a minute or two)"
+                      ><RefreshCw size={13} class={auditLoading ? 'animate-spin' : ''} /> Refresh</Button
+                    >{/if}
+                </div>
+              {:else if onRefreshAudit}
+                <Button variant="outline" size="sm" disabled={auditLoading || busy} onclick={onRefreshAudit}
+                  ><RefreshCw size={13} class={auditLoading ? 'animate-spin' : ''} />
+                  {auditLoading ? 'Auditing…' : 'Run audit'}</Button
+                >
+              {/if}
+            </div>
+            {#if auditLoading && !auditReport}
+              <p class="flex items-center gap-2 text-sm text-muted-foreground" role="status">
+                <LoaderCircle size={15} class="animate-spin" /> Auditing installed apps — this takes a minute or two.
+              </p>
+            {:else if auditError && !auditReport}
+              <div class="inline-error" role="alert">
+                <p>{auditError}</p>
+                {#if onRefreshAudit}<Button variant="outline" size="sm" onclick={onRefreshAudit}>Try again</Button>{/if}
+              </div>
+            {:else if auditReport}
+              {#if auditError}<p class="mb-2 text-xs text-muted-foreground" role="status">
+                  Refresh failed — showing the cached audit. {auditError}
+                </p>{/if}
+              {#if filteredApps.length > 0}
+                <ul class="grid gap-2">
+                  {#each filteredApps as app (app.id)}
+                    {@const icon = appIconUrl(app.appPath, app.kind)}
+                    {@const stale = staleByApp.get(app.id) === true}
+                    {@const scanning = scanningAppId === app.id}
+                    <li
+                      class="flex items-center gap-2 rounded-lg border bg-card p-2"
+                      class:opacity-70={scanning}
+                    >
+                      {#if icon}
+                        <img src={icon} alt="" aria-hidden="true" class="size-7 shrink-0 rounded-md object-contain" />
+                      {:else}
+                        <div
+                          class="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-semibold text-muted-foreground"
+                          aria-hidden="true">{initialsFor(app.name)}</div
+                        >
+                      {/if}
+                      <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-1.5">
+                          <strong class="min-w-0 truncate text-[13px] font-semibold" title={app.name}>{app.name}</strong>
+                          {#if stale}<span
+                              class="shrink-0 rounded-full border border-amber-500/50 px-1.5 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                              title="Audit refreshed or files changed after cleanup — rescan for current sizes"
+                              role="status">Stale</span
+                            >{/if}
+                        </div>
+                        <p class="truncate text-[11px] tabular-nums text-muted-foreground">
+                          {formatBytes(app.totalSize)} · {app.locations.length} location{app.locations.length === 1
+                            ? ''
+                            : 's'}
+                        </p>
+                      </div>
+                      {#if onScanApp}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={busy || scanning || !appScanSupported}
+                          title={appScanSupported
+                            ? `Scan ${app.name}`
+                            : 'App scans need the desktop host'}
+                          onclick={() => onScanApp(app.id)}
+                          >{scanning ? 'Scanning…' : 'Scan'}</Button
+                        >
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {:else}
+                <p class="text-sm text-muted-foreground">No matching apps. Try a different search.</p>
+              {/if}
+            {:else if (recentApps ?? []).length > 0}
+              <!-- No cached report yet: fall back to recent-app names only. -->
+              <ul class="grid gap-2">
+                {#each (recentApps ?? []).filter((entry) => entry.appName.toLowerCase().includes(query.trim().toLowerCase())) as entry (entry.appId)}
+                  <li class="flex items-center gap-2 rounded-lg border bg-card p-2">
+                    <div
+                      class="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-semibold text-muted-foreground"
+                      aria-hidden="true">{initialsFor(entry.appName)}</div
+                    >
+                    <div class="min-w-0 flex-1">
+                      <strong class="block truncate text-[13px] font-semibold" title={entry.appName}>{entry.appName}</strong>
+                      <p class="truncate text-[11px] text-muted-foreground">Previously scanned</p>
+                    </div>
+                    {#if onScanApp}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy || !appScanSupported}
+                        onclick={() => onScanApp(entry.appId)}>{scanningAppId === entry.appId ? 'Scanning…' : 'Scan'}</Button
+                      >
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+              <p class="mt-2 text-[11px] text-muted-foreground">Run the audit for sizes and the full app list.</p>
+            {:else}
+              <p class="text-sm text-muted-foreground">Run the audit to browse installed apps here.</p>
+            {/if}
+          </section>
+        {/if}
         {#if status?.state === 'scanning'}
           <section class="mt-6 grid gap-3 rounded-lg border bg-card p-5" aria-label="Scan progress" role="status">
             <div class="flex items-center justify-between gap-3">

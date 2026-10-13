@@ -12,7 +12,8 @@
     Settings,
     RefreshCw,
   } from '@lucide/svelte'
-  import type { ScanTarget, ScanVolume } from '../../types'
+  import type { ScanStatus, ScanTarget, ScanVolume } from '../../types'
+  import type { RecentAppEntry } from '../../lib/app-scan'
   import { formatBytes } from '../../lib/format'
   import { scanVolumeLabel, volumeCapacity } from '../../lib/scan-volume'
 
@@ -31,6 +32,20 @@
     onSelect: (target: ScanTarget) => void
     onCustom: () => void
     onForget?: (path: string) => Promise<void> | void
+    /** V3 live app-scan sessions for the app switcher (§2.3). */
+    appScans?: ScanStatus[]
+    activeScanId?: string | null
+    onSwitchScan?: (scanId: string) => void
+    /** Scan ids with a stale audit generation (badge + rescan affordance). */
+    staleScanIds?: Set<string> | string[]
+    /** Client-side app-scan history (badges survive reload via A11 metadata). */
+    recentApps?: RecentAppEntry[]
+    onSelectApp?: (appId: string) => void
+    onForgetApp?: (appId: string) => Promise<void> | void
+    /** A6: switching sessions is blocked while a cleanup executes. */
+    switchingBlocked?: boolean
+    /** Picker search text; narrows locations, recents and recent apps. */
+    query?: string
     /** The volume the current scan lives on, for the capacity card. */
     volume?: ScanVolume | null
     /** What the last scan measured, shown under the capacity bar. */
@@ -56,6 +71,15 @@
     onSelect,
     onCustom,
     onForget,
+    appScans = [],
+    activeScanId = null,
+    onSwitchScan,
+    staleScanIds,
+    recentApps = [],
+    onSelectApp,
+    onForgetApp,
+    switchingBlocked = false,
+    query = '',
     volume = null,
     scanBytes = 0,
     scanEntries = 0,
@@ -66,6 +90,13 @@
 
   let capacity = $derived(volumeCapacity(volume))
   let driveName = $derived(volume ? scanVolumeLabel(volume, targets) : '')
+  /** Picker search narrows locations, recents and recent apps; sessions stay. */
+  let queryValue = $derived((query ?? '').trim().toLowerCase())
+  let staleSet = $derived(staleScanIds instanceof Set ? staleScanIds : new Set(staleScanIds ?? []))
+  let liveAppScans = $derived((appScans ?? []).filter((scan) => scan.app))
+  function appScanLabel(scan: ScanStatus): string {
+    return scan.label ?? scan.app?.appName ?? scan.app?.appId ?? scan.scanId
+  }
   let capacityLabel = $derived(
     capacity
       ? `${driveName}: ${formatBytes(capacity.used)} used of ${formatBytes(capacity.total)}, ${formatBytes(capacity.free)} free`
@@ -74,14 +105,37 @@
   const itemClass = 'sidebar-item'
   const headingClass = 'sidebar-heading'
   let forgetting = $state<string | null>(null)
-  let recent = $derived(targets.filter((target) => target.source === 'recent'))
-  let locations = $derived(targets.filter((target) => target.source !== 'recent'))
+  let recent = $derived(
+    targets
+      .filter((target) => target.source === 'recent')
+      .filter((target) => queryValue === '' || target.label.toLowerCase().includes(queryValue) || target.path.toLowerCase().includes(queryValue)),
+  )
+  let locations = $derived(
+    targets
+      .filter((target) => target.source !== 'recent')
+      .filter((target) => queryValue === '' || target.label.toLowerCase().includes(queryValue) || target.path.toLowerCase().includes(queryValue)),
+  )
+  let filteredRecentApps = $derived(
+    (recentApps ?? []).filter(
+      (app) => queryValue === '' || app.appName.toLowerCase().includes(queryValue),
+    ),
+  )
 
   async function forget(path: string) {
     if (!onForget) return
     forgetting = path
     try {
       await onForget(path)
+    } finally {
+      forgetting = null
+    }
+  }
+
+  async function forgetApp(appId: string) {
+    if (!onForgetApp) return
+    forgetting = appId
+    try {
+      await onForgetApp(appId)
     } finally {
       forgetting = null
     }
@@ -177,6 +231,61 @@
               onclick={() => void forget(target.path)}
               aria-label={`Forget ${target.label}`}
               title="Remove from recent scans"><X size={12} /></button
+            >
+          {/if}
+        </div>
+      {/each}
+    {/if}
+    {#if onSwitchScan && liveAppScans.length > 0}
+      <h2 class={headingClass}>App scans</h2>
+      {#each liveAppScans as scan (scan.scanId)}
+        {@const stale = staleSet.has(scan.scanId)}
+        <button
+          class={itemClass}
+          data-selected={activeScanId === scan.scanId}
+          class:selected={activeScanId === scan.scanId}
+          type="button"
+          disabled={busy || switchingBlocked}
+          onclick={() => onSwitchScan(scan.scanId)}
+          title={switchingBlocked
+            ? 'Finish the running cleanup before switching scans'
+            : stale
+              ? `${appScanLabel(scan)} — audit refreshed, rescan available`
+              : appScanLabel(scan)}
+          aria-pressed={activeScanId === scan.scanId}
+          ><AppWindow size={16} /><span>{appScanLabel(scan)}</span>{#if stale}<span
+              class="stale-dot"
+              title="Audit refreshed — rescan available"
+              aria-label="Stale audit generation"
+            ></span>{/if}</button
+        >
+      {/each}
+    {/if}
+    {#if onSelectApp && filteredRecentApps.length > 0}
+      <h2 class={headingClass}>Recent apps</h2>
+      {#each filteredRecentApps as app (app.appId)}
+        <div class="sidebar-recent" class:selected={false}>
+          <button
+            class={itemClass}
+            data-selected={false}
+            type="button"
+            disabled={busy}
+            onclick={() => onSelectApp(app.appId)}
+            title={app.stale ? `${app.appName} — stale, rescan available` : app.appName}
+            ><AppWindow size={16} /><span>{app.appName}</span>{#if app.stale}<span
+                class="stale-dot"
+                title="Stale — rescan available"
+                aria-label="Stale audit generation"
+              ></span>{/if}</button
+          >
+          {#if onForgetApp}
+            <button
+              class="sidebar-forget"
+              type="button"
+              disabled={busy || forgetting === app.appId}
+              onclick={() => void forgetApp(app.appId)}
+              aria-label={`Forget ${app.appName}`}
+              title="Remove from recent apps"><X size={12} /></button
             >
           {/if}
         </div>

@@ -20,9 +20,14 @@
     return base || path
   }
 
-  /** Whether a scan of this mount is servable: inside a configured root. */
+  /** Whether a scan of this mount is servable: inside a configured root.
+   * Synthetic app identifiers are never filesystem scan inputs (§5/A10). */
   function scannable(path: string): boolean {
-    return targets.some((target) => path === target.path || path.startsWith(`${target.path.replace(/\/+$/, '')}/`))
+    if (path.startsWith('app-storage:')) return false
+    return targets.some((target) => {
+      if (target.path.startsWith('app-storage:')) return false
+      return path === target.path || path.startsWith(`${target.path.replace(/\/+$/, '')}/`)
+    })
   }
 
   function usedOf(volume: ScanVolume): number {

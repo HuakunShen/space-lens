@@ -6,6 +6,7 @@
   "description": "Space Lens Svelte component library: sunburst lens UI shared by the web app, the Tauri desktop build, and the VS Code webview.",
   "exports": {
     ".": "./src/index.ts",
+    "./lib/app-scan": "./src/lib/app-scan.ts",
     "./styles.css": "./src/styles.css",
     "./types": "./src/types.ts",
     "./package.json": "./package.json"

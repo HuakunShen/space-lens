@@ -3,6 +3,7 @@
   import { prefersReducedMotion } from 'svelte/motion'
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
   import { buildBubbleCircles, clipBubbleName, type BubbleCircle } from '../../lib/bubbles'
+  import { canCollectNode, isAccountingLeaf, isAncestorById } from '../../lib/app-scan'
   import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
   import type { ChartSize } from '../../lib/chart-size'
   import { chartEmptyMessage } from '../../lib/chart-empty'
@@ -30,6 +31,10 @@
     onContext: (node: TreeNodeSummary, x: number, y: number) => void
     onBack?: () => void
     canGoBack?: boolean
+    /** App scans dim by id ancestry (locations are disjoint real paths);
+     * path scans keep path-prefix dimming. */
+    isAppScan?: boolean
+    parents?: Map<string, string> | null
   }
 
   let {
@@ -47,6 +52,8 @@
     onContext,
     onBack,
     canGoBack = false,
+    isAppScan = false,
+    parents = null,
   }: Props = $props()
 
   let size = $state<ChartSize>({ width: 620, height: 430 })
@@ -105,11 +112,18 @@
   })
 
   function isRelated(circle: BubbleCircle, hovered: BubbleCircle): boolean {
+    if (circle.id === hovered.id) return true
+    if (isAppScan && parents) {
+      return isAncestorById(circle.id, hovered.id, parents) || isAncestorById(hovered.id, circle.id, parents)
+    }
     return (
-      circle.id === hovered.id ||
       hovered.path.startsWith(`${circle.path}/`) ||
       circle.path.startsWith(`${hovered.path}/`)
     )
+  }
+
+  function openable(node: TreeNodeSummary): boolean {
+    return node.scanState !== 'skipped' && !isAccountingLeaf(node)
   }
 
   function labelLines(circle: BubbleCircle): Array<{ text: string; kind: 'name' | 'detail' }> {
@@ -189,23 +203,24 @@
                 class="arc bubble"
                 class:hovered={hoveredId === circle.id}
                 class:collected={collectedIds.has(circle.id)}
+                class:accounting={isAccountingLeaf(circle.node)}
                 cx={circle.x}
                 cy={circle.y}
                 r={circle.r}
                 fill={`url(#${paintId}-sphere-${index})`}
                 role="button"
-                aria-disabled={circle.isAggregate || circle.node.scanState === 'skipped'}
+                aria-disabled={circle.isAggregate || !openable(circle.node)}
                 tabindex="0"
-                aria-label={`${circle.name}, ${circle.isAggregate ? formatBytes(circle.size) : formatNodeSize(circle.node)}, ${circle.path}${circle.isAggregate ? ', summarized items' : ''}`}
+                aria-label={`${circle.name}, ${circle.isAggregate ? formatBytes(circle.size) : formatNodeSize(circle.node)}, ${circle.path}${circle.isAggregate ? ', summarized items' : ''}${isAccountingLeaf(circle.node) ? ', own files counted in total' : ''}`}
                 onmouseenter={() => onHover(circle.id)}
                 onmouseleave={() => onHover(null)}
                 onfocus={() => onHover(circle.id)}
                 onblur={() => onHover(null)}
                 onclick={() => {
-                  if (!circle.isAggregate && circle.node.scanState !== 'skipped') onOpen(circle.node)
+                  if (!circle.isAggregate && openable(circle.node)) onOpen(circle.node)
                 }}
                 onkeydown={(event) => {
-                  if ((event.key === 'Enter' || event.key === ' ') && !circle.isAggregate && circle.node.scanState !== 'skipped') {
+                  if ((event.key === 'Enter' || event.key === ' ') && !circle.isAggregate && openable(circle.node)) {
                     event.preventDefault()
                     onOpen(circle.node)
                   }
@@ -216,7 +231,7 @@
                 }}
                 oncontextmenu={(event) => {
                   event.preventDefault()
-                  if (!circle.isAggregate && circle.node.scanState !== 'skipped') onContext(circle.node, event.clientX, event.clientY)
+                  if (!circle.isAggregate && canCollectNode(circle.node)) onContext(circle.node, event.clientX, event.clientY)
                 }}
               />
               {#if lines.length > 0}

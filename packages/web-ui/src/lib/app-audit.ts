@@ -83,10 +83,13 @@ function comparableAuditPath(path: string): string {
  * True when `path` sits strictly inside any staged path. Staging a parent
  * folder covers its itemized children (audit sizes are already partitioned,
  * so the child must not be staged separately). A path never covers itself.
+ * Synthetic virtual identifiers never cover and are never covered (§5).
  */
 export function isPathCovered(path: string, staged: Iterable<string>): boolean {
+  if (path.startsWith('app-storage:')) return false
   const child = comparableAuditPath(path)
   for (const candidate of staged) {
+    if (candidate.startsWith('app-storage:')) continue
     const ancestor = comparableAuditPath(candidate)
     if (child !== ancestor && child.startsWith(ancestor === '/' ? '/' : `${ancestor}/`)) return true
   }

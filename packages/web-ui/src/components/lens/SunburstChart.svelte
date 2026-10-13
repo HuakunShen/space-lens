@@ -3,6 +3,7 @@
   import { prefersReducedMotion } from 'svelte/motion'
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
   import { buildSunburstSegments } from '../../lib/sunburst'
+  import { canCollectNode, isAccountingLeaf, isAncestorById } from '../../lib/app-scan'
   import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
   import type { ChartSize } from '../../lib/chart-size'
   import { chartEmptyMessage } from '../../lib/chart-empty'
@@ -28,6 +29,10 @@
     onContext: (node: TreeNodeSummary, x: number, y: number) => void
     onBack?: () => void
     canGoBack?: boolean
+    /** App scans dim by id ancestry (locations are disjoint real paths);
+     * path scans keep path-prefix dimming. */
+    isAppScan?: boolean
+    parents?: Map<string, string> | null
   }
 
   let {
@@ -45,6 +50,8 @@
     onContext,
     onBack,
     canGoBack = false,
+    isAppScan = false,
+    parents = null,
   }: Props = $props()
   let size = $state<ChartSize>({ width: 620, height: 430 })
   // The ring canvas follows the stage, so a wider workbench buys real ring
@@ -60,6 +67,17 @@
   let percentageLabel = $derived(
     percentage > 0 && percentage < 0.1 ? '<0.1%' : `${percentage.toFixed(percentage < 10 ? 1 : 0)}%`,
   )
+  /** App scans dim by tree ancestry; path scans keep path-prefix dimming. */
+  function isRelated(segmentId: string, segmentPath: string, hoveredId: string, hoveredPath: string): boolean {
+    if (segmentId === hoveredId) return true
+    if (isAppScan && parents) {
+      return isAncestorById(segmentId, hoveredId, parents) || isAncestorById(hoveredId, segmentId, parents)
+    }
+    return hoveredPath.startsWith(`${segmentPath}/`) || segmentPath.startsWith(`${hoveredPath}/`)
+  }
+  function openable(node: TreeNodeSummary): boolean {
+    return node.scanState !== 'skipped' && !isAccountingLeaf(node)
+  }
 </script>
 
 <section class="chart-wrap" aria-label="Disk usage chart">
@@ -90,9 +108,9 @@
               class:dimmed={hoveredId !== null &&
                 active !== undefined &&
                 hoveredId !== segment.id &&
-                !active.path.startsWith(`${segment.path}/`) &&
-                !segment.path.startsWith(`${active.path}/`)}
+                !isRelated(segment.id, segment.path, active.id, active.path)}
               class:collected={collectedIds.has(segment.id)}
+              class:accounting={isAccountingLeaf(segment.node)}
               in:fade={{
                 duration: prefersReducedMotion.current ? 0 : 320,
                 delay: prefersReducedMotion.current ? 0 : Math.min(segment.depth, 4) * 35,
@@ -100,21 +118,21 @@
               d={segment.pathData}
               fill={segment.color}
               role="button"
-              aria-disabled={segment.isAggregate || segment.node.scanState === 'skipped'}
+              aria-disabled={segment.isAggregate || !openable(segment.node)}
               tabindex="0"
-              aria-label={`${segment.name}, ${segment.isAggregate ? formatBytes(segment.size) : formatNodeSize(segment.node)}, ${segment.path}${segment.isAggregate ? ', summarized items' : ''}`}
+              aria-label={`${segment.name}, ${segment.isAggregate ? formatBytes(segment.size) : formatNodeSize(segment.node)}, ${segment.path}${segment.isAggregate ? ', summarized items' : ''}${isAccountingLeaf(segment.node) ? ', own files counted in total' : ''}`}
               onmouseenter={() => onHover(segment.id)}
               onmouseleave={() => onHover(null)}
               onfocus={() => onHover(segment.id)}
               onblur={() => onHover(null)}
               onclick={() => {
-                if (!segment.isAggregate && segment.node.scanState !== 'skipped') onOpen(segment.node)
+                if (!segment.isAggregate && openable(segment.node)) onOpen(segment.node)
               }}
               onkeydown={(event) => {
                 if (
                   (event.key === 'Enter' || event.key === ' ') &&
                   !segment.isAggregate &&
-                  segment.node.scanState !== 'skipped'
+                  openable(segment.node)
                 ) {
                   event.preventDefault()
                   onOpen(segment.node)
@@ -126,7 +144,7 @@
               }}
               oncontextmenu={(event) => {
                 event.preventDefault()
-                if (!segment.isAggregate && segment.node.scanState !== 'skipped')
+                if (!segment.isAggregate && canCollectNode(segment.node))
                   onContext(segment.node, event.clientX, event.clientY)
               }}
             />

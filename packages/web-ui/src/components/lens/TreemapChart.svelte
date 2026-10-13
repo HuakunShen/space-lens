@@ -3,6 +3,7 @@
   import { prefersReducedMotion } from 'svelte/motion'
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
   import { buildTreemapTiles, clipTileName, type TreemapTile } from '../../lib/treemap'
+  import { canCollectNode, isAccountingLeaf, isAncestorById } from '../../lib/app-scan'
   import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
   import type { ChartSize } from '../../lib/chart-size'
   import { chartEmptyMessage } from '../../lib/chart-empty'
@@ -31,6 +32,10 @@
     onContext: (node: TreeNodeSummary, x: number, y: number) => void
     onBack?: () => void
     canGoBack?: boolean
+    /** App scans dim by id ancestry (locations are disjoint real paths);
+     * path scans keep path-prefix dimming. */
+    isAppScan?: boolean
+    parents?: Map<string, string> | null
   }
 
   let {
@@ -48,6 +53,8 @@
     onContext,
     onBack,
     canGoBack = false,
+    isAppScan = false,
+    parents = null,
   }: Props = $props()
 
   let size = $state<ChartSize>({ width: 620, height: 430 })
@@ -64,11 +71,18 @@
   )
 
   // Ancestor-path dimming mirrors the sunburst: hovering keeps the hovered
-  // tile and its ancestor chain lit and dims unrelated tiles.
+  // tile and its ancestor chain lit and dims unrelated tiles. App scans dim
+  // by id ancestry instead (locations are disjoint real paths).
   function isRelated(tile: TreemapTile, hovered: TreemapTile): boolean {
-    return (
-      tile.id === hovered.id || hovered.path.startsWith(`${tile.path}/`) || tile.path.startsWith(`${hovered.path}/`)
-    )
+    if (tile.id === hovered.id) return true
+    if (isAppScan && parents) {
+      return isAncestorById(tile.id, hovered.id, parents) || isAncestorById(hovered.id, tile.id, parents)
+    }
+    return hovered.path.startsWith(`${tile.path}/`) || tile.path.startsWith(`${hovered.path}/`)
+  }
+
+  function openable(node: TreeNodeSummary): boolean {
+    return node.scanState !== 'skipped' && !isAccountingLeaf(node)
   }
 
   function tileLabelLines(tile: TreemapTile): Array<{ text: string; kind: 'name' | 'detail' }> {
@@ -132,6 +146,7 @@
               class="arc tile"
               class:hovered={hoveredId === tile.id}
               class:collected={collectedIds.has(tile.id)}
+              class:accounting={isAccountingLeaf(tile.node)}
               x={tile.x0}
               y={tile.y0}
               width={tile.x1 - tile.x0}
@@ -139,18 +154,18 @@
               rx={Math.min(9, (tile.x1 - tile.x0) / 5, (tile.y1 - tile.y0) / 5)}
               fill={`url(#${paintId}-tile-${index})`}
               role="button"
-              aria-disabled={tile.isAggregate || tile.node.scanState === 'skipped'}
+              aria-disabled={tile.isAggregate || !openable(tile.node)}
               tabindex="0"
-              aria-label={`${tile.name}, ${tile.isAggregate ? formatBytes(tile.size) : formatNodeSize(tile.node)}, ${tile.path}${tile.isAggregate ? ', summarized items' : ''}`}
+              aria-label={`${tile.name}, ${tile.isAggregate ? formatBytes(tile.size) : formatNodeSize(tile.node)}, ${tile.path}${tile.isAggregate ? ', summarized items' : ''}${isAccountingLeaf(tile.node) ? ', own files counted in total' : ''}`}
               onmouseenter={() => onHover(tile.id)}
               onmouseleave={() => onHover(null)}
               onfocus={() => onHover(tile.id)}
               onblur={() => onHover(null)}
               onclick={() => {
-                if (!tile.isAggregate && tile.node.scanState !== 'skipped') onOpen(tile.node)
+                if (!tile.isAggregate && openable(tile.node)) onOpen(tile.node)
               }}
               onkeydown={(event) => {
-                if ((event.key === 'Enter' || event.key === ' ') && !tile.isAggregate && tile.node.scanState !== 'skipped') {
+                if ((event.key === 'Enter' || event.key === ' ') && !tile.isAggregate && openable(tile.node)) {
                   event.preventDefault()
                   onOpen(tile.node)
                 }
@@ -161,7 +176,7 @@
               }}
               oncontextmenu={(event) => {
                 event.preventDefault()
-                if (!tile.isAggregate && tile.node.scanState !== 'skipped') onContext(tile.node, event.clientX, event.clientY)
+                if (!tile.isAggregate && canCollectNode(tile.node)) onContext(tile.node, event.clientX, event.clientY)
               }}
             />
             {#if lines.length > 0}

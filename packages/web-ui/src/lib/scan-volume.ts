@@ -11,7 +11,13 @@ function normalizedPath(path: string): string | null {
 /** Scan reports can identify the queried folder rather than its mount. */
 type DisplayVolume = ScanVolume & { queriedPath?: boolean }
 
+function isVirtualAppPath(path: string): boolean {
+  return path.startsWith('app-storage:')
+}
+
 function containsPath(parent: string, child: string): boolean {
+  // §5: the virtual identifier never resolves to a volume.
+  if (isVirtualAppPath(parent) || isVirtualAppPath(child)) return false
   return (
     child === parent ||
     (parent === '/' ? child.startsWith('/') && !child.startsWith('//') : child.startsWith(`${parent}/`))
@@ -37,7 +43,8 @@ export function resolveScanVolume(
   statusVolumes: readonly ScanVolume[],
   hostVolumes: readonly ScanVolume[],
 ): DisplayVolume | null {
-  const focus = path ? normalizedPath(path) : null
+  if (!path || isVirtualAppPath(path)) return null
+  const focus = normalizedPath(path)
   if (!focus) return null
   const host = containingVolume(focus, hostVolumes)
   if (host && volumeCapacity(host)) return host

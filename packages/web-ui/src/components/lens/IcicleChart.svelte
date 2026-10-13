@@ -3,6 +3,7 @@
   import { prefersReducedMotion } from 'svelte/motion'
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
   import { buildIcicleSegments, clipIcicleName, icicleColumns, type IcicleSegment } from '../../lib/icicle'
+  import { canCollectNode, isAccountingLeaf, isAncestorById } from '../../lib/app-scan'
   import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
   import type { ChartSize } from '../../lib/chart-size'
   import { chartEmptyMessage } from '../../lib/chart-empty'
@@ -27,6 +28,10 @@
     onContext: (node: TreeNodeSummary, x: number, y: number) => void
     onBack?: () => void
     canGoBack?: boolean
+    /** App scans dim by id ancestry (locations are disjoint real paths);
+     * path scans keep path-prefix dimming. */
+    isAppScan?: boolean
+    parents?: Map<string, string> | null
   }
 
   let {
@@ -44,6 +49,8 @@
     onContext,
     onBack,
     canGoBack = false,
+    isAppScan = false,
+    parents = null,
   }: Props = $props()
 
   /** Band above the columns for the level headers. */
@@ -64,9 +71,18 @@
   )
 
   // Hovering keeps the hovered segment and its ancestor chain lit; unrelated
-  // columns dim, so a path stands out from the rest of the partition.
+  // columns dim, so a path stands out from the rest of the partition. App
+  // scans dim by id ancestry instead (locations are disjoint real paths).
   function isRelated(segment: IcicleSegment, hovered: IcicleSegment): boolean {
+    if (segment.id === hovered.id) return true
+    if (isAppScan && parents) {
+      return isAncestorById(segment.id, hovered.id, parents) || isAncestorById(hovered.id, segment.id, parents)
+    }
     return hovered.path.startsWith(`${segment.path}/`) || segment.path.startsWith(`${hovered.path}/`)
+  }
+
+  function openable(node: TreeNodeSummary): boolean {
+    return node.scanState !== 'skipped' && !isAccountingLeaf(node)
   }
 
   /**
@@ -125,6 +141,7 @@
               class="arc"
               class:hovered={hoveredId === segment.id}
               class:collected={collectedIds.has(segment.id)}
+              class:accounting={isAccountingLeaf(segment.node)}
               x={segment.x0}
               y={segment.y0 + headerHeight}
               width={Math.max(0, segment.x1 - segment.x0)}
@@ -132,18 +149,18 @@
               rx="3"
               fill={segment.color}
               role="button"
-              aria-disabled={segment.isAggregate || segment.node.scanState === 'skipped'}
+              aria-disabled={segment.isAggregate || !openable(segment.node)}
               tabindex="0"
-              aria-label={`${segment.name}, ${segment.isAggregate ? formatBytes(segment.size) : formatNodeSize(segment.node)}, ${segment.path}${segment.isAggregate ? ', summarized items' : ''}`}
+              aria-label={`${segment.name}, ${segment.isAggregate ? formatBytes(segment.size) : formatNodeSize(segment.node)}, ${segment.path}${segment.isAggregate ? ', summarized items' : ''}${isAccountingLeaf(segment.node) ? ', own files counted in total' : ''}`}
               onmouseenter={() => onHover(segment.id)}
               onmouseleave={() => onHover(null)}
               onfocus={() => onHover(segment.id)}
               onblur={() => onHover(null)}
               onclick={() => {
-                if (!segment.isAggregate && segment.node.scanState !== 'skipped') onOpen(segment.node)
+                if (!segment.isAggregate && openable(segment.node)) onOpen(segment.node)
               }}
               onkeydown={(event) => {
-                if ((event.key === 'Enter' || event.key === ' ') && !segment.isAggregate && segment.node.scanState !== 'skipped') {
+                if ((event.key === 'Enter' || event.key === ' ') && !segment.isAggregate && openable(segment.node)) {
                   event.preventDefault()
                   onOpen(segment.node)
                 }
@@ -154,7 +171,7 @@
               }}
               oncontextmenu={(event) => {
                 event.preventDefault()
-                if (!segment.isAggregate && segment.node.scanState !== 'skipped') onContext(segment.node, event.clientX, event.clientY)
+                if (!segment.isAggregate && canCollectNode(segment.node)) onContext(segment.node, event.clientX, event.clientY)
               }}
             />
             {#if lines.length > 0}

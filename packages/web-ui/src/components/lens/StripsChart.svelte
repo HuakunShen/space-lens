@@ -4,6 +4,7 @@
   import { Folder, File, Lightbulb, ChevronRight } from '@lucide/svelte'
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
   import { buildStripRows, rankLargestItems, type StripRow, type StripSegment } from '../../lib/strips'
+  import { canCollectNode, isAccountingLeaf } from '../../lib/app-scan'
   import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
   import { chartEmptyMessage } from '../../lib/chart-empty'
   import { formatBytes } from '../../lib/format'
@@ -90,6 +91,11 @@
     return `${value.toFixed(value < 10 ? 1 : 0)}%`
   }
 
+  /** A12 accounting leaves are non-actionable; skipped nodes cannot open. */
+  function openable(node: TreeNodeSummary): boolean {
+    return node.scanState !== 'skipped' && !isAccountingLeaf(node)
+  }
+
   function segmentLabel(segment: StripSegment, row: StripRow): string {
     return `${segment.name}, ${formatNodeSize(segment.node)}, ${percent(segment.share)} of ${row.name}`
   }
@@ -115,9 +121,9 @@
                 <button
                   type="button"
                   class="strip-head"
-                  aria-disabled={row.node.scanState === 'skipped'}
+                  aria-disabled={!openable(row.node)}
                   onclick={() => {
-                    if (row.node.scanState !== 'skipped') onOpen(row.node)
+                    if (openable(row.node)) onOpen(row.node)
                   }}
                   onmouseenter={() => onHover(row.id)}
                   onmouseleave={() => onHover(null)}
@@ -125,7 +131,7 @@
                   onblur={() => onHover(null)}
                   oncontextmenu={(event) => {
                     event.preventDefault()
-                    if (row.node.scanState !== 'skipped') onContext(row.node, event.clientX, event.clientY)
+                    if (canCollectNode(row.node)) onContext(row.node, event.clientX, event.clientY)
                   }}
                 >
                   <span class="strip-chip" style={`--node: ${row.color}`}>
@@ -156,8 +162,9 @@
                         class:hovered={hoveredId === segment.id}
                         class:collected={collectedIds.has(segment.id)}
                         class:muted-ink={segment.node.ignored}
+                        class:accounting={isAccountingLeaf(segment.node)}
                         style={`flex: ${Math.max(segment.share, 0.0001)}; --node: ${segment.color}`}
-                        aria-disabled={segment.node.scanState === 'skipped'}
+                        aria-disabled={!openable(segment.node)}
                         aria-label={segmentLabel(segment, row)}
                         title={segmentLabel(segment, row)}
                         onmouseenter={() => onHover(segment.id)}
@@ -165,11 +172,11 @@
                         onfocus={() => onHover(segment.id)}
                         onblur={() => onHover(null)}
                         onclick={() => {
-                          if (segment.node.scanState !== 'skipped') onOpen(segment.node)
+                          if (openable(segment.node)) onOpen(segment.node)
                         }}
                         oncontextmenu={(event) => {
                           event.preventDefault()
-                          if (segment.node.scanState !== 'skipped') onContext(segment.node, event.clientX, event.clientY)
+                          if (canCollectNode(segment.node)) onContext(segment.node, event.clientX, event.clientY)
                         }}
                       >
                         {#if labeled}
@@ -206,13 +213,13 @@
                   type="button"
                   class="rail-row"
                   class:is-hovered={hoveredId === item.id}
-                  aria-disabled={item.node.scanState === 'skipped'}
+                  aria-disabled={!openable(item.node)}
                   onmouseenter={() => onHover(item.id)}
                   onmouseleave={() => onHover(null)}
                   onfocus={() => onHover(item.id)}
                   onblur={() => onHover(null)}
                   onclick={() => {
-                    if (item.node.scanState !== 'skipped') onOpen(item.node)
+                    if (openable(item.node)) onOpen(item.node)
                   }}
                 >
                   <span class="rail-rank">{index + 1}</span>

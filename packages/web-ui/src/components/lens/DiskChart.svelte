@@ -8,6 +8,7 @@
   import type { TreeNodeSummary, TreeSliceNode } from '../../types'
   import type { ChartMode, TreemapDensity } from '../../lib/chart-mode'
   import { buildDiskChartModel } from '../../lib/echarts-model'
+  import { canCollectNode, isAccountingLeaf, type AuditAnnotation } from '../../lib/app-scan'
   import { chartEmptyMessage } from '../../lib/chart-empty'
   import type { SoftBubbleSnapshot } from '../../lib/soft-bubbles/world'
   import { formatNodeSize } from '../../lib/node-size'
@@ -34,10 +35,15 @@
     onContext: (node: TreeNodeSummary, x: number, y: number) => void
     onBack?: () => void
     canGoBack?: boolean
+    /** A11 audit annotation for the inspected depth-1 location node. */
+    inspectorAnnotation?: AuditAnnotation | null
+    /** A11 measurement provenance for the inspected node. */
+    inspectorProvenance?: 'measured' | 'audit-time' | null
   }
 
   let { softBubbles = true, tree, focusNode, mode, onModeChange, density, onDensityChange, hoveredId,
-    hoveredNode = null, collectedIds, onHover, onOpen, onContext, onBack, canGoBack = false }: Props = $props()
+    hoveredNode = null, collectedIds, onHover, onOpen, onContext, onBack, canGoBack = false,
+    inspectorAnnotation = null, inspectorProvenance = null }: Props = $props()
   let host = $state<HTMLDivElement>()
   let softOverlay = $state<{ begin(event: PointerEvent): void; cancel(): void }>()
   let softActive = $state(false)
@@ -79,11 +85,13 @@
   }
   function openNode(id: string | null): void {
     const item = id ? model?.nodes.get(id) : undefined
-    if (item && !item.isAggregate && item.node.scanState !== 'skipped') onOpen(item.node)
+    if (item && !item.isAggregate && !item.isAccounting && item.node.scanState !== 'skipped') onOpen(item.node)
   }
   function collectNode(id: string | null, x: number, y: number): void {
     const item = id ? model?.nodes.get(id) : undefined
-    if (item && !item.isAggregate && item.node.scanState !== 'skipped') onContext(item.node, x, y)
+    // A8: the single eligibility predicate decides (bundle/virtual/
+    // accounting refuse inside canCollectNode).
+    if (item && !item.isAggregate && !item.isAccounting && canCollectNode(item.node)) onContext(item.node, x, y)
   }
 
   // The instance survives mode and folder changes. Replacing the option lets
@@ -177,7 +185,7 @@
     {/if}
   </ChartStage>
   <p id={helpId} class="sr-only">Use arrow keys to inspect items, Enter to open, and Shift F10 to add or remove an item from review. The contents list provides the same files and folders.</p>
-  <ChartInspector {inspected} {active} {hoveredId} {focusNode} {percentageLabel} noun="item" />
+  <ChartInspector {inspected} {active} {hoveredId} {focusNode} {percentageLabel} noun="item" annotation={inspectorAnnotation} provenance={inspectorProvenance} isAccounting={inspected ? isAccountingLeaf(inspected) : false} />
 </section>
 
 <style>

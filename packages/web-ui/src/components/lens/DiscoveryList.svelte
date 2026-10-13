@@ -2,6 +2,7 @@
   import { File, Folder, Copy, FolderOpen, Search, LoaderCircle, ArrowDown } from '@lucide/svelte'
   import type { DiscoveryItem, DiscoveryKind, DiscoveryPage, TreeNodeSummary } from '@space-lens/contract'
   import { formatBytes } from '../../lib/format'
+  import { canCollectNode, collectRefusalReason } from '../../lib/app-scan'
   import LensSelect from './LensSelect.svelte'
   import { Button } from '../ui/button/index'
   import { Checkbox } from '../ui/checkbox/index'
@@ -74,6 +75,14 @@
         ? 'Recognized dependencies, build output and tool caches. Review before removing.'
         : 'Matched by .gitignore. This can include valuable untracked files; nothing is selected automatically.',
   )
+  function toggleDisabled(node: TreeNodeSummary): boolean {
+    // A8: the single eligibility predicate (host-provided when available).
+    return disabled || isCovered(node) || !canCollectNode(node)
+  }
+  function toggleTitle(node: TreeNodeSummary): string {
+    if (isCovered(node)) return 'Included in a selected parent folder'
+    return collectRefusalReason(node) ?? 'Add to review selection'
+  }
   function consequence(category: string): string {
     const name = category.toLowerCase()
     if (name.includes('dependenc')) return 'Dependencies · reinstall before use'
@@ -157,13 +166,10 @@
       >
         <Checkbox
           checked={isSelected(item.node)}
-          disabled={disabled ||
-            isCovered(item.node) ||
-            item.node.scanState === 'skipped' ||
-            item.node.scanState === 'partial'}
+          disabled={toggleDisabled(item.node)}
           onCheckedChange={() => onToggle(item.node)}
           aria-label={`Select ${item.node.path}`}
-          title={isCovered(item.node) ? 'Included in a selected parent folder' : 'Add to review selection'}
+          title={toggleTitle(item.node)}
         />
         <span class="file-kind"
           >{#if item.isDirectory}<Folder size={19} />{:else}<File size={19} />{/if}</span

@@ -7,6 +7,7 @@ import { buildBubbleLabels, BUBBLE_FONT } from './bubble-label.ts'
 import { buildIcicleSegments, clipIcicleName } from './icicle.ts'
 import { buildStripRows } from './strips.ts'
 import { withOmittedBuckets } from './sunburst.ts'
+import { isAccountingLeaf } from './app-scan.ts'
 import { nodeColor, nodeMutedColor } from './colors.ts'
 import { BUBBLE_TEXT_COLOR, BUBBLE_TEXT_SHADOW, bubbleStyle, chartMaterial } from './chart-material.ts'
 import { SoftBubbleWorld, type SoftBubbleSnapshot } from './soft-bubbles/world.ts'
@@ -17,6 +18,9 @@ export interface DiskChartNode {
   node: TreeSliceNode
   color: string
   isAggregate: boolean
+  /** A12: a directory-own residual leaf — counted in the total, distinct
+   * from truncation buckets, never actionable. */
+  isAccounting: boolean
   childCount: number
   dataIndex: number
 }
@@ -80,14 +84,18 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
   const familyNames = new Map(root.children.map((child) => [child.id, child.name]))
   const sourceColors = new Map<string, string>()
   function register(node: TreeSliceNode, parentId: string, family: string, dataIndex: number) {
-    const color = node.ignored
+    const accounting = isAccountingLeaf(node)
+    const color = accounting
       ? nodeMutedColor(node.depth)
-      : nodeColor(node.id, node.depth, family, familyNames.get(family) ?? node.name)
+      : node.ignored
+        ? nodeMutedColor(node.depth)
+        : nodeColor(node.id, node.depth, family, familyNames.get(family) ?? node.name)
     sourceColors.set(node.id, color)
     nodes.set(node.id, {
       node,
       color,
       isAggregate: node.id === `${parentId}:omitted`,
+      isAccounting: accounting,
       childCount: node.childCount,
       dataIndex,
     })
@@ -111,6 +119,7 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
           ? []
           : node.children.map((child) => convertBranch(child, node.id, family, visibleDepth + 1))
       const source = sourceColors.get(node.id) ?? ''
+      const accounting = isAccountingLeaf(node)
       const parentTile = mode === 'treemap' && children.length > 0
       const borderColor = parentTile
         ? chartMaterial(source).colorStops[0].color
@@ -128,6 +137,7 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
           borderColor,
           borderWidth: parentTile ? 4 : selectedWidth(node.id),
           borderRadius: mode === 'treemap' ? 7 : 0,
+          ...(accounting ? { borderType: 'dashed' as const, opacity: 0.6 } : {}),
         },
         label: {
           show: mode !== 'sunburst',
@@ -228,11 +238,13 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
       family: string
       render: () => CustomSeriesRenderItemReturn
     }[] = []
-    function style(id: string, color: string) {
+    function style(id: string, color: string, node?: TreeSliceNode) {
+      const accounting = node ? isAccountingLeaf(node) : false
       return {
         fill: chartMaterial(color, mode === 'icicle' ? 'icicle' : 'strips'),
         stroke: selectedEdge(id),
         lineWidth: selectedWidth(id),
+        ...(accounting ? { opacity: 0.6 as const } : {}),
       }
     }
     const emphasis = { style: { stroke: EMPHASIS_EDGE, lineWidth: 2 } }
@@ -337,7 +349,7 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
             id: segment.id,
             morph: true,
             shape: { x: segment.x0 + 2, y: segment.y0 + 2, width: w, height: h, r: Math.min(6, h / 3) },
-            style: style(segment.id, segment.color),
+            style: style(segment.id, segment.color, segment.node),
             emphasis,
             textContent: {
               type: 'text',
@@ -381,7 +393,7 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
                 name: 'bar',
                 morph: true,
                 shape: { x: 4, y: barY, width: w, height: h, r: Math.min(6, h / 3) },
-                style: style(row.id, row.color),
+                style: style(row.id, row.color, row.node),
                 emphasis,
               },
               {
@@ -437,7 +449,7 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
                   height: Math.max(1, h - 6),
                   r: 3,
                 },
-                style: style(segment.id, segment.color),
+                style: style(segment.id, segment.color, segment.node),
                 emphasis,
                 textContent: {
                   type: 'text',
@@ -475,7 +487,7 @@ export function buildDiskChartModel(input: DiskChartInput): DiskChartModel {
     option,
     nodes,
     bubbles,
-    navigableIds: [...nodes].filter(([, entry]) => !entry.isAggregate).map(([id]) => id),
+    navigableIds: [...nodes].filter(([, entry]) => !entry.isAggregate && !entry.isAccounting).map(([id]) => id),
   }
 }
 

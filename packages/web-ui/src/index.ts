@@ -27,6 +27,7 @@ export { default as AppAuditCard } from './components/lens/AppAuditCard.svelte'
 export { default as AppAuditDrawer } from './components/lens/AppAuditDrawer.svelte'
 export { default as AppLocationRow } from './components/lens/AppLocationRow.svelte'
 export { default as AppCleanupDialog } from './components/lens/AppCleanupDialog.svelte'
+export { default as AppScanHeader } from './components/lens/AppScanHeader.svelte'
 export { default as AppearancePanel } from './components/lens/AppearancePanel.svelte'
 
 // App-shell components (connection + feedback)
@@ -51,6 +52,22 @@ export { Badge, Button, Card, ContextMenu, Checkbox, Input, Progress, ScrollArea
 // Helpers
 export { formatBytes, formatPercent } from './lib/format.js'
 export { formatNodeName } from './lib/node-size.js'
+export {
+  annotationForNode,
+  assertRealPath,
+  canCollectNode,
+  collectRefusalReason,
+  eligibilityOf,
+  isAccountingLeaf,
+  isAncestorById,
+  isAppBundleNode,
+  isAppScanStatus,
+  isOmittedBucket,
+  isVirtualAppId,
+  isVirtualAppPath,
+  parentIdMap,
+} from './lib/app-scan.js'
+export type { AuditAnnotation, CleanupEligibility, RecentAppEntry } from './lib/app-scan.js'
 export { cn } from './lib/utils.js'
 export { chartEmptyMessage } from './lib/chart-empty.js'
 export {
