@@ -6502,7 +6502,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gpui-kit",
+ "image",
  "kuntu-scan",
+ "libc",
  "rfd",
  "serde",
  "serde_json",

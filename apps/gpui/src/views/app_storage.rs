@@ -12,15 +12,16 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::progress::Progress;
-use gpui_kit::component::{
-  h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _,
-};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _};
 use gpui_kit::*;
 use smol::channel;
 use spacelens_app_audit::{
-  AppAuditEntry, AppAuditOptions, AppAuditReport, AppKind, AuditSource, Classification,
-  audit_installed_apps,
+  app_icon_png, audit_installed_apps, AppAuditEntry, AppAuditOptions, AppAuditReport, AppKind,
+  AuditSource, Classification,
 };
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
 use crate::session::format::{format_bytes, format_count};
 use crate::views::theme::{inspector, selected, stripe};
@@ -81,6 +82,51 @@ pub fn initials_for(name: &str) -> String {
   }
 }
 
+/// Decodes PNG bytes (as returned by [`app_icon_png`]) into a renderable GPUI
+/// image. Pure and UI-thread-free: the background icon loader calls it, never
+/// render. Returns `None` for undecodable bytes.
+///
+/// The RGBA→BGRA swap mirrors gpui-pre's own PNG path
+/// (`decode_static_image_from_decoder`): `RenderImage` expects BGRA order.
+pub fn decode_png_to_render_image(png: &[u8]) -> Option<Arc<RenderImage>> {
+  let decoded = image::load_from_memory(png).ok()?;
+  let mut rgba = decoded.to_rgba8();
+  for pixel in rgba.chunks_exact_mut(4) {
+    pixel.swap(0, 2);
+  }
+  let frame = image::Frame::new(rgba);
+  // `Vec<Frame>` converts into the `SmallVec<[Frame; 1]>` `RenderImage::new`
+  // takes, so no direct smallvec dependency is needed.
+  Some(Arc::new(RenderImage::new(vec![frame])))
+}
+
+/// App bundle paths in report order that still need an icon load: entries
+/// without an `app_path` (CLI tools) never need one, and paths already in the
+/// cache — loaded or permanently failed (`None`) — are never re-requested.
+pub fn missing_icon_paths(
+  report: &AppAuditReport,
+  icons: &HashMap<String, Option<Arc<RenderImage>>>,
+) -> Vec<String> {
+  report
+    .apps
+    .iter()
+    .filter_map(|app| app.app_path.clone())
+    .filter(|path| !icons.contains_key(path))
+    .collect()
+}
+
+/// The cached renderable icon for an app path, if it loaded successfully: a
+/// path absent from the cache (not loaded yet) and a cached `None` (load
+/// failed) both map to `None`, i.e. "show the letter avatar".
+pub fn icon_for_path(
+  icons: &HashMap<String, Option<Arc<RenderImage>>>,
+  app_path: &Option<String>,
+) -> Option<Arc<RenderImage>> {
+  app_path
+    .as_ref()
+    .and_then(|path| icons.get(path).cloned().flatten())
+}
+
 /// The list-row projection of one audit entry: the web card's Z1-Z3 hierarchy
 /// flattened into row data (the engine already sorts size-descending).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,7 +166,12 @@ pub struct AppStorageView {
   generation: u64,
   error: Option<String>,
   selected: Option<String>,
+  /// Per-view icon cache keyed by app bundle path: `Some` once the icon
+  /// decoded, `None` permanently when the load failed (CLI entries have no
+  /// path and never enter the map). Filled by the background icon loader.
+  icons: HashMap<String, Option<Arc<RenderImage>>>,
   _audit_task: Option<Task<()>>,
+  _icon_task: Option<Task<()>>,
 }
 
 impl AppStorageView {
@@ -131,7 +182,9 @@ impl AppStorageView {
       generation: 0,
       error: None,
       selected: None,
+      icons: HashMap::new(),
       _audit_task: None,
+      _icon_task: None,
     }
   }
 
@@ -155,6 +208,16 @@ impl AppStorageView {
     let (tx, rx) = channel::bounded::<AuditMsg>(1);
     cx.background_spawn(async move {
       // Only plain data crosses here: the future must stay Send.
+      #[cfg(unix)]
+      {
+        // The audit runs kuntu's rayon-parallel scan in-process and would
+        // otherwise saturate every core while the UI thread tries to render
+        // (hovering the sidebar entry lagged for the whole audit). Nicing the
+        // background worker down keeps the UI responsive.
+        unsafe {
+          libc::setpriority(libc::PRIO_PROCESS, 0, 10);
+        }
+      }
       let options = AppAuditOptions {
         min_size: 0,
         include_heuristic: true,
@@ -186,12 +249,17 @@ impl AppStorageView {
               this.error = None;
               // A refresh can drop the selected app; fall back to the
               // placeholder rather than showing a stale detail.
-              if !this.selected.as_deref().is_some_and(|id| {
-                report.apps.iter().any(|app| app.id == id)
-              }) {
+              if !this
+                .selected
+                .as_deref()
+                .is_some_and(|id| report.apps.iter().any(|app| app.id == id))
+              {
                 this.selected = None;
               }
               this.report = Some(report);
+              // Icons load lazily after the report lands so the list paints
+              // immediately; each icon notifies once as it arrives.
+              this.start_icon_loading(cx);
             }
             AuditMsg::Failed(gen, message) if gen == this.generation => {
               this.loading = false;
@@ -206,6 +274,61 @@ impl AppStorageView {
     }));
 
     cx.notify();
+  }
+
+  /// Loads one icon per app with a bundle path, off the UI thread: the icon
+  /// read (`app_icon_png`) and the PNG decode both run in `background_spawn`,
+  /// and only the finished `RenderImage` crosses to the entity task, which
+  /// inserts it and notifies once per icon. Entries already cached — decoded
+  /// or permanently failed — are skipped, and icons for paths the new report
+  /// no longer contains are pruned so a refresh never leaks stale entries.
+  /// Messages carry the audit generation that started them: a refresh
+  /// supersedes a running loader and its late icons are discarded.
+  fn start_icon_loading(&mut self, cx: &mut Context<Self>) {
+    let Some(report) = &self.report else {
+      return;
+    };
+    let live: std::collections::HashSet<&str> = report
+      .apps
+      .iter()
+      .filter_map(|app| app.app_path.as_deref())
+      .collect();
+    self.icons.retain(|path, _| live.contains(path.as_str()));
+    let paths = missing_icon_paths(report, &self.icons);
+    if paths.is_empty() {
+      return;
+    }
+    let generation = self.generation;
+    let (tx, rx) = channel::bounded::<(u64, String, Option<Arc<RenderImage>>)>(32);
+    cx.background_spawn(async move {
+      for path in paths {
+        let rendered =
+          app_icon_png(Path::new(&path)).and_then(|png| decode_png_to_render_image(&png));
+        // A send error means the receiving view is gone; stop loading.
+        if tx.send((generation, path, rendered)).await.is_err() {
+          break;
+        }
+      }
+    })
+    .detach();
+
+    self._icon_task = Some(cx.spawn(async move |this, cx| {
+      while let Ok((gen, path, rendered)) = rx.recv().await {
+        let current = this.update(cx, |this, cx| {
+          if gen == this.generation {
+            this.icons.insert(path, rendered);
+            cx.notify();
+            true
+          } else {
+            // Stale loader — a newer audit owns the view.
+            false
+          }
+        });
+        if !matches!(current, Ok(true)) {
+          break;
+        }
+      }
+    }));
   }
 
   fn select(&mut self, id: String, cx: &mut Context<Self>) {
@@ -302,7 +425,11 @@ impl AppStorageView {
         .items_center()
         .justify_center()
         .gap_2()
-        .child(Progress::new("app-storage-progress").loading(true).w(px(280.)))
+        .child(
+          Progress::new("app-storage-progress")
+            .loading(true)
+            .w(px(280.)),
+        )
         .child(
           div()
             .text_size(px(12.))
@@ -362,10 +489,13 @@ impl AppStorageView {
         );
     }
     // Master-detail split: `h_flex` centers children, so the row stretches
-    // them to the full height.
+    // them to the full height. Every ancestor of the two scroll containers is
+    // bounded (`flex_1` + `min_h_0`, `min_w_0` on this horizontal split) so
+    // the lists measure against the window instead of their content.
     h_flex()
       .flex_1()
       .min_h_0()
+      .min_w_0()
       .w_full()
       .items_stretch()
       .child(self.render_list(report, cx))
@@ -374,6 +504,14 @@ impl AppStorageView {
 
   /// The size-descending app list: one row per entry with the web card's
   /// Z1-Z3 hierarchy (name + total, badges + count, reclaimable dot).
+  ///
+  /// The outer wrapper is a `v_flex` (column) so the inner scroll container's
+  /// `flex_1` resolves vertically against the bounded split height: inside a
+  /// plain `div` (row direction) `flex_1` would grow horizontally and the
+  /// list would size to its content, never scrolling. Row `.id(ix)` keys
+  /// match workbench.rs's scrolling lists (`cleanup-candidates`,
+  /// `git-repositories`, `explorer-contents`), which scroll fine with them —
+  /// plain keyed rows without `on_scroll` do not swallow wheel events.
   fn render_list(&self, report: &AppAuditReport, cx: &Context<Self>) -> Div {
     let muted = cx.theme().muted_foreground;
     let mut list = v_flex()
@@ -404,23 +542,15 @@ impl AppStorageView {
           })
           .hover(|style| style.bg(cx.theme().list_hover))
           .cursor_pointer()
-          .child(
-            div()
-              .size(px(32.))
-              .flex_shrink_0()
-              .rounded(px(8.))
-              .bg(stripe(cx))
-              .flex()
-              .items_center()
-              .justify_center()
-              .child(
-                div()
-                  .text_size(px(13.))
-                  .font_weight(FontWeight::SEMIBOLD)
-                  .text_color(muted)
-                  .child(initials_for(&app.name)),
-              ),
-          )
+          .child(app_avatar(
+            &self.icons,
+            &app.app_path,
+            &app.name,
+            px(32.),
+            px(8.),
+            px(13.),
+            cx,
+          ))
           .child(
             v_flex()
               .flex_1()
@@ -447,19 +577,23 @@ impl AppStorageView {
                   ),
               )
               .children((row.reclaimable > 0).then(|| {
-                h_flex().gap(px(6.)).items_center().child(
-                  div()
-                    .size(px(6.))
-                    .flex_shrink_0()
-                    .rounded_full()
-                    .bg(cx.theme().primary),
-                ).child(
-                  div()
-                    .truncate()
-                    .text_size(px(11.))
-                    .text_color(muted)
-                    .child(format!("{} reclaimable", format_bytes(row.reclaimable))),
-                )
+                h_flex()
+                  .gap(px(6.))
+                  .items_center()
+                  .child(
+                    div()
+                      .size(px(6.))
+                      .flex_shrink_0()
+                      .rounded_full()
+                      .bg(cx.theme().primary),
+                  )
+                  .child(
+                    div()
+                      .truncate()
+                      .text_size(px(11.))
+                      .text_color(muted)
+                      .child(format!("{} reclaimable", format_bytes(row.reclaimable))),
+                  )
               })),
           )
           .child(
@@ -472,7 +606,7 @@ impl AppStorageView {
           .on_click(cx.listener(move |this, _, _, cx| this.select(id.clone(), cx))),
       );
     }
-    div()
+    v_flex()
       .flex_1()
       .min_w_0()
       .h_full()
@@ -525,23 +659,15 @@ impl AppStorageView {
           .gap(px(10.))
           .items_center()
           .min_w_0()
-          .child(
-            div()
-              .size(px(36.))
-              .flex_shrink_0()
-              .rounded(px(9.))
-              .bg(stripe(cx))
-              .flex()
-              .items_center()
-              .justify_center()
-              .child(
-                div()
-                  .text_size(px(15.))
-                  .font_weight(FontWeight::SEMIBOLD)
-                  .text_color(muted)
-                  .child(initials_for(&app.name)),
-              ),
-          )
+          .child(app_avatar(
+            &self.icons,
+            &app.app_path,
+            &app.name,
+            px(40.),
+            px(10.),
+            px(15.),
+            cx,
+          ))
           .child(
             v_flex()
               .flex_1()
@@ -566,9 +692,9 @@ impl AppStorageView {
           .gap(px(6.))
           .items_center()
           .child(badge(kind_label(app.kind), muted, cx))
-          .children((app.source == AuditSource::Catalog).then(|| {
-            badge("Known", cx.theme().primary, cx)
-          })),
+          .children(
+            (app.source == AuditSource::Catalog).then(|| badge("Known", cx.theme().primary, cx)),
+          ),
       )
       .children(app.bundle_id.clone().map(|bundle_id| {
         div()
@@ -585,27 +711,28 @@ impl AppStorageView {
           .child(app_path)
       }))
       .children((app.installed_size > 0).then(|| {
-        div()
-          .text_size(px(11.))
-          .text_color(muted)
-          .child(format!(
-            "includes {} app bundle",
-            format_bytes(app.installed_size)
-          ))
+        div().text_size(px(11.)).text_color(muted).child(format!(
+          "includes {} app bundle",
+          format_bytes(app.installed_size)
+        ))
       }))
       .children((reclaimable > 0).then(|| {
-        h_flex().gap(px(6.)).items_center().child(
-          div()
-            .size(px(6.))
-            .flex_shrink_0()
-            .rounded_full()
-            .bg(cx.theme().primary),
-        ).child(
-          div()
-            .text_size(px(11.))
-            .text_color(muted)
-            .child(format!("{} reclaimable", format_bytes(reclaimable))),
-        )
+        h_flex()
+          .gap(px(6.))
+          .items_center()
+          .child(
+            div()
+              .size(px(6.))
+              .flex_shrink_0()
+              .rounded_full()
+              .bg(cx.theme().primary),
+          )
+          .child(
+            div()
+              .text_size(px(11.))
+              .text_color(muted)
+              .child(format!("{} reclaimable", format_bytes(reclaimable))),
+          )
       }))
       .child(
         div()
@@ -614,9 +741,13 @@ impl AppStorageView {
           .flex_shrink_0()
           .bg(cx.theme().border),
       )
-      .children(app.locations.iter().enumerate().map(|(ix, location)| {
-        self.render_location(ix, location, cx)
-      }));
+      .children(
+        app
+          .locations
+          .iter()
+          .enumerate()
+          .map(|(ix, location)| self.render_location(ix, location, cx)),
+      );
     v_flex()
       .w(px(380.))
       .flex_shrink_0()
@@ -718,9 +849,13 @@ impl Render for AppStorageView {
     // phase always ends up with a load in flight. Guarded, so the notify
     // below never loops.
     self.ensure_started(cx);
+    // `size_full` fills the shell's screen slot; `min_h_0`/`min_w_0` keep the
+    // flex chain shrinkable so the scroll containers below stay bounded.
     v_flex()
       .id("app-storage")
       .size_full()
+      .min_h_0()
+      .min_w_0()
       .bg(cx.theme().background)
       .text_color(cx.theme().foreground)
       .child(self.render_header(cx))
@@ -734,6 +869,45 @@ impl Render for AppStorageView {
       .child(self.render_body(cx))
       .children(self.render_footnote(cx))
   }
+}
+
+/// An app's icon when its bundle icon loaded, else the existing letter
+/// avatar: the icon path goes through `ImageSource::Render`, the decoded
+/// `RenderImage` held in the view's cache. Sized for list rows (32px) and the
+/// detail header (40px) by the caller.
+fn app_avatar(
+  icons: &std::collections::HashMap<String, Option<Arc<RenderImage>>>,
+  app_path: &Option<String>,
+  name: &str,
+  size: Pixels,
+  radius: Pixels,
+  font: Pixels,
+  cx: &App,
+) -> AnyElement {
+  if let Some(rendered) = icon_for_path(icons, app_path) {
+    return img(ImageSource::Render(rendered))
+      .size(size)
+      .flex_shrink_0()
+      .rounded(radius)
+      .into_any_element();
+  }
+  let muted = cx.theme().muted_foreground;
+  div()
+    .size(size)
+    .flex_shrink_0()
+    .rounded(radius)
+    .bg(stripe(cx))
+    .flex()
+    .items_center()
+    .justify_center()
+    .child(
+      div()
+        .text_size(font)
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(muted)
+        .child(initials_for(name)),
+    )
+    .into_any_element()
 }
 
 /// A small bordered pill for kind / Known / classification markers.
@@ -757,12 +931,15 @@ mod tests {
   // `use gpui_kit::*` glob would pull the whole kit prelude into the test
   // module and blow the `#[test]` expansion over the recursion limit.
   use super::{
-    app_row, classification_color, classification_label, initials_for, purgeable_total,
+    app_row, classification_color, classification_label, decode_png_to_render_image, icon_for_path,
+    initials_for, missing_icon_paths, purgeable_total,
   };
+  use gpui_kit::RenderImage;
   use spacelens_app_audit::{
-    AppAuditEntry, AppAuditLocation, AppKind, AuditSource, Classification,
+    AppAuditEntry, AppAuditLocation, AppAuditReport, AppKind, AuditSource, Classification,
   };
-  use std::collections::BTreeSet;
+  use std::collections::{BTreeSet, HashMap};
+  use std::sync::Arc;
 
   fn location(path: &str, size: u64, purgeable: bool) -> AppAuditLocation {
     AppAuditLocation {
@@ -847,5 +1024,87 @@ mod tests {
     let cli_row = app_row(&cli);
     assert_eq!(cli_row.kind_label, "CLI");
     assert!(!cli_row.known);
+  }
+
+  fn test_render_image() -> Arc<RenderImage> {
+    let frame = image::Frame::new(image::ImageBuffer::from_pixel(
+      1,
+      1,
+      image::Rgba([0, 0, 0, 255]),
+    ));
+    Arc::new(RenderImage::new(vec![frame]))
+  }
+
+  fn icon_report() -> AppAuditReport {
+    let mut first = entry("raycast");
+    first.app_path = Some("/Applications/Raycast.app".into());
+    let mut cli = entry("codex-cli");
+    cli.app_path = None; // CLI entries have no bundle and never need icons
+    let mut third = entry("zoom");
+    third.app_path = Some("/Applications/Zoom.app".into());
+    AppAuditReport {
+      platform: "macos".into(),
+      generated_at: "2026-10-13T00:00:00Z".into(),
+      apps: vec![first, cli, third],
+      total_apps: 3,
+      truncated: false,
+    }
+  }
+
+  #[test]
+  fn icon_loader_requests_only_uncached_bundle_paths_in_order() {
+    let report = icon_report();
+    let icons: HashMap<String, Option<Arc<RenderImage>>> = HashMap::new();
+    // Report order, CLI entries skipped.
+    assert_eq!(
+      missing_icon_paths(&report, &icons),
+      vec![
+        "/Applications/Raycast.app".to_string(),
+        "/Applications/Zoom.app".to_string(),
+      ]
+    );
+    // A decoded icon and a permanent failure are both cached: neither is
+    // re-requested.
+    let icons: HashMap<String, Option<Arc<RenderImage>>> = HashMap::from([
+      (
+        "/Applications/Raycast.app".to_string(),
+        Some(test_render_image()),
+      ),
+      ("/Applications/Zoom.app".to_string(), None),
+    ]);
+    assert!(missing_icon_paths(&report, &icons).is_empty());
+  }
+
+  #[test]
+  fn icon_cache_maps_missing_and_failed_paths_to_the_letter_avatar() {
+    let icons: HashMap<String, Option<Arc<RenderImage>>> = HashMap::from([
+      (
+        "/Applications/Ok.app".to_string(),
+        Some(test_render_image()),
+      ),
+      ("/Applications/Broken.app".to_string(), None),
+    ]);
+    assert!(icon_for_path(&icons, &Some("/Applications/Ok.app".into())).is_some());
+    assert!(icon_for_path(&icons, &Some("/Applications/Broken.app".into())).is_none());
+    assert!(icon_for_path(&icons, &Some("/Applications/Unknown.app".into())).is_none());
+    assert!(icon_for_path(&icons, &None).is_none());
+  }
+
+  #[test]
+  fn png_bytes_decode_to_a_single_rgba_frame() {
+    let buffer = image::ImageBuffer::from_pixel(2, 2, image::Rgba([10, 20, 30, 255]));
+    let dynamic = image::DynamicImage::ImageRgba8(buffer);
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    dynamic
+      .write_to(&mut cursor, image::ImageFormat::Png)
+      .expect("test PNG encodes");
+    let png = cursor.into_inner();
+    let rendered = decode_png_to_render_image(&png).expect("test PNG decodes");
+    assert_eq!(rendered.frame_count(), 1);
+    assert_eq!(
+      rendered.as_bytes(0).map(|bytes| bytes.len()),
+      Some(2 * 2 * 4)
+    );
+    assert!(decode_png_to_render_image(b"not a png").is_none());
   }
 }

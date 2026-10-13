@@ -398,7 +398,10 @@ impl Render for AppState {
           .w_full()
           .items_stretch()
           .children(self.sidebar_visible.then(|| self.render_sidebar(cx)))
-          .child(div().flex_1().min_w_0().h_full().child(screen)),
+          // `min_h_0` keeps the screen slot shrinkable: without it the slot
+          // defaults to content minimum height and the App Storage scroll
+          // containers below would measure against their content.
+          .child(div().flex_1().min_w_0().min_h_0().h_full().child(screen)),
       )
   }
 }

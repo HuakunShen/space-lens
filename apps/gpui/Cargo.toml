@@ -16,6 +16,10 @@ path = "src/main.rs"
 # Default features are ["assets", "component"]; never enable the tree-sitter
 # syntax-highlighting features, a disk tool pulls no parsers.
 gpui-kit = "0.7"
+# PNG decode for audited app icons (decoded off the UI thread, see views/app_storage.rs).
+image      = "0.25"
+# Lowered background-audit priority so the rayon scan yields to the UI thread.
+libc       = "0.2"
 # Published to crates.io as kuntu-scan; the path keeps local (submodule) builds.
 space-lens = { package = "kuntu-scan", version = "0.3", path = "../../vendors/kuntu/crates/kuntu-scan" }
 spacelens-app-audit = { path = "../../crates/app-audit" }
