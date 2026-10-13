@@ -34,6 +34,33 @@ export function appAuditAvailable(input: AppAuditGateInput): boolean {
   return Boolean(input.capabilities?.scan.appAudit && input.service?.appAudit)
 }
 
+export interface AppCleanupGateInput {
+  capabilities: Capabilities | null
+  /** `Pick` of the workbench service; only the V2 app cleanup methods matter. */
+  service: { appCleanupPlan?: unknown; appCleanupExecute?: unknown } | null
+}
+
+/** Audit-generation cleanup needs both submit arms declared and implemented. */
+export function appCleanupAvailable(input: AppCleanupGateInput): boolean {
+  return Boolean(
+    input.capabilities?.cleanup.appPlan &&
+      input.capabilities?.cleanup.appExecute &&
+      input.service?.appCleanupPlan &&
+      input.service?.appCleanupExecute,
+  )
+}
+
+export interface RevealGateInput {
+  capabilities: Capabilities | null
+  /** `Pick` of the workbench service; only the reveal method matters. */
+  service: { revealAppLocation?: unknown } | null
+}
+
+/** Finder reveal needs the host flag and the host request method. */
+export function revealAvailable(input: RevealGateInput): boolean {
+  return Boolean(input.capabilities?.host.appLocationReveal && input.service?.revealAppLocation)
+}
+
 /** The engine skips `.gitignore` content reads for the startup-disk roots. */
 const FULL_DISK_PATHS = ['/', '/System/Volumes/Data']
 

@@ -26,7 +26,7 @@
   } from '@space-lens/web-ui'
   import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
-  import type { CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, AppAuditReport } from '@space-lens/contract'
+  import type { CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, AppAuditReport, AppCleanupPlan } from '@space-lens/contract'
   import { setMode, userPrefersMode } from 'mode-watcher'
   import { addSelection, selectedAncestor } from '../lib/selection'
   import { ACTIVE_SCAN_KEY, parseActiveScan } from '../lib/resume'
@@ -55,7 +55,10 @@
     discoveryAvailable as discoveryGate,
     gitignoredAvailable as gitignoredGate,
     appAuditAvailable as appAuditGate,
+    appCleanupAvailable as appCleanupGate,
+    revealAvailable as revealGate,
   } from '../lib/gates'
+  import { shouldApplyAuditReport } from '../lib/app-storage'
   import { startDesktopEventStream } from '../lib/desktop-events'
 
   let ticketInput = $state('')
@@ -291,6 +294,12 @@
   const appAuditAvailable = $derived(
     appAuditGate({ capabilities: workbench.capabilities, service: workbench.service }),
   )
+  const appCleanupAvailable = $derived(
+    appCleanupGate({ capabilities: workbench.capabilities, service: workbench.service }),
+  )
+  const revealAvailable = $derived(
+    revealGate({ capabilities: workbench.capabilities, service: workbench.service }),
+  )
   const cleanupAvailable = $derived(
     cleanupGate({
       capabilities: workbench.capabilities,
@@ -351,7 +360,7 @@
     const currentView = view
     if (currentView !== 'apps' || !appAuditAvailable) return
     void size
-    void refreshAppAudit(true)
+    void refreshAppAudit()
   })
   let navigating = $state(false)
   let navigationRequest = 0
@@ -735,16 +744,18 @@
       if (request === discoverySequence) discoveryLoading = false
     }
   }
-  async function refreshAppAudit(reset = true): Promise<void> {
+  // Refresh swaps the report on success and never blanks it first, so an
+  // open drawer keeps its sizes (and its selection, when the app survives)
+  // while the re-audit runs. A failed refresh leaves the stale report up.
+  async function refreshAppAudit(): Promise<void> {
     const { service } = workbench
     if (!service?.appAudit || view !== 'apps') return
     const request = ++appAuditSequence
     appAuditLoading = true
     appAuditError = null
-    if (reset) appAuditReport = null
     try {
       const report = await service.appAudit({ minSize: appMinSize, includeHeuristic: true, limit: 500 })
-      if (request !== appAuditSequence || view !== 'apps') return
+      if (!shouldApplyAuditReport({ request, sequence: appAuditSequence, view })) return
       appAuditReport = report
     } catch (error) {
       if (request === appAuditSequence) appAuditError = describeError(error)
@@ -846,6 +857,38 @@
     }
   }
 
+  // V2 app-scoped cleanup: the drawer stages whole audited locations, the
+  // dialog reviews them, and the host verifies fingerprints + manifest at
+  // plan time and again before the first trash. Authorization is the
+  // per-generation auditId, not a scanId.
+  async function planAppCleanup(appId: string, paths: string[]): Promise<AppCleanupPlan> {
+    const service = workbench.service
+    if (!service?.appCleanupPlan) throw new Error('App cleanup is unavailable on this host.')
+    const auditId = appAuditReport?.auditId
+    if (!auditId) throw new Error('This audit predates cleanup support — refresh and try again.')
+    return service.appCleanupPlan({ auditId, appId, paths })
+  }
+
+  async function executeAppCleanup(planId: string): Promise<CleanupOutcome> {
+    const service = workbench.service
+    if (!service?.appCleanupExecute) throw new Error('App cleanup is unavailable on this host.')
+    const outcome = await service.appCleanupExecute({ planId, confirm: true })
+    await refreshAppAudit()
+    notice =
+      outcome.failed.length === 0
+        ? `${outcome.trashed.length} item${outcome.trashed.length === 1 ? '' : 's'} moved to Trash · ${formatBytes(outcome.bytesFreed)}`
+        : `${outcome.trashed.length} moved to Trash, ${outcome.failed.length} failed — see the dialog for details.`
+    return outcome
+  }
+
+  async function revealAppLocation(appId: string, path: string): Promise<void> {
+    try {
+      await workbench.service?.revealAppLocation?.({ appId, path })
+    } catch (error) {
+      notice = describeError(error)
+    }
+  }
+
   onMount(() => {
     appearance = parseAppearance(window.localStorage.getItem(APPEARANCE_KEY))
     const storedMode = window.localStorage.getItem(CHART_MODE_KEY)
@@ -939,10 +982,15 @@
                 error={appAuditError}
                 minSize={appMinSize}
                 disabled={workbench.deleting || planning}
+                cleanupAvailable={appCleanupAvailable}
+                revealAvailable={revealAvailable}
                 onRefresh={() => void refreshAppAudit()}
                 onMinSize={(v) => (appMinSize = v)}
                 onCopy={(path) => void copyPath(path)}
                 onIcon={appIcon}
+                onReveal={(appId, path) => void revealAppLocation(appId, path)}
+                onCleanupPlan={(appId, paths) => planAppCleanup(appId, paths)}
+                onCleanupExecute={(planId) => executeAppCleanup(planId)}
               />{/key}
           </div>
         </section>
@@ -1228,10 +1276,15 @@
               error={appAuditError}
               minSize={appMinSize}
               disabled={workbench.deleting || planning}
+              cleanupAvailable={appCleanupAvailable}
+              revealAvailable={revealAvailable}
               onRefresh={() => void refreshAppAudit()}
               onMinSize={(v) => (appMinSize = v)}
               onCopy={(path) => void copyPath(path)}
               onIcon={appIcon}
+              onReveal={(appId, path) => void revealAppLocation(appId, path)}
+              onCleanupPlan={(appId, paths) => planAppCleanup(appId, paths)}
+              onCleanupExecute={(planId) => executeAppCleanup(planId)}
             />{/key}
         {:else}
           {#key view}<DiscoveryList
