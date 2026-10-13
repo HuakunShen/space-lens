@@ -139,6 +139,12 @@
   :root[data-interface='linux'] body {
     background: var(--background);
   }
+  :root[data-interface='web']:not(.dark) body {
+    background: var(--background);
+  }
+  :root:is([data-backdrop='glass'], [data-backdrop='vibrancy']) body {
+    background: transparent;
+  }
   /* Native vibrancy (desktop shell, macOS): the window material shows
      through the base layer, so the body and chart canvas go transparent
      while sidebar/cards keep their own tint. The `data-backdrop` attribute

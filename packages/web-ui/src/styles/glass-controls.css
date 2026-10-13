@@ -34,7 +34,7 @@
   }
   .workbench-shell .glass-controls button {
     border-radius: 999px;
-    color: var(--muted-foreground);
+    color: color-mix(in srgb, var(--foreground) 70%, transparent);
     background: transparent;
     border-color: transparent;
     transition: background 140ms ease, box-shadow 140ms ease, color 140ms ease;

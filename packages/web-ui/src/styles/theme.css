@@ -207,10 +207,26 @@
 
   body {
     @apply text-foreground;
+  }
+
+  /* Dark keeps the original radial wash; light uses the token background
+     so foreground text keeps its pairing. Glass goes transparent so the
+     native material shows through. */
+  :root.dark body {
     background:
       radial-gradient(circle at 18% 0%, oklch(0.3 0.045 250 / 0.46), transparent 31rem),
       radial-gradient(circle at 88% 8%, oklch(0.28 0.06 165 / 0.32), transparent 30rem),
       linear-gradient(135deg, oklch(0.13 0 0), oklch(0.17 0.01 260));
+  }
+
+  :root:not(.dark) body {
+    background:
+      radial-gradient(ellipse at 45% 20%, color-mix(in srgb, var(--card) 60%, transparent), transparent 72%),
+      var(--background);
+  }
+
+  :root:is([data-backdrop='glass'], [data-backdrop='vibrancy']) body {
+    background: transparent;
   }
 
   button,
@@ -430,6 +446,7 @@
     margin-top: 0.25rem;
     border-radius: 999px;
     background: oklch(0.72 0.19 145);
+    box-shadow: 0 0 0 1px var(--background);
   }
   .drive-rescan {
     appearance: none;
@@ -712,7 +729,7 @@
     filter: brightness(1.08);
   }
   .center-well {
-    fill: color-mix(in oklch, var(--background) 72%, black 28%);
+    fill: var(--card);
     stroke: var(--border);
     stroke-width: 1;
   }
@@ -937,7 +954,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--node);
+    color: color-mix(in srgb, var(--node) 60%, var(--foreground));
   }
   /* The concept's category tile: a rounded chip tinted with the row's own
      family color, so scanning the left column reads as category, not glyph. */
@@ -948,7 +965,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: var(--node);
+    color: color-mix(in srgb, var(--node) 55%, var(--foreground));
     background: color-mix(in oklch, var(--node) 22%, transparent);
   }
   .strip-chevron {
@@ -1133,6 +1150,9 @@
   .rail-insight svg {
     flex-shrink: 0;
     margin-top: 0.1rem;
+    color: oklch(0.55 0.16 84);
+  }
+  :root.dark .rail-insight svg {
     color: oklch(0.78 0.16 84);
   }
   .center-size,
@@ -1199,7 +1219,7 @@
     padding: 0.55rem;
     border: 1px solid var(--border);
     border-radius: 9px;
-    color: var(--node);
+    color: color-mix(in srgb, var(--node) 60%, var(--foreground));
     background: color-mix(in srgb, var(--node) 8%, transparent);
   }
   .inspector-content {
@@ -1227,6 +1247,9 @@
     font-size: 0.7rem;
     line-height: 1.6;
     margin-top: 0.3rem;
+    color: var(--foreground);
+  }
+  :root.dark .inspector-path {
     color: var(--muted-foreground);
   }
   .inspector-hint {
@@ -1257,9 +1280,12 @@
   }
   .chart-summary {
     text-align: center;
-    color: var(--muted-foreground);
+    color: var(--foreground);
     font-size: 0.65rem;
     margin-top: 0.75rem;
+  }
+  :root.dark .chart-summary {
+    color: var(--muted-foreground);
   }
   @media (prefers-reduced-motion: reduce) {
     .arc,

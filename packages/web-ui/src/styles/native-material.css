@@ -36,6 +36,9 @@
 }
 @layer components {
   /* Keep data surfaces readable even over a bright wallpaper or inactive glass. */
+  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) body {
+    background: transparent;
+  }
   :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])
     :is(.workspace-content, .scan-picker .picker-layout > section) {
     background: var(--native-content);

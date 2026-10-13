@@ -68,6 +68,7 @@
     margin-left: auto;
     border-radius: 9999px;
     background: var(--amber-500, #f59e0b);
+    box-shadow: 0 0 0 1px var(--background);
   }
   .scan-sidebar .drive-card {
     flex: none;
@@ -100,6 +101,9 @@
   .scan-sidebar .drive-usage {
     display: flex;
     justify-content: space-between;
+    color: var(--foreground);
+  }
+  :root.dark .scan-sidebar .drive-usage {
     color: var(--muted-foreground);
   }
   .scan-sidebar .drive-usage strong {
@@ -109,10 +113,11 @@
   .scan-sidebar .drive-bar {
     height: 6px;
     margin-top: -3px;
+    background: color-mix(in srgb, var(--foreground) 12%, transparent);
   }
   .scan-sidebar .drive-bar > span,
   .scan-sidebar .drive-swatch.used {
-    background: color-mix(in srgb, var(--foreground) 65%, transparent);
+    background: var(--primary);
   }
   .scan-sidebar .drive-legend {
     gap: 6px;
@@ -137,7 +142,6 @@
   .scan-sidebar .drive-dot {
     width: 6px;
     height: 6px;
-    background: var(--muted-foreground);
   }
   .scan-sidebar .drive-rescan {
     min-height: 30px;
@@ -147,12 +151,6 @@
   .scan-sidebar .sidebar-footnote {
     font-size: 10px;
     padding: 12px 10px 0;
-  }
-  .dark .scan-sidebar {
-    --foreground: #e8e8e8;
-    --muted-foreground: #999999;
-    --border: rgb(255 255 255 / 9%);
-    background: #181818;
   }
   [data-density='comfortable'] .scan-sidebar .sidebar-item {
     height: 40px;

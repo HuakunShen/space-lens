@@ -113,12 +113,16 @@
   }
   .bubble-text,
   .tile-text {
-    fill: white;
+    fill: oklch(0.25 0.02 260);
     paint-order: stroke;
     stroke: rgb(0 25 65 / 12%);
     stroke-width: 2px;
     stroke-linejoin: round;
     font-variant-numeric: tabular-nums;
+  }
+  .bubble-text.muted-ink,
+  .tile-text.muted-ink {
+    fill: oklch(0.9 0.01 260);
   }
   .bubble-name {
     font-size: 12px;
@@ -166,6 +170,7 @@
   .tile-share {
     font-size: 10px;
     stroke: none;
+    fill: white;
   }
   .chart-folder {
     pointer-events: none;
@@ -214,7 +219,7 @@
     width: 38px;
     height: 42px;
     border-radius: 10px;
-    color: white;
+    color: color-mix(in srgb, var(--node) 55%, var(--foreground));
     background: linear-gradient(
       145deg,
       color-mix(in srgb, var(--node) 85%, white),
@@ -229,7 +234,7 @@
     width: 23px;
     height: 23px;
     stroke-width: 1.4;
-    fill: rgb(255 255 255 / 18%);
+    fill: color-mix(in srgb, currentColor 18%, transparent);
   }
   .strip-identity {
     display: flex;
@@ -280,9 +285,18 @@
   }
   .piece-label,
   .piece-size {
-    color: white;
     max-width: calc(100% - 10px);
     text-shadow: 0 1px 2px rgb(0 20 50 / 15%);
+  }
+  .piece-label {
+    color: oklch(0.25 0.02 260);
+  }
+  .piece-size {
+    color: oklch(0.3 0.02 260);
+  }
+  .strip-piece.muted-ink .piece-label,
+  .strip-piece.muted-ink .piece-size {
+    color: oklch(0.9 0.01 260);
   }
   .piece-label {
     font-size: 10px;
@@ -313,6 +327,7 @@
   .rail-icon {
     width: 24px;
     height: 26px;
+    color: color-mix(in srgb, var(--node) 60%, var(--foreground));
   }
   .rail-icon svg {
     width: 20px;

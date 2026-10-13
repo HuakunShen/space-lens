@@ -71,7 +71,7 @@
     padding: 0 9px;
     color: var(--foreground);
     border: 1px solid var(--border);
-    background: var(--background);
+    background: var(--control, var(--card));
   }
   .toolbar-icon:hover,
   .toolbar-icon.active,
@@ -285,7 +285,7 @@
     }
   }
   .compact-workbench .center-well {
-    fill: var(--background);
+    fill: var(--card);
   }
   .compact-workbench .center-size {
     font-size: 23px;
@@ -319,7 +319,7 @@
   }
   .compact-workbench .explorer-sidebar {
     padding: 13px 8px 8px;
-    background: var(--background);
+    background: var(--sidebar);
   }
   .compact-workbench .contents-heading {
     padding: 0 6px 11px;
@@ -339,7 +339,7 @@
     align-items: center;
     gap: 8px;
     border: 1px solid var(--input);
-    background: var(--background);
+    background: var(--control, var(--card));
     border-radius: var(--radius);
     padding: 0 9px;
     color: var(--muted-foreground);
@@ -428,6 +428,7 @@
     border-radius: 50%;
     background: oklch(0.66 0.13 150);
     flex: none;
+    box-shadow: 0 0 0 1px var(--background);
   }
   .workspace-status i.reconnecting {
     background: oklch(0.72 0.14 75);
@@ -583,11 +584,14 @@
   }
   .discovery-path {
     font-size: 10px;
-    color: var(--muted-foreground);
+    color: var(--foreground);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     user-select: text;
+  }
+  :root.dark .discovery-path {
+    color: var(--muted-foreground);
   }
   .candidate-reason {
     font-size: 9px;
