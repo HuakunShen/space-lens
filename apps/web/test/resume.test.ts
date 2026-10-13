@@ -10,3 +10,23 @@ test('only a valid bounded scan reference can resume; malformed browser state is
   assert.equal(parseActiveScan(JSON.stringify({ scanId: 'scan_12345678', paths: Array(17).fill('/') })), null)
   assert.deepEqual(parseActiveScan(JSON.stringify({ scanId: 'scan_12345678', paths: ['/', '/System/Volumes/Data'], focusNodeId: 'abcd' })), { scanId: 'scan_12345678', paths: ['/', '/System/Volumes/Data'], focusNodeId: 'abcd' })
 })
+
+test('app sessions restore by identity and never persist the virtual path', () => {
+  const app = { appId: 'raycast', auditId: 'audit_abcdef1234567890abcdef' }
+  assert.deepEqual(parseActiveScan(JSON.stringify({ scanId: 'scan_abcdefgh', app })), {
+    scanId: 'scan_abcdefgh',
+    app,
+  })
+  // Neither input form present: nothing to restore.
+  assert.equal(parseActiveScan(JSON.stringify({ scanId: 'scan_abcdefgh' })), null)
+  // Malformed app identity is ignored like any malformed state.
+  assert.equal(
+    parseActiveScan(JSON.stringify({ scanId: 'scan_abcdefgh', app: { appId: '', auditId: 'audit_x' } })),
+    null,
+  )
+  // Legacy path payloads still parse unchanged.
+  assert.deepEqual(parseActiveScan(JSON.stringify({ scanId: 'scan_abcdefgh', paths: ['/tmp'] })), {
+    scanId: 'scan_abcdefgh',
+    paths: ['/tmp'],
+  })
+})

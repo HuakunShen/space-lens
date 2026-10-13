@@ -61,6 +61,17 @@ export function revealAvailable(input: RevealGateInput): boolean {
   return Boolean(input.capabilities?.host.appLocationReveal && input.service?.revealAppLocation)
 }
 
+export interface AppScanGateInput {
+  capabilities: Capabilities | null
+  /** `Pick` of the workbench service; only the optional startAppScan method matters. */
+  service: { startAppScan?: unknown } | null
+}
+
+/** V3 app scans need the host flag and the submit arm. */
+export function appScanAvailable(input: AppScanGateInput): boolean {
+  return Boolean(input.capabilities?.scan.appScan && input.service?.startAppScan)
+}
+
 /** The engine skips `.gitignore` content reads for the startup-disk roots. */
 const FULL_DISK_PATHS = ['/', '/System/Volumes/Data']
 

@@ -16,6 +16,7 @@
     ScanSidebar,
     DiscoveryList,
     AppAuditList,
+    AppScanHeader,
     AppearancePanel,
     ScanCoveragePanel,
     Button,
@@ -23,12 +24,17 @@
     formatBytes,
     formatNodeName,
     resolveScanVolume,
+    isVirtualAppPath,
+    isAppBundleNode,
+    isAccountingLeaf,
+    annotationForNode,
   } from '@space-lens/web-ui'
   import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
-  import type { CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, AppAuditReport, AppCleanupPlan } from '@space-lens/contract'
+  import type { AppAuditEntry, AppAuditReport, CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, ScanStatus } from '@space-lens/contract'
   import { setMode, userPrefersMode } from 'mode-watcher'
   import { addSelection, selectedAncestor } from '../lib/selection'
+  import { canCollectNode } from '@space-lens/web-ui/lib/app-scan'
   import { ACTIVE_SCAN_KEY, parseActiveScan } from '../lib/resume'
   import { APPEARANCE_KEY, parseAppearance, resolveStyle } from '../lib/appearance'
   import { CHART_MODE_KEY, TREEMAP_DENSITY_KEY, parseChartMode, parseTreemapDensity } from '../lib/chart-mode'
@@ -50,15 +56,22 @@
     ticketFromLocation,
     workbench,
   } from '../lib/workbench.svelte'
+  import { restoreCollector, shouldApplyPlan, stashCollector } from '../lib/session-isolation'
   import {
     cleanupAvailable as cleanupGate,
     discoveryAvailable as discoveryGate,
     gitignoredAvailable as gitignoredGate,
     appAuditAvailable as appAuditGate,
-    appCleanupAvailable as appCleanupGate,
-    revealAvailable as revealGate,
+    appScanAvailable as appScanGate,
   } from '../lib/gates'
   import { shouldApplyAuditReport } from '../lib/app-storage'
+  import {
+    forgetRecentAppScan,
+    isRecentAppStale,
+    loadRecentAppScans,
+    markRecentAppStale,
+    rememberRecentAppScan,
+  } from '../lib/recent-apps'
   import { auditFixtureActive, installAuditFixture } from '../lib/audit-fixture'
   import { startDesktopEventStream } from '../lib/desktop-events'
 
@@ -109,6 +122,11 @@
   ))
   let rescanning = $state(false)
   async function rescan(): Promise<void> {
+    // A10: app sessions never rescan a synthetic identifier as a path.
+    if (workbench.status?.app) {
+      await rescanApp()
+      return
+    }
     const paths = scannedPaths.length > 0 ? scannedPaths : workbench.targets.map((target) => target.path)
     if (paths.length === 0) return
     rescanning = true
@@ -208,7 +226,17 @@
   let pickerOpen = $state(false)
   let pickerPath = $state('')
   let startingScan = $state(false)
+  let startingAppId = $state<string | null>(null)
   let recentTargets = $state(loadRecentTargets())
+  let recentAppScans = $state(loadRecentAppScans())
+  /** Pinned per-scan audit reports (§1 Q3): browsing never invalidates. */
+  let pinnedReports = $state(new Map<string, AppAuditReport>())
+  /** Known sessions with an app origin, for the sidebar app switcher. */
+  let appSessions = $state<ScanStatus[]>([])
+  /** A6: late planning responses are discarded when the scan moved on. */
+  let planSequence = 0
+  /** Filesystem inputs per path session (virtual ids are never stored). */
+  let pathsByScan = new Map<string, string[]>()
   let appearance = $state(parseAppearance(null))
   let appVersion = $state<string | null>(null)
   let updateStatus = $state<UpdateStatus>({ state: 'idle' })
@@ -295,11 +323,8 @@
   const appAuditAvailable = $derived(
     appAuditGate({ capabilities: workbench.capabilities, service: workbench.service }),
   )
-  const appCleanupAvailable = $derived(
-    appCleanupGate({ capabilities: workbench.capabilities, service: workbench.service }),
-  )
-  const revealAvailable = $derived(
-    revealGate({ capabilities: workbench.capabilities, service: workbench.service }),
+  const appScanSupported = $derived(
+    appScanGate({ capabilities: workbench.capabilities, service: workbench.service }),
   )
   const cleanupAvailable = $derived(
     cleanupGate({
@@ -311,12 +336,94 @@
   const selectedItems = $derived(
     workbench.items.filter((item) => item.name.toLowerCase().includes(browseSearch.toLowerCase())),
   )
-  const selectableShown = $derived(
-    selectedItems.filter((item) => item.scanState !== 'skipped' && item.scanState !== 'partial'),
-  )
+  // A8: bulk selection consults the single eligibility predicate, not its
+  // own scanState heuristic.
+  const selectableShown = $derived(selectedItems.filter((item) => canCollectNode(item)))
   const coveredIds = $derived(
-    new Set(workbench.items.filter((item) => selectedAncestor(workbench.collector, item.path)).map((item) => item.id)),
+    new Set(
+      workbench.items
+        .filter((item) => {
+          const entry = selectedAncestor(workbench.collector, item.path, workbench.activeScanId)
+          return Boolean(entry && entry.nodeId !== item.id)
+        })
+        .map((item) => item.id),
+    ),
   )
+  /** V3 virtual-root session marker (status.app set by the host). */
+  const isAppScan = $derived(workbench.status?.app != null)
+  const activeApp = $derived(workbench.status?.app ?? null)
+  const activeAuditId = $derived(activeApp?.auditId ?? null)
+  /**
+   * A11 annotation source: the report pinned at scan start, falling back to
+   * the live report only when its generation matches the session pin.
+   */
+  const activePinnedReport = $derived.by((): AppAuditReport | null => {
+    if (!activeAuditId) return null
+    const pinned = pinnedReports.get(activeAuditId)
+    if (pinned) return pinned
+    if (appAuditReport?.auditId === activeAuditId) return appAuditReport
+    return null
+  })
+  const activeAppEntry = $derived.by((): AppAuditEntry | null => {
+    if (!activeApp) return null
+    return activePinnedReport?.apps.find((app) => app.id === activeApp.appId) ?? null
+  })
+  /** A11 stale: re-audit minted a new generation, or cleanup moved files. */
+  const appScanStale = $derived.by((): boolean => {
+    if (!activeApp) return false
+    const recent = recentAppScans.find((entry) => entry.appId === activeApp.appId)
+    if (recent && isRecentAppStale(recent, appAuditReport?.auditId ?? null)) return true
+    if (appAuditReport?.auditId && activeApp.auditId !== appAuditReport.auditId) return true
+    return false
+  })
+  const staleScanIds = $derived.by((): Set<string> => {
+    const stale = new Set<string>()
+    for (const session of appSessions) {
+      const origin = session.app
+      if (!origin) continue
+      const recent = recentAppScans.find((entry) => entry.appId === origin.appId)
+      if (
+        (recent && isRecentAppStale(recent, appAuditReport?.auditId ?? null)) ||
+        (appAuditReport?.auditId && origin.auditId !== appAuditReport.auditId)
+      ) {
+        stale.add(session.scanId)
+      }
+    }
+    if (workbench.status?.app && appScanStale && workbench.activeScanId) stale.add(workbench.activeScanId)
+    return stale
+  })
+  /**
+   * A11 inspector join: the hovered (or focused) node annotated from the
+   * pinned report when it is a depth-1 child of the virtual root.
+   */
+  const inspectedNode = $derived.by((): TreeNodeSummary | null => {
+    const hovered = workbench.hoveredId
+      ? workbench.items.find((item) => item.id === workbench.hoveredId) ?? null
+      : null
+    return hovered ?? displayFocus
+  })
+  const inspectedIsLocationNode = $derived.by((): boolean => {
+    const node = inspectedNode
+    const focus = workbench.slice?.focusNode
+    return (
+      isAppScan &&
+      node !== null &&
+      node.depth === 1 &&
+      focus !== undefined &&
+      focus.depth === 0 &&
+      isVirtualAppPath(focus.path)
+    )
+  })
+  const inspectorAnnotation = $derived.by(() =>
+    inspectedNode
+      ? annotationForNode(inspectedNode, inspectedIsLocationNode, activePinnedReport, activeApp?.appId ?? null)
+      : null,
+  )
+  const inspectorProvenance = $derived.by((): 'measured' | 'audit-time' | null => {
+    if (!isAppScan || !inspectedNode) return null
+    if (isAppBundleNode(inspectedNode)) return 'audit-time'
+    return 'measured'
+  })
   const automaticStyle = resolveStyle(
     'auto',
     __SPACLENS_DESKTOP__,
@@ -359,7 +466,12 @@
   $effect(() => {
     const size = appMinSize
     const currentView = view
+    const cached = appAuditReport
+    const failed = appAuditError
     if (currentView !== 'apps' || !appAuditAvailable) return
+    // First visit only: a cached report is shown as-is with its generation
+    // timestamp + explicit Refresh (Q4 — a full audit costs 1–2 min).
+    if (cached !== null || failed !== null) return
     void size
     void refreshAppAudit()
   })
@@ -460,7 +572,10 @@
       try {
         stream = await startDesktopEventStream(ports, {
           activeScanId: () => workbench.activeScanId,
-          onStatus: (status) => (workbench.status = status),
+          onStatus: (status) => {
+            workbench.status = status
+            upsertAppSession(status)
+          },
           onReady: () => void loadRoot(),
         })
       } catch {
@@ -468,22 +583,31 @@
       }
       startPolling()
       const scans = await service.listScans?.().catch(() => [])
+      appSessions = (scans ?? []).filter((scan) => scan.app)
       const previous =
         scans?.find((scan) => scan.state === 'scanning') ??
         scans?.filter((scan) => scan.state === 'ready').sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
       if (previous) {
+        if (previous.app) upsertAppSession(previous)
         workbench.activeScanId = previous.scanId
         workbench.status = previous
+        workbench.collector = restoreCollector(previous.scanId)
         pickerOpen = false
         if (previous.state === 'ready') {
           await loadRoot()
-          scannedPaths = await Promise.all(
-            previous.rootIds.map(
-              async (nodeId) =>
-                (await service.treeSlice({ scanId: previous.scanId, nodeId, depth: 0, maxChildrenPerNode: 1 }))
-                  .focusNode.path,
-            ),
-          )
+          if (previous.app) {
+            // A10: the virtual root id is not a filesystem scan input.
+            scannedPaths = []
+          } else {
+            scannedPaths = await Promise.all(
+              previous.rootIds.map(
+                async (nodeId) =>
+                  (await service.treeSlice({ scanId: previous.scanId, nodeId, depth: 0, maxChildrenPerNode: 1 }))
+                    .focusNode.path,
+              ),
+            )
+            pathsByScan.set(previous.scanId, scannedPaths)
+          }
         }
       }
     } catch (error) {
@@ -542,6 +666,7 @@
         .then((fresh) => {
           if (workbench.activeScanId !== fresh.scanId) return
           workbench.status = fresh
+          if (fresh.app) upsertAppSession(fresh)
           if (fresh.state === 'ready') void loadRoot()
         })
         .catch(() => {})
@@ -558,9 +683,20 @@
         window.sessionStorage.removeItem(ACTIVE_SCAN_KEY)
         return
       }
-      scannedPaths = previous.paths
+      if (status.app) upsertAppSession(status)
+      if (previous.app && status.app) {
+        // A10: app sessions restore by identity, never by virtual path.
+        scannedPaths = []
+      } else if (previous.paths) {
+        scannedPaths = previous.paths
+        pathsByScan.set(status.scanId, scannedPaths)
+      } else {
+        window.sessionStorage.removeItem(ACTIVE_SCAN_KEY)
+        return
+      }
       workbench.activeScanId = status.scanId
       workbench.status = status
+      workbench.collector = restoreCollector(status.scanId)
       pickerOpen = false
       if (status.state === 'ready') {
         if (previous.focusNodeId) await focusById(previous.focusNodeId)
@@ -589,6 +725,10 @@
       for (const path of paths) rememberRecentTarget(path)
       recentTargets = loadRecentTargets()
       scannedPaths = paths.map(expandTilde)
+      pathsByScan.set(session.scanId, scannedPaths)
+      if (workbench.activeScanId && workbench.activeScanId !== session.scanId) {
+        stashCollector(workbench.activeScanId, workbench.collector)
+      }
       pickerOpen = false
       view = 'browse'
       browseSearch = ''
@@ -649,9 +789,192 @@
     }
   }
 
+  function upsertAppSession(status: ScanStatus): void {
+    if (!status.app) return
+    appSessions = [status, ...appSessions.filter((session) => session.scanId !== status.scanId)].slice(0, 10)
+  }
+
+  /**
+   * V3 card-click → scan flow: an app becomes a virtual-root session rendered
+   * by the standard browse workbench. The audit generation is pinned at
+   * start; the virtual identifier is never stored as a filesystem input.
+   */
+  async function startAppScan(appId: string): Promise<void> {
+    const { service } = workbench
+    if (service?.startAppScan === undefined || startingScan || startingAppId !== null || workbench.deleting) return
+    const recent = recentAppScans.find((entry) => entry.appId === appId)
+    // A11: recents resolve against the current report when it lists the app.
+    const reported = appAuditReport?.apps.find((app) => app.id === appId)
+    const auditId = reported ? (appAuditReport?.auditId ?? recent?.auditId) : recent?.auditId
+    if (!auditId) {
+      notice = 'Run the audit first — an app scan needs the current audit generation.'
+      return
+    }
+    startingAppId = appId
+    workbench.error = null
+    try {
+      const session = await service.startAppScan({ auditId, appId })
+      if (appAuditReport?.auditId === auditId) {
+        const next = new Map(pinnedReports)
+        next.set(auditId, appAuditReport)
+        pinnedReports = next
+      }
+      rememberRecentAppScan({
+        appId,
+        appName:
+          reported?.name ?? session.app?.appName ?? recent?.appName ?? appId,
+        auditId,
+        generatedAt: appAuditReport?.auditId === auditId ? appAuditReport.generatedAt : (recent?.generatedAt ?? null),
+      })
+      recentAppScans = loadRecentAppScans()
+      if (workbench.activeScanId && workbench.activeScanId !== session.scanId) {
+        stashCollector(workbench.activeScanId, workbench.collector)
+      }
+      // A10: the virtual root id is not a filesystem path — tracked inputs
+      // stay empty for app sessions; rescan routes through the app identity.
+      scannedPaths = []
+      pickerOpen = false
+      view = 'browse'
+      browseSearch = ''
+      browseSort = 'size'
+      notice = null
+      cleanupPlan = null
+      cleanupError = null
+      cleanupOutcome = null
+      planSequence++
+      discoverySequence++
+      navigationRequest++
+      navigating = false
+      discoveryLoading = false
+      discoveryItems = []
+      discoveryPage = null
+      workbench.activeScanId = session.scanId
+      if (!__SPACLENS_DESKTOP__)
+        window.sessionStorage.setItem(ACTIVE_SCAN_KEY, JSON.stringify({ scanId: session.scanId, app: { appId, auditId } }))
+      workbench.status = {
+        scanId: session.scanId,
+        state: 'scanning',
+        message: '',
+        progress: null,
+        currentPath: null,
+        bytesScanned: 0,
+        entriesScanned: 0,
+        rootIds: session.rootIds,
+        label: session.label,
+        updatedAt: session.createdAt,
+        ...(session.app ? { app: session.app } : {}),
+      }
+      if (session.app) upsertAppSession(workbench.status)
+      workbench.slice = null
+      workbench.items = []
+      workbench.childrenTotal = 0
+      workbench.collector = []
+      if (__SPACLENS_DESKTOP__ && workbench.service !== null) {
+        try {
+          workbench.status = await workbench.service.scanStatus(session.scanId)
+          if (workbench.status.app) upsertAppSession(workbench.status)
+        } catch {
+          // keep the optimistic scanning status; the stream will refresh it
+        }
+        await loadRoot()
+      }
+    } catch (error) {
+      workbench.error = describeError(error)
+    } finally {
+      startingAppId = null
+    }
+  }
+
+  /**
+   * A6 session switching: stash the outgoing collector, restore the
+   * incoming one, drop pending plans, and never switch mid-execution.
+   */
+  async function switchScan(scanId: string): Promise<void> {
+    const { service } = workbench
+    if (service === null || workbench.deleting || planning || startingScan || startingAppId !== null) return
+    if (scanId === workbench.activeScanId) return
+    if (workbench.activeScanId) stashCollector(workbench.activeScanId, workbench.collector)
+    planSequence++
+    cleanupPlan = null
+    cleanupError = null
+    cleanupOutcome = null
+    navigationRequest++
+    navigating = false
+    try {
+      const status = await service.scanStatus(scanId)
+      if (status.app) upsertAppSession(status)
+      workbench.activeScanId = status.scanId
+      workbench.status = status
+      workbench.collector = restoreCollector(status.scanId)
+      workbench.slice = null
+      workbench.items = []
+      workbench.childrenTotal = 0
+      view = 'browse'
+      browseSearch = ''
+      discoverySequence++
+      discoveryItems = []
+      discoveryPage = null
+      notice = null
+      if (status.app) {
+        // A10: app sessions carry no filesystem inputs.
+        scannedPaths = []
+        if (!__SPACLENS_DESKTOP__)
+          window.sessionStorage.setItem(
+            ACTIVE_SCAN_KEY,
+            JSON.stringify({ scanId: status.scanId, app: { appId: status.app.appId, auditId: status.app.auditId } }),
+          )
+      } else {
+        const known = pathsByScan.get(status.scanId)
+        if (known && known.length > 0) {
+          scannedPaths = known
+        } else {
+          // Best-effort: resolve the root paths for the restored session.
+          try {
+            scannedPaths = await Promise.all(
+              status.rootIds.map(
+                async (nodeId) =>
+                  (await service.treeSlice({ scanId: status.scanId, nodeId, depth: 0, maxChildrenPerNode: 1 }))
+                    .focusNode.path,
+              ),
+            )
+            pathsByScan.set(status.scanId, scannedPaths)
+          } catch {
+            scannedPaths = []
+          }
+        }
+        if (!__SPACLENS_DESKTOP__ && scannedPaths.length > 0)
+          window.sessionStorage.setItem(ACTIVE_SCAN_KEY, JSON.stringify({ scanId: status.scanId, paths: scannedPaths }))
+      }
+      if (status.state === 'ready') await loadRoot()
+    } catch (error) {
+      workbench.error = describeError(error)
+    }
+  }
+
+  /** A10: app rescan routes through the app identity + current generation. */
+  async function rescanApp(): Promise<void> {
+    const app = workbench.status?.app
+    if (!app) return
+    if (!appAuditReport?.auditId) {
+      notice = 'Refresh the audit first — rescanning needs the current generation.'
+      return
+    }
+    rescanning = true
+    try {
+      await startAppScan(app.appId)
+    } finally {
+      rescanning = false
+    }
+  }
+
   async function focus(node: TreeNodeSummary): Promise<void> {
     if (node.scanState === 'skipped') {
       notice = `Not scanned: ${node.skipReason ?? 'unavailable'}. See scan details for coverage.`
+      return
+    }
+    // A12: accounting leaves explain the total; they have nothing to open.
+    if (isAccountingLeaf(node)) {
+      notice = `This folder's own files are counted in the total — open the folder to explore its contents.`
       return
     }
     const { service, status } = workbench
@@ -746,17 +1069,20 @@
     }
   }
   // Refresh swaps the report on success and never blanks it first, so an
-  // open drawer keeps its sizes (and its selection, when the app survives)
-  // while the re-audit runs. A failed refresh leaves the stale report up.
+  // open directory keeps its sizes while the re-audit runs. A failed
+  // refresh leaves the stale report up. Q4: the audit is never fetched
+  // automatically on picker open — only on first entering the apps view
+  // with no cached report, or via the explicit Refresh buttons.
   async function refreshAppAudit(): Promise<void> {
     const { service } = workbench
-    if (!service?.appAudit || view !== 'apps') return
+    if (!service?.appAudit || (view !== 'apps' && !pickerOpen)) return
     const request = ++appAuditSequence
     appAuditLoading = true
     appAuditError = null
     try {
       const report = await service.appAudit({ minSize: appMinSize, includeHeuristic: true, limit: 500 })
-      if (!shouldApplyAuditReport({ request, sequence: appAuditSequence, view })) return
+      const effectiveView = view === 'apps' || pickerOpen ? 'apps' : view
+      if (!shouldApplyAuditReport({ request, sequence: appAuditSequence, view: effectiveView })) return
       appAuditReport = report
     } catch (error) {
       if (request === appAuditSequence) appAuditError = describeError(error)
@@ -827,15 +1153,24 @@
   async function reviewCleanup(): Promise<void> {
     const { service, status, collector } = workbench
     if (!service || !status || !collector.length || !workbench.capabilities?.cleanup.plan || planning) return
+    // A6: plan only the active scan's entries; discard the reply when the
+    // scan moved on while the host verified fingerprints.
+    const scanId = status.scanId
+    const request = ++planSequence
+    const nodeIds = collector.filter((entry) => entry.scanId === scanId).map((entry) => entry.nodeId)
+    if (nodeIds.length === 0) return
     planning = true
     cleanupError = null
     cleanupOutcome = null
     try {
-      cleanupPlan = await service.plan({ scanId: status.scanId, nodeIds: collector.map((entry) => entry.nodeId) })
+      const plan = await service.plan({ scanId, nodeIds })
+      if (!shouldApplyPlan({ request, sequence: planSequence, activeScanId: workbench.activeScanId, scanId })) return
+      cleanupPlan = plan
     } catch (error) {
+      if (!shouldApplyPlan({ request, sequence: planSequence, activeScanId: workbench.activeScanId, scanId })) return
       cleanupError = describeError(error)
     } finally {
-      planning = false
+      if (shouldApplyPlan({ request, sequence: planSequence, activeScanId: workbench.activeScanId, scanId })) planning = false
     }
   }
   async function confirmCleanup(): Promise<void> {
@@ -849,6 +1184,12 @@
       const trashedPaths = new Set(cleanupOutcome.trashed.map((entry) => entry.path))
       workbench.collector = workbench.collector.filter((entry) => !trashedPaths.has(entry.path))
       cleanupPlan = null
+      // A11: files moved — the session's sizes are stale until rescanned.
+      const app = workbench.status?.app
+      if (app) {
+        markRecentAppStale(app.appId)
+        recentAppScans = loadRecentAppScans()
+      }
       notice = `${cleanupOutcome.trashed.length} items moved to Trash. Rescan to update the storage map.`
     } catch (error) {
       cleanupError = describeError(error)
@@ -858,36 +1199,14 @@
     }
   }
 
-  // V2 app-scoped cleanup: the drawer stages whole audited locations, the
-  // dialog reviews them, and the host verifies fingerprints + manifest at
-  // plan time and again before the first trash. Authorization is the
-  // per-generation auditId, not a scanId.
-  async function planAppCleanup(appId: string, paths: string[]): Promise<AppCleanupPlan> {
-    const service = workbench.service
-    if (!service?.appCleanupPlan) throw new Error('App cleanup is unavailable on this host.')
-    const auditId = appAuditReport?.auditId
-    if (!auditId) throw new Error('This audit predates cleanup support — refresh and try again.')
-    return service.appCleanupPlan({ auditId, appId, paths })
-  }
+  // V3: location + descendant cleanup goes through the engine CleanupPlan /
+  // Execute arms with nodeIds (§6). The standalone appCleanupPlan/Execute
+  // arms stay on the host for programmatic callers; the desktop UI no longer
+  // calls them.
 
-  async function executeAppCleanup(planId: string): Promise<CleanupOutcome> {
-    const service = workbench.service
-    if (!service?.appCleanupExecute) throw new Error('App cleanup is unavailable on this host.')
-    const outcome = await service.appCleanupExecute({ planId, confirm: true })
-    await refreshAppAudit()
-    notice =
-      outcome.failed.length === 0
-        ? `${outcome.trashed.length} item${outcome.trashed.length === 1 ? '' : 's'} moved to Trash · ${formatBytes(outcome.bytesFreed)}`
-        : `${outcome.trashed.length} moved to Trash, ${outcome.failed.length} failed — see the dialog for details.`
-    return outcome
-  }
-
-  async function revealAppLocation(appId: string, path: string): Promise<void> {
-    try {
-      await workbench.service?.revealAppLocation?.({ appId, path })
-    } catch (error) {
-      notice = describeError(error)
-    }
+  function forgetRecentApp(appId: string): void {
+    forgetRecentAppScan(appId)
+    recentAppScans = loadRecentAppScans()
   }
 
   onMount(() => {
@@ -993,16 +1312,15 @@
                 loading={appAuditLoading}
                 error={appAuditError}
                 minSize={appMinSize}
-                disabled={workbench.deleting || planning}
-                cleanupAvailable={appCleanupAvailable}
-                revealAvailable={revealAvailable}
+                disabled={workbench.deleting || planning || startingAppId !== null}
+                scanAvailable={appScanSupported}
+                scanningAppId={startingAppId}
+                staleByApp={new Map(recentAppScans.filter((entry) => entry.stale === true).map((entry) => [entry.appId, true]))}
                 onRefresh={() => void refreshAppAudit()}
                 onMinSize={(v) => (appMinSize = v)}
                 onCopy={(path) => void copyPath(path)}
                 onIcon={appIcon}
-                onReveal={(appId, path) => void revealAppLocation(appId, path)}
-                onCleanupPlan={(appId, paths) => planAppCleanup(appId, paths)}
-                onCleanupExecute={(planId) => executeAppCleanup(planId)}
+                onScanApp={(entry) => void startAppScan(entry.id)}
               />{/key}
           </div>
         </section>
@@ -1021,7 +1339,7 @@
         logo={`${base}/logo-mark.png`}
         initialPath={pickerPath}
         canClose={workbench.status?.state === 'ready'}
-        busy={startingScan || workbench.status?.state === 'scanning'}
+        busy={startingScan || startingAppId !== null || workbench.status?.state === 'scanning'}
         error={workbench.error ||
           (workbench.status?.state === 'failed'
             ? workbench.status.message
@@ -1031,6 +1349,17 @@
         status={workbench.status}
         onScan={(paths) => void startScan(paths)}
         onForget={forgetRecent}
+        auditReport={appAuditReport}
+        auditLoading={appAuditLoading}
+        auditError={appAuditError}
+        onRefreshAudit={() => void refreshAppAudit()}
+        auditSupported={appAuditAvailable}
+        appScanSupported={appScanSupported}
+        scanningAppId={startingAppId}
+        recentApps={recentAppScans}
+        onScanApp={(appId) => void startAppScan(appId)}
+        onForgetApp={forgetRecentApp}
+        onIcon={appIcon}
         onCancel={() => {
           if (workbench.status?.state === 'scanning') void cancelScan()
           else pickerOpen = false
@@ -1082,6 +1411,14 @@
           onSelect={(target) => newLocation(target.path)}
           onCustom={() => newLocation()}
           onForget={forgetRecent}
+          appScans={appSessions}
+          activeScanId={workbench.activeScanId}
+          onSwitchScan={(scanId) => void switchScan(scanId)}
+          staleScanIds={staleScanIds}
+          recentApps={recentAppScans}
+          onSelectApp={(appId) => void startAppScan(appId)}
+          onForgetApp={forgetRecentApp}
+          switchingBlocked={workbench.deleting || planning}
           onSettings={() => (settingsOpen = true)}
           volume={scanVolume}
           scanBytes={workbench.status?.bytesScanned ?? 0}
@@ -1104,7 +1441,7 @@
                 : view === 'apps'
                   ? 'App storage'
                   : 'Gitignored space'}
-          path={displayFocus?.path ?? workbench.status.label ?? undefined}
+          path={isAppScan ? undefined : (displayFocus?.path ?? workbench.status.label ?? undefined)}
           busy={workbench.deleting || planning}
           collectorCount={workbench.collector.length}
           {chartVisible}
@@ -1126,10 +1463,29 @@
                 disabled={workbench.deleting}
                 onclick={() => {
                   cleanupOutcome = null
-                  void startScan(scannedPaths.length ? scannedPaths : [workbench.status?.label ?? ''])
+                  if (workbench.status?.app) void rescanApp()
+                  else void startScan(scannedPaths.length ? scannedPaths : [workbench.status?.label ?? ''])
                 }}>Rescan</button
               >{/if}<button type="button" aria-label="Dismiss notice" onclick={() => (notice = null)}>×</button>
           </div>{/if}
+        {#if isAppScan && activeApp}
+          <AppScanHeader
+            appName={activeAppEntry?.name ?? activeApp.appName}
+            appId={activeApp.appId}
+            auditId={activeApp.auditId}
+            generatedAt={activePinnedReport?.generatedAt ?? (appAuditReport?.auditId === activeApp.auditId ? appAuditReport.generatedAt : null)}
+            stale={appScanStale}
+            totalBytes={workbench.slice?.totalSize ?? workbench.status.bytesScanned}
+            locationCount={activeAppEntry?.locations.length ?? null}
+            appPath={activeAppEntry?.appPath ?? null}
+            isCli={activeAppEntry?.kind === 'cli'}
+            {rescanning}
+            rescanAvailable={appScanSupported}
+            onBack={() => changeView('apps')}
+            onRescan={() => void rescanApp()}
+            onIcon={appIcon}
+          />
+        {/if}
         <ScanCoveragePanel status={workbench.status} />
         {#if view === 'browse'}
           <div
@@ -1178,6 +1534,8 @@
                   canGoBack={ancestors.length > 1}
                   hoveredId={workbench.hoveredId}
                   collectedIds={coveredIds}
+                  inspectorAnnotation={inspectorAnnotation}
+                  inspectorProvenance={inspectorProvenance}
                   onHover={(id) => (workbench.hoveredId = id)}
                   onOpen={(node) => void focus(node)}
                   onContext={toggleCollected}
@@ -1262,7 +1620,7 @@
                   colorMode={chartMode === 'sunburst' ? 'sunburst' : 'standard'}
                   disabled={planning || workbench.deleting}
                   isCovered={(node) => {
-                    const entry = selectedAncestor(workbench.collector, node.path)
+                    const entry = selectedAncestor(workbench.collector, node.path, workbench.activeScanId)
                     return Boolean(entry && entry.nodeId !== node.id)
                   }}
                   totalSize={workbench.slice?.focusNode.size ?? 0}
@@ -1287,16 +1645,15 @@
               loading={appAuditLoading}
               error={appAuditError}
               minSize={appMinSize}
-              disabled={workbench.deleting || planning}
-              cleanupAvailable={appCleanupAvailable}
-              revealAvailable={revealAvailable}
+              disabled={workbench.deleting || planning || startingAppId !== null}
+              scanAvailable={appScanSupported}
+              scanningAppId={startingAppId}
+              staleByApp={new Map(recentAppScans.filter((entry) => entry.stale === true).map((entry) => [entry.appId, true]))}
               onRefresh={() => void refreshAppAudit()}
               onMinSize={(v) => (appMinSize = v)}
               onCopy={(path) => void copyPath(path)}
               onIcon={appIcon}
-              onReveal={(appId, path) => void revealAppLocation(appId, path)}
-              onCleanupPlan={(appId, paths) => planAppCleanup(appId, paths)}
-              onCleanupExecute={(planId) => executeAppCleanup(planId)}
+              onScanApp={(entry) => void startAppScan(entry.id)}
             />{/key}
         {:else}
           {#key view}<DiscoveryList
@@ -1307,9 +1664,9 @@
               error={discoveryError}
               minSize={minimumSize}
               disabled={workbench.deleting || planning}
-              isSelected={(node) => Boolean(selectedAncestor(workbench.collector, node.path))}
+              isSelected={(node) => Boolean(selectedAncestor(workbench.collector, node.path, workbench.activeScanId))}
               isCovered={(node) => {
-                const entry = selectedAncestor(workbench.collector, node.path)
+                const entry = selectedAncestor(workbench.collector, node.path, workbench.activeScanId)
                 return Boolean(entry && entry.nodeId !== node.id)
               }}
               onToggle={toggleCollected}

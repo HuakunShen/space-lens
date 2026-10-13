@@ -8,7 +8,12 @@ import {
   AppCleanupExecuteRequestSchema,
   AppCleanupPlanRequestSchema,
   AppCleanupPlanSchema,
+  AppScanOriginSchema,
+  AppScanStartRequestSchema,
   AuditIdSchema,
+  RecentAppScanSchema,
+  ScanSessionSchema,
+  ScanStatusSchema,
   buildContractArtifacts,
   CleanupExecuteRequestSchema,
   CleanupPlanRequestSchema,
@@ -145,6 +150,72 @@ describe('app audit report contract', () => {
     }
     expect(AuditIdSchema.safeParse('audit_ABCDEFGH12345678').success).toBe(true)
     expect(AuditIdSchema.safeParse('audit_abc').success).toBe(false)
+  })
+})
+
+describe('app scan contract', () => {
+  const origin = { appId: 'raycast', appName: 'Raycast', auditId: 'audit_abcdef1234567890abcdef' }
+
+  it('parses the pinned origin and start request shapes', () => {
+    expect(AppScanOriginSchema.parse(origin)).toEqual(origin)
+    expect(
+      AppScanStartRequestSchema.parse({ auditId: 'audit_abcdef1234567890abcdef', appId: 'raycast' }),
+    ).toEqual({ auditId: 'audit_abcdef1234567890abcdef', appId: 'raycast' })
+    expect(
+      RecentAppScanSchema.parse({ ...origin, lastScannedAt: '2026-10-13T00:00:00.000Z' }),
+    ).toEqual({ ...origin, lastScannedAt: '2026-10-13T00:00:00.000Z' })
+  })
+
+  it('bounds app ids, names, generations and timestamps', () => {
+    for (const invalid of [
+      { ...origin, appId: '' },
+      { ...origin, appId: 'x'.repeat(129) },
+      { ...origin, appName: '' },
+      { ...origin, appName: 'x'.repeat(257) },
+      { ...origin, auditId: 'audit_short' },
+      { ...origin, auditId: 'plain-id' },
+    ]) {
+      expect(AppScanOriginSchema.safeParse(invalid).success).toBe(false)
+    }
+    for (const invalid of [
+      { auditId: 'audit_short', appId: 'raycast' },
+      { auditId: 'audit_abcdef1234567890abcdef', appId: '' },
+      { auditId: 'audit_abcdef1234567890abcdef', appId: 'x'.repeat(129) },
+      { auditId: 'audit_abcdef1234567890abcdef', appId: 'raycast', extra: true },
+    ]) {
+      expect(AppScanStartRequestSchema.safeParse(invalid).success).toBe(false)
+    }
+    expect(
+      RecentAppScanSchema.safeParse({ ...origin, lastScannedAt: 'not-a-date' }).success,
+    ).toBe(false)
+    expect(RecentAppScanSchema.safeParse({ ...origin }).success).toBe(false)
+    expect(RecentAppScanSchema.safeParse({ ...origin, lastScannedAt: '2026-10-13T00:00:00.000Z', extra: 1 }).success).toBe(
+      false,
+    )
+  })
+
+  it('keeps the app origin optional so old session payloads still parse', () => {
+    const session = { scanId: 'scan_abcdefgh', rootIds: [], createdAt: '2026-10-13T00:00:00.000Z', label: null }
+    expect(ScanSessionSchema.parse(session)).toEqual(session)
+    expect(ScanSessionSchema.parse({ ...session, app: origin })).toEqual({ ...session, app: origin })
+    expect(ScanSessionSchema.safeParse({ ...session, app: { ...origin, appId: '' } }).success).toBe(false)
+    expect(ScanSessionSchema.safeParse({ ...session, extra: 1 }).success).toBe(false)
+
+    const status = {
+      scanId: 'scan_abcdefgh',
+      state: 'ready',
+      message: '',
+      progress: null,
+      currentPath: null,
+      bytesScanned: 0,
+      entriesScanned: 0,
+      rootIds: [],
+      label: null,
+      updatedAt: '2026-10-13T00:00:00.000Z',
+    }
+    expect(ScanStatusSchema.parse(status)).toEqual(status)
+    expect(ScanStatusSchema.parse({ ...status, app: origin }).app).toEqual(origin)
+    expect(ScanStatusSchema.safeParse({ ...status, app: origin, extra: 1 }).success).toBe(false)
   })
 })
 

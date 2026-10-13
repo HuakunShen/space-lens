@@ -226,6 +226,74 @@ it('sends closed reveal IPC requests and preserves typed app cleanup failures', 
   expect(failure).toMatchObject({ code: 'StalePlan', message: 'plan expired' })
 })
 
+it('sends the exact appScanStart submit arm and returns the app session', async () => {
+  let receive: (message: unknown) => void = () => {}
+  const requests: unknown[] = []
+  const session = {
+    scanId: 'scan_app0001',
+    rootIds: ['approot_abcdef1234567890abcdef'],
+    createdAt: '2026-10-13T00:00:00.000Z',
+    label: 'Raycast',
+    app: { appId: 'raycast', appName: 'Raycast', auditId: 'audit_abcdef1234567890abcdef' },
+  }
+  const ports: TauriPorts = {
+    createChannel(callback) {
+      receive = callback
+      return 'channel'
+    },
+    async invoke(command, payload) {
+      if (command === 'sl_connect') return { sessionId: 'session_1' }
+      requests.push({ command, ...payload })
+      receive({ ok: true, result: session })
+      return undefined
+    },
+  }
+  expect(
+    await createTauriService(ports).startAppScan!({
+      auditId: 'audit_abcdef1234567890abcdef',
+      appId: 'raycast',
+    }),
+  ).toEqual(session)
+  expect(requests).toEqual([
+    {
+      command: 'sl_submit',
+      sessionId: 'session_1',
+      reply: 'channel',
+      request: { kind: 'appScanStart', auditId: 'audit_abcdef1234567890abcdef', appId: 'raycast' },
+    },
+  ])
+})
+
+it('keeps an app scan start pending beyond the ordinary one-minute reply timeout', async () => {
+  vi.useFakeTimers()
+  try {
+    let receive: (message: unknown) => void = () => {}
+    const ports: TauriPorts = {
+      createChannel(callback) {
+        receive = callback
+        return 'channel'
+      },
+      async invoke(command) {
+        return command === 'sl_connect' ? { sessionId: 'session_1' } : undefined
+      },
+    }
+    const session = {
+      scanId: 'scan_app0001',
+      rootIds: ['approot_abcdef1234567890abcdef'],
+      createdAt: '2026-10-13T00:00:00.000Z',
+      label: 'Raycast',
+    }
+    const pending = createTauriService(ports)
+      .startAppScan!({ auditId: 'audit_abcdef1234567890abcdef', appId: 'raycast' })
+      .catch((error: unknown) => error)
+    await vi.advanceTimersByTimeAsync(61_000)
+    receive({ ok: true, result: session })
+    expect(await pending).toEqual(session)
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
 it('keeps a background discovery request pending beyond the ordinary one-minute reply timeout', async () => {
   vi.useFakeTimers()
   try {

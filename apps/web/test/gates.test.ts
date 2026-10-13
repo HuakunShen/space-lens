@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { cleanupAvailable, discoveryAvailable, gitignoredAvailable, appAuditAvailable } from '../src/lib/gates.ts'
+import { appScanAvailable, cleanupAvailable, discoveryAvailable, gitignoredAvailable, appAuditAvailable } from '../src/lib/gates.ts'
 import type { Capabilities, ScanStatus } from '@space-lens/contract'
 
 const capabilities = (
@@ -70,6 +70,25 @@ test('app storage view requires the appAudit capability and service method', () 
   // service method missing (e.g. the browser HTTP host in v1) -> hidden
   assert.equal(appAuditAvailable({ capabilities: auditCapabilities, service: {} }), false)
   assert.equal(appAuditAvailable({ capabilities: auditCapabilities, service: null }), false)
+})
+
+test('app scans need the host flag and the submit arm', () => {
+  const scanCapabilities = capabilities({ appScan: true })
+  const scanService = { startAppScan: () => Promise.reject(new Error('unused')) }
+  assert.equal(appScanAvailable({ capabilities: scanCapabilities, service: scanService }), true)
+  // capability missing -> hidden
+  assert.equal(
+    appScanAvailable({ capabilities: capabilities({ appScan: undefined }), service: scanService }),
+    false,
+  )
+  assert.equal(
+    appScanAvailable({ capabilities: capabilities({ appScan: false }), service: scanService }),
+    false,
+  )
+  assert.equal(appScanAvailable({ capabilities: null, service: scanService }), false)
+  // service method missing (older adapters, HTTP this round) -> hidden
+  assert.equal(appScanAvailable({ capabilities: scanCapabilities, service: {} }), false)
+  assert.equal(appScanAvailable({ capabilities: scanCapabilities, service: null }), false)
 })
 
 test('cleanup stays desktop-only for covered scans and capability-gated everywhere', () => {
