@@ -760,22 +760,58 @@
     container-type: inline-size;
     container-name: audit;
   }
+  /* App storage master-detail: the split is the top-level row of the view.
+   * The left column owns the heading, filters, grid, and footnote, while
+   * the right rail is the drawer spanning the full height of the view.
+   * Both columns scroll independently inside the bounded view height. */
   .audit-split {
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
+    flex: 1;
     min-height: 0;
+    display: flex;
+    gap: 16px;
+    align-items: stretch;
+  }
+  .audit-main {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
   .audit-list {
     flex: 1;
     min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
+  .audit-main .discovery-rows {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+  }
+  /* Full-height rail: its top edge aligns with the left column's heading,
+   * with a real gap between the columns, so it reads as a side panel
+   * rather than a detail block glued to the filters. The rail is a flex
+   * column — pinned header, scrollable middle, pinned staged footer. */
   .audit-drawer {
     width: clamp(360px, 32%, 480px);
     flex-shrink: 0;
+    align-self: stretch;
+    min-height: 0;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     position: sticky;
-    top: 12px;
-    max-height: calc(100dvh - 24px);
+    top: 0;
+  }
+  .audit-drawer-head {
+    flex: none;
+  }
+  .audit-drawer-body {
+    flex: 1;
+    min-height: 0;
     overflow: auto;
   }
   .app-chart-slot {
@@ -805,9 +841,10 @@
     color: var(--muted-foreground);
     line-height: 1.6;
   }
+  /* Pinned footer of the full-height rail: it sits outside the scrollable
+   * middle, so it rests at the bottom of the panel without sticky hacks. */
   .app-staged-footer {
-    position: sticky;
-    bottom: 0;
+    flex: none;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -829,13 +866,30 @@
     margin-top: 6px;
   }
   @container audit (max-width: 720px) {
+    /* Stacked: the split itself scrolls while the list and the drawer
+     * size to their content, so nothing clips at narrow widths. */
     .audit-split {
       flex-direction: column;
+      overflow: auto;
+    }
+    .audit-main {
+      flex: none;
+    }
+    .audit-list,
+    .audit-main .discovery-rows {
+      flex: none;
+      overflow: visible;
     }
     .audit-drawer {
       width: 100%;
+      flex: none;
+      align-self: auto;
       position: static;
       max-height: none;
+      overflow: visible;
+    }
+    .audit-drawer-body {
+      overflow: visible;
     }
     .app-chart-slot,
     .app-chart-loading {
@@ -846,11 +900,26 @@
     @media (max-width: 760px) {
       .audit-split {
         flex-direction: column;
+        overflow: auto;
+      }
+      .audit-main {
+        flex: none;
+      }
+      .audit-list,
+      .audit-main .discovery-rows {
+        flex: none;
+        overflow: visible;
       }
       .audit-drawer {
         width: 100%;
+        flex: none;
+        align-self: auto;
         position: static;
         max-height: none;
+        overflow: visible;
+      }
+      .audit-drawer-body {
+        overflow: visible;
       }
       .app-chart-slot,
       .app-chart-loading {

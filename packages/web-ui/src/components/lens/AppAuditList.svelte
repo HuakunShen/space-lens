@@ -273,141 +273,153 @@
 {/snippet}
 
 <section class="discovery-view audit-root" aria-label="App storage" aria-busy={loading}>
-  <div class="discovery-heading">
-    <div>
-      <span class="section-eyebrow">DISCOVER & REVIEW</span>
-      <h1>App storage</h1>
-      <p>What installed apps and CLI tools keep on this disk</p>
-    </div>
-    {#if report}<div class="discovery-total">
-        <strong>{formatBytes(grandTotal)}</strong><span
-          >{appCount.toLocaleString()}
-          app{appCount === 1 ? '' : 's'} audited</span
-        >
-      </div>{/if}
-  </div>
-  <div class="discovery-filters">
-    <label class="relative flex min-w-40 flex-1 items-center gap-2"
-      ><Search size={15} /><Input
-        type="search"
-        bind:value={query}
-        placeholder="Search apps by name"
-        aria-label="Search apps by name"
-      /></label
-    >
-    <div class="setting-options w-36" role="group" aria-label="App storage view">
-      <button
-        type="button"
-        data-selected={viewMode === 'cards'}
-        class:selected={viewMode === 'cards'}
-        aria-pressed={viewMode === 'cards'}
-        onclick={() => (viewMode = 'cards')}>Cards</button
-      >
-      <button
-        type="button"
-        data-selected={viewMode === 'list'}
-        class:selected={viewMode === 'list'}
-        aria-pressed={viewMode === 'list'}
-        onclick={() => (viewMode = 'list')}>List</button
-      >
-    </div>
-    <div class="filter-select">
-      <span>Size</span><LensSelect
-        value={String(minSize)}
-        options={sizeOptions}
-        label="Minimum size"
-        class="min-w-28"
-        disabled={disabled || loading}
-        onChange={(value) => onMinSize(Number(value))}
-      />
-    </div>
-    <Button variant="outline" size="sm" disabled={disabled || loading} onclick={onRefresh}
-      ><RefreshCw size={14} /> Refresh</Button
-    >
-  </div>
-  {#if error}<div class="inline-error" role="alert">
-      <p>{error}</p>
-      <Button variant="outline" size="sm" onclick={onRefresh}>Try again</Button>
-    </div>{/if}
+  <!-- Master-detail: the split is the top-level row. The left column owns the heading,
+       filters, grid, and footnote, so the search bar ends before the rail; the right
+       rail is the drawer spanning the full height of the view. -->
   <div class="audit-split">
-    <div class="audit-list">
-      <div class="discovery-rows">
-        {#if report}
-          {#if viewMode === 'cards'}
-            {#if filtered.length > 0}
-              <!-- auto-fill on the card's minimum readable width: narrow hosts
-                   collapse to one column, wide ones grow columns for free -->
-              <div
-                class="grid gap-3 p-4 [grid-template-columns:repeat(auto-fill,minmax(230px,1fr))]"
-                aria-label="Apps"
-              >
-                {#each filtered as app (app.id)}
-                  <AppAuditCard entry={app} active={app.id === selectedId} onOpen={openCard} onIcon={onIcon} />
-                {/each}
-              </div>
-            {:else}
-              <div class="discovery-empty">
-                <Search size={28} /><strong>No matching apps</strong>
-                <p>Try a different search or size filter.</p>
-              </div>
-            {/if}
-          {:else}
-            {#each filtered as app (app.id)}
-              <article class="rounded-lg border bg-card p-4">
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <strong class="text-sm">{app.name}</strong>
-                      <span
-                        class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                        >{app.kind === 'app' ? 'App' : 'CLI'}</span
-                      >
-                      {#if app.source === 'catalog'}<span
-                          class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-                          title="Curated entry with human-reviewed location notes">Known</span
-                        >{/if}
-                    </div>
-                    {#if app.installedSize > 0}<p class="mt-1 text-xs text-muted-foreground">
-                        includes {formatBytes(app.installedSize)} app bundle
-                      </p>{/if}
-                    {#if app.bundleId}<button
-                        type="button"
-                        class="mt-1 block truncate font-mono text-xs text-muted-foreground hover:text-foreground"
-                        title="Copy bundle identifier"
-                        onclick={() => onCopy(app.bundleId ?? '')}>{app.bundleId}</button
-                      >{/if}
-                    {#if app.appPath}<div class="mt-1 flex min-w-0 items-center gap-1">
-                        <span class="min-w-0 flex-1 truncate font-mono text-xs" title={app.appPath}>{app.appPath}</span>
-                        <button
-                          class="toolbar-icon"
-                          type="button"
-                          onclick={() => app.appPath && onCopy(app.appPath)}
-                          aria-label={`Copy path of ${app.name}`}
-                          title="Copy path"><Copy size={14} /></button
-                        >
-                      </div>{/if}
-                  </div>
-                  <span class="shrink-0 text-sm font-semibold tabular-nums">{formatBytes(app.totalSize)}</span>
-                </div>
-                {@render locationList(app)}
-              </article>
-            {/each}
-            {#if filtered.length === 0}
-              <div class="discovery-empty">
-                <Search size={28} /><strong>No matching apps</strong>
-                <p>Try a different search or size filter.</p>
-              </div>
-            {/if}
-          {/if}
-        {/if}
-        {#if !report && !loading && !error}<div class="discovery-empty">
-            <RefreshCw size={28} /><strong>No audit yet</strong>
-            <p>Refresh to enumerate installed apps and their scattered storage.</p>
-          </div>{/if}
-        {#if loading}<div class="discovery-loading" role="status">
-            <LoaderCircle size={18} class="animate-spin" /> Auditing installed apps…
+    <div class="audit-main">
+      <div class="discovery-heading">
+        <div>
+          <span class="section-eyebrow">DISCOVER & REVIEW</span>
+          <h1>App storage</h1>
+          <p>What installed apps and CLI tools keep on this disk</p>
+        </div>
+        {#if report}<div class="discovery-total">
+            <strong>{formatBytes(grandTotal)}</strong><span
+              >{appCount.toLocaleString()}
+              app{appCount === 1 ? '' : 's'} audited</span
+            >
           </div>{/if}
       </div>
+      <div class="discovery-filters">
+        <label class="relative flex min-w-40 flex-1 items-center gap-2"
+          ><Search size={15} /><Input
+            type="search"
+            bind:value={query}
+            placeholder="Search apps by name"
+            aria-label="Search apps by name"
+          /></label
+        >
+        <div class="setting-options w-36" role="group" aria-label="App storage view">
+          <button
+            type="button"
+            data-selected={viewMode === 'cards'}
+            class:selected={viewMode === 'cards'}
+            aria-pressed={viewMode === 'cards'}
+            onclick={() => (viewMode = 'cards')}>Cards</button
+          >
+          <button
+            type="button"
+            data-selected={viewMode === 'list'}
+            class:selected={viewMode === 'list'}
+            aria-pressed={viewMode === 'list'}
+            onclick={() => (viewMode = 'list')}>List</button
+          >
+        </div>
+        <div class="filter-select">
+          <span>Size</span><LensSelect
+            value={String(minSize)}
+            options={sizeOptions}
+            label="Minimum size"
+            class="min-w-28"
+            disabled={disabled || loading}
+            onChange={(value) => onMinSize(Number(value))}
+          />
+        </div>
+        <Button variant="outline" size="sm" disabled={disabled || loading} onclick={onRefresh}
+          ><RefreshCw size={14} /> Refresh</Button
+        >
+      </div>
+      {#if error}<div class="inline-error" role="alert">
+          <p>{error}</p>
+          <Button variant="outline" size="sm" onclick={onRefresh}>Try again</Button>
+        </div>{/if}
+      <div class="audit-list">
+        <div class="discovery-rows">
+          {#if report}
+            {#if viewMode === 'cards'}
+              {#if filtered.length > 0}
+                <!-- auto-fill on the card's minimum readable width: narrow hosts
+                     collapse to one column, wide ones grow columns for free -->
+                <div
+                  class="grid gap-3 p-4 [grid-template-columns:repeat(auto-fill,minmax(230px,1fr))]"
+                  aria-label="Apps"
+                >
+                  {#each filtered as app (app.id)}
+                    <AppAuditCard entry={app} active={app.id === selectedId} onOpen={openCard} onIcon={onIcon} />
+                  {/each}
+                </div>
+              {:else}
+                <div class="discovery-empty">
+                  <Search size={28} /><strong>No matching apps</strong>
+                  <p>Try a different search or size filter.</p>
+                </div>
+              {/if}
+            {:else}
+              {#each filtered as app (app.id)}
+                <article class="rounded-lg border bg-card p-4">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <strong class="text-sm">{app.name}</strong>
+                        <span
+                          class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                          >{app.kind === 'app' ? 'App' : 'CLI'}</span
+                        >
+                        {#if app.source === 'catalog'}<span
+                            class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                            title="Curated entry with human-reviewed location notes">Known</span
+                          >{/if}
+                      </div>
+                      {#if app.installedSize > 0}<p class="mt-1 text-xs text-muted-foreground">
+                          includes {formatBytes(app.installedSize)} app bundle
+                        </p>{/if}
+                      {#if app.bundleId}<button
+                          type="button"
+                          class="mt-1 block truncate font-mono text-xs text-muted-foreground hover:text-foreground"
+                          title="Copy bundle identifier"
+                          onclick={() => onCopy(app.bundleId ?? '')}>{app.bundleId}</button
+                        >{/if}
+                      {#if app.appPath}<div class="mt-1 flex min-w-0 items-center gap-1">
+                          <span class="min-w-0 flex-1 truncate font-mono text-xs" title={app.appPath}>{app.appPath}</span>
+                          <button
+                            class="toolbar-icon"
+                            type="button"
+                            onclick={() => app.appPath && onCopy(app.appPath)}
+                            aria-label={`Copy path of ${app.name}`}
+                            title="Copy path"><Copy size={14} /></button
+                          >
+                        </div>{/if}
+                    </div>
+                    <span class="shrink-0 text-sm font-semibold tabular-nums">{formatBytes(app.totalSize)}</span>
+                  </div>
+                  {@render locationList(app)}
+                </article>
+              {/each}
+              {#if filtered.length === 0}
+                <div class="discovery-empty">
+                  <Search size={28} /><strong>No matching apps</strong>
+                  <p>Try a different search or size filter.</p>
+                </div>
+              {/if}
+            {/if}
+          {/if}
+          {#if !report && !loading && !error}<div class="discovery-empty">
+              <RefreshCw size={28} /><strong>No audit yet</strong>
+              <p>Refresh to enumerate installed apps and their scattered storage.</p>
+            </div>{/if}
+          {#if loading}<div class="discovery-loading" role="status">
+              <LoaderCircle size={18} class="animate-spin" /> Auditing installed apps…
+            </div>{/if}
+        </div>
+      </div>
+      {#if report}<p class="discovery-footnote">
+          Reclaimable classes: {formatBytes(reclaimableTotal)}
+          <span class="mt-1 block text-[11px] text-muted-foreground"
+            >Classification, not a recommendation — nothing is selected or deleted automatically. Sizes may be lower bounds
+            where macOS restricts reads.</span
+          >
+        </p>{/if}
     </div>
     {#if selectedId !== null}
       <AppAuditDrawer
@@ -440,13 +452,6 @@
       />
     {/if}
   </div>
-  {#if report}<p class="discovery-footnote">
-      Reclaimable classes: {formatBytes(reclaimableTotal)}
-      <span class="mt-1 block text-[11px] text-muted-foreground"
-        >Classification, not a recommendation — nothing is selected or deleted automatically. Sizes may be lower bounds
-        where macOS restricts reads.</span
-      >
-    </p>{/if}
   <AppCleanupDialog
     open={dialogOpen}
     appName={selected?.name ?? ''}

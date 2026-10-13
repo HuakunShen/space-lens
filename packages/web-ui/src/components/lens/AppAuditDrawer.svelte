@@ -108,7 +108,7 @@
       <Button variant="outline" size="sm" onclick={onClose}>← Back to apps</Button>
     </div>
   {:else}
-    <div class="mb-3 flex items-center justify-between gap-2">
+    <div class="audit-drawer-head mb-3 flex items-center justify-between gap-2">
       <Button variant="ghost" size="sm" onclick={onClose}>← Back to apps</Button>
       <button
         class="toolbar-icon"
@@ -119,95 +119,97 @@
         title="Close details"><X size={15} /></button
       >
     </div>
-    <div class="flex items-start gap-3">
-      {#if icon.status === 'ready' && icon.url}
-        <img src={icon.url} alt="" aria-hidden="true" class="size-10 shrink-0 rounded-lg object-contain" />
-      {:else if icon.status === 'failed'}
-        <div
-          class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground"
-          aria-hidden="true">{initialsFor(entry.name)}</div
-        >
-      {:else}
-        <div class="size-10 shrink-0 animate-pulse rounded-lg bg-muted" aria-hidden="true"></div>
-      {/if}
-      <div class="min-w-0 flex-1">
-        <div class="flex items-start justify-between gap-2">
-          <strong class="min-w-0 truncate text-base font-semibold" title={entry.name}>{entry.name}</strong>
-          <span class="shrink-0 text-sm font-semibold tabular-nums">{formatBytes(entry.totalSize)}</span>
-        </div>
-        <div class="mt-1 flex flex-wrap items-center gap-1">
-          <span class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-            >{entry.kind === 'app' ? 'App' : 'CLI'}</span
+    <div class="audit-drawer-body">
+      <div class="flex items-start gap-3">
+        {#if icon.status === 'ready' && icon.url}
+          <img src={icon.url} alt="" aria-hidden="true" class="size-10 shrink-0 rounded-lg object-contain" />
+        {:else if icon.status === 'failed'}
+          <div
+            class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground"
+            aria-hidden="true">{initialsFor(entry.name)}</div
           >
-          {#if entry.source === 'catalog'}<span
-              class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
-              title="Curated entry with human-reviewed location notes">Known</span
-            >{/if}
+        {:else}
+          <div class="size-10 shrink-0 animate-pulse rounded-lg bg-muted" aria-hidden="true"></div>
+        {/if}
+        <div class="min-w-0 flex-1">
+          <div class="flex items-start justify-between gap-2">
+            <strong class="min-w-0 truncate text-base font-semibold" title={entry.name}>{entry.name}</strong>
+            <span class="shrink-0 text-sm font-semibold tabular-nums">{formatBytes(entry.totalSize)}</span>
+          </div>
+          <div class="mt-1 flex flex-wrap items-center gap-1">
+            <span class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+              >{entry.kind === 'app' ? 'App' : 'CLI'}</span
+            >
+            {#if entry.source === 'catalog'}<span
+                class="rounded-full border px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
+                title="Curated entry with human-reviewed location notes">Known</span
+              >{/if}
+          </div>
+          {#if entry.installedSize > 0}<p class="mt-1 text-xs text-muted-foreground">
+              includes {formatBytes(entry.installedSize)} app bundle
+            </p>{/if}
         </div>
-        {#if entry.installedSize > 0}<p class="mt-1 text-xs text-muted-foreground">
-            includes {formatBytes(entry.installedSize)} app bundle
-          </p>{/if}
       </div>
-    </div>
-    {#if entry.bundleId}<button
-        type="button"
-        class="mt-2 block w-full truncate text-left font-mono text-xs text-muted-foreground hover:text-foreground"
-        title="Copy bundle identifier"
-        onclick={() => onCopy(entry.bundleId ?? '')}>{entry.bundleId}</button
-      >{/if}
-    {#if entry.appPath}<div class="mt-1 flex min-w-0 items-center gap-1">
-        <span class="min-w-0 flex-1 truncate font-mono text-xs" title={entry.appPath}>{entry.appPath}</span>
-        <button
-          class="toolbar-icon"
+      {#if entry.bundleId}<button
           type="button"
-          onclick={() => entry.appPath && onCopy(entry.appPath)}
-          aria-label={`Copy path of ${entry.name}`}
-          title="Copy path"><Copy size={14} /></button
-        >
-      </div>{/if}
+          class="mt-2 block w-full truncate text-left font-mono text-xs text-muted-foreground hover:text-foreground"
+          title="Copy bundle identifier"
+          onclick={() => onCopy(entry.bundleId ?? '')}>{entry.bundleId}</button
+        >{/if}
+      {#if entry.appPath}<div class="mt-1 flex min-w-0 items-center gap-1">
+          <span class="min-w-0 flex-1 truncate font-mono text-xs" title={entry.appPath}>{entry.appPath}</span>
+          <button
+            class="toolbar-icon"
+            type="button"
+            onclick={() => entry.appPath && onCopy(entry.appPath)}
+            aria-label={`Copy path of ${entry.name}`}
+            title="Copy path"><Copy size={14} /></button
+          >
+        </div>{/if}
 
-    <div class="mt-4">
-      {#if treeLoading}
-        <div class="app-chart-loading" role="status">
-          <LoaderCircle size={16} class="animate-spin" /> Measuring app locations…
-        </div>
-      {:else if tree}
-        <div class="app-chart-slot">
-          <DiskChart
-            tree={tree}
-            focusNode={tree}
-            mode={chartMode}
-            onModeChange={onModeChange}
-            density={treemapDensity}
-            onDensityChange={onDensityChange}
-            hoveredId={hoveredId}
-            collectedIds={collectedIds}
-            onHover={(id) => (hoveredId = id)}
-            onOpen={() => {}}
-            onContext={() => {}}
+      <div class="mt-4">
+        {#if treeLoading}
+          <div class="app-chart-loading" role="status">
+            <LoaderCircle size={16} class="animate-spin" /> Measuring app locations…
+          </div>
+        {:else if tree}
+          <div class="app-chart-slot">
+            <DiskChart
+              tree={tree}
+              focusNode={tree}
+              mode={chartMode}
+              onModeChange={onModeChange}
+              density={treemapDensity}
+              onDensityChange={onDensityChange}
+              hoveredId={hoveredId}
+              collectedIds={collectedIds}
+              onHover={(id) => (hoveredId = id)}
+              onOpen={() => {}}
+              onContext={() => {}}
+            />
+          </div>
+        {:else}
+          <p class="app-chart-fallback">Deep sizes unavailable — audit sizes shown.{#if treeError} {treeError}{/if}</p>
+        {/if}
+      </div>
+
+      {#if notice}<p class="mt-3 text-[11px] text-muted-foreground" role="status">{notice}</p>{/if}
+
+      <ul class="mt-3 space-y-2">
+        {#each sorted as location (location.path)}
+          <AppLocationRow
+            location={location}
+            staged={staged.has(location.path)}
+            covered={isPathCovered(location.path, staged) && !staged.has(location.path)}
+            busy={busy}
+            onToggle={onToggleStage}
+            onCopy={onCopy}
+            onReveal={revealAvailable ? onReveal : undefined}
           />
-        </div>
-      {:else}
-        <p class="app-chart-fallback">Deep sizes unavailable — audit sizes shown.{#if treeError} {treeError}{/if}</p>
-      {/if}
+        {/each}
+      </ul>
+
     </div>
-
-    {#if notice}<p class="mt-3 text-[11px] text-muted-foreground" role="status">{notice}</p>{/if}
-
-    <ul class="mt-3 space-y-2">
-      {#each sorted as location (location.path)}
-        <AppLocationRow
-          location={location}
-          staged={staged.has(location.path)}
-          covered={isPathCovered(location.path, staged) && !staged.has(location.path)}
-          busy={busy}
-          onToggle={onToggleStage}
-          onCopy={onCopy}
-          onReveal={revealAvailable ? onReveal : undefined}
-        />
-      {/each}
-    </ul>
-
     {#if cleanupAvailable}
       <div class="app-staged-footer">
         <span class="min-w-0 flex-1 truncate text-xs tabular-nums"
