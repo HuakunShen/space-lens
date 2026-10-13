@@ -11,7 +11,7 @@ import {
 } from './cleanup.ts'
 import { EventEnvelopeSchema } from './events.ts'
 import { DiscoveryKindSchema, DiscoveryRequestSchema, DiscoveryItemSchema, DiscoveryPageSchema } from './discovery.ts'
-import { AppAuditRequestSchema, AppAuditReportSchema, AppIconRequestSchema, AppIconSchema } from './apps.ts'
+import { AppAuditRequestSchema, AppAuditReportSchema, AppIconRequestSchema, AppIconSchema, AppScanOriginSchema, AppScanStartRequestSchema, RecentAppScanSchema } from './apps.ts'
 import {
   LocalScanReportSchema,
   LocalScanNodeSchema,
@@ -54,6 +54,9 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   AppAuditReport: AppAuditReportSchema,
   AppIconRequest: AppIconRequestSchema,
   AppIcon: AppIconSchema,
+  AppScanOrigin: AppScanOriginSchema,
+  AppScanStartRequest: AppScanStartRequestSchema,
+  RecentAppScan: RecentAppScanSchema,
   CleanupPlanRequest: CleanupPlanRequestSchema,
   CleanupPlan: CleanupPlanSchema,
   CleanupExecuteRequest: CleanupExecuteRequestSchema,

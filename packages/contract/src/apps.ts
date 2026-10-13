@@ -63,6 +63,28 @@ export type AppAuditReport = z.infer<typeof AppAuditReportSchema>
 export const AuditIdSchema = z.string().regex(/^audit_[0-9a-zA-Z]{8,64}$/)
 export type AuditId = z.infer<typeof AuditIdSchema>
 
+export const AppScanOriginSchema = z.strictObject({
+  appId: z.string().min(1).max(128),
+  appName: z.string().min(1).max(256),
+  auditId: AuditIdSchema,
+})
+export type AppScanOrigin = z.infer<typeof AppScanOriginSchema>
+
+export const AppScanStartRequestSchema = z.strictObject({
+  auditId: AuditIdSchema,
+  appId: z.string().min(1).max(128),
+})
+export type AppScanStartRequest = z.infer<typeof AppScanStartRequestSchema>
+
+// Client-only recent (no wire, localStorage key spacelens.recentAppScans, max 5)
+export const RecentAppScanSchema = z.strictObject({
+  appId: z.string().min(1).max(128),
+  appName: z.string().min(1).max(256),
+  auditId: AuditIdSchema,
+  lastScannedAt: z.iso.datetime(),
+})
+export type RecentAppScan = z.infer<typeof RecentAppScanSchema>
+
 export const AppIconRequestSchema = z.strictObject({ appPath: z.string().min(1).max(4096) })
 export type AppIconRequest = z.infer<typeof AppIconRequestSchema>
 

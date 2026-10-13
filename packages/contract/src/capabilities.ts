@@ -12,6 +12,7 @@ export const CapabilitiesSchema = z.strictObject({
     cancel: z.boolean(),
     discovery: z.boolean().optional(),
     appAudit: z.boolean().optional(),
+    appScan: z.boolean().optional(),
     maxConcurrent: UintSchema,
   }),
   cleanup: z.strictObject({

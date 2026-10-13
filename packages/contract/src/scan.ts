@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { LocalNodeMetadataShape, ScanCoverageSchema, ScanVolumeSchema } from './local-scan.ts'
+import { AppScanOriginSchema } from './apps.ts'
 
 export const IgnoredModeSchema = z.enum(['summarize', 'exclude'])
 export type IgnoredMode = z.infer<typeof IgnoredModeSchema>
@@ -30,6 +31,7 @@ export const ScanSessionSchema = z.strictObject({
   rootIds: z.array(NodeIdSchema),
   createdAt: IsoDateTimeSchema,
   label: z.string().nullable(),
+  app: AppScanOriginSchema.optional(),
 })
 
 export type ScanSession = z.infer<typeof ScanSessionSchema>
@@ -55,6 +57,7 @@ export const ScanStatusSchema = z.strictObject({
   updatedAt: IsoDateTimeSchema,
   coverage: ScanCoverageSchema.optional(),
   volumes: z.array(ScanVolumeSchema).optional(),
+  app: AppScanOriginSchema.optional(),
 })
 
 export type ScanStatus = z.infer<typeof ScanStatusSchema>

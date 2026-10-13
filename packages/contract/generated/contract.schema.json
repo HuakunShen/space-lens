@@ -58,6 +58,9 @@
             "appAudit": {
               "type": "boolean"
             },
+            "appScan": {
+              "type": "boolean"
+            },
             "maxConcurrent": {
               "type": "integer",
               "minimum": 0,
@@ -384,6 +387,31 @@
             ],
             "additionalProperties": false
           }
+        },
+        "app": {
+          "type": "object",
+          "properties": {
+            "appId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "appName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "auditId": {
+              "type": "string",
+              "pattern": "^audit_[0-9a-zA-Z]{8,64}$"
+            }
+          },
+          "required": [
+            "appId",
+            "appName",
+            "auditId"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -2258,6 +2286,84 @@
       ],
       "additionalProperties": false
     },
+    "AppScanOrigin": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "appName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "auditId": {
+          "type": "string",
+          "pattern": "^audit_[0-9a-zA-Z]{8,64}$"
+        }
+      },
+      "required": [
+        "appId",
+        "appName",
+        "auditId"
+      ],
+      "additionalProperties": false
+    },
+    "AppScanStartRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "auditId": {
+          "type": "string",
+          "pattern": "^audit_[0-9a-zA-Z]{8,64}$"
+        },
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "auditId",
+        "appId"
+      ],
+      "additionalProperties": false
+    },
+    "RecentAppScan": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "appName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "auditId": {
+          "type": "string",
+          "pattern": "^audit_[0-9a-zA-Z]{8,64}$"
+        },
+        "lastScannedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+        }
+      },
+      "required": [
+        "appId",
+        "appName",
+        "auditId",
+        "lastScannedAt"
+      ],
+      "additionalProperties": false
+    },
     "CleanupPlanRequest": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2943,6 +3049,31 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "app": {
+                      "type": "object",
+                      "properties": {
+                        "appId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "appName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "auditId": {
+                          "type": "string",
+                          "pattern": "^audit_[0-9a-zA-Z]{8,64}$"
+                        }
+                      },
+                      "required": [
+                        "appId",
+                        "appName",
+                        "auditId"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -3177,6 +3308,31 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "app": {
+                      "type": "object",
+                      "properties": {
+                        "appId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "appName": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "auditId": {
+                          "type": "string",
+                          "pattern": "^audit_[0-9a-zA-Z]{8,64}$"
+                        }
+                      },
+                      "required": [
+                        "appId",
+                        "appName",
+                        "auditId"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
