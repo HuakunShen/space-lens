@@ -113,6 +113,9 @@
               >
             {/each}
           </div>
+          <p class="mt-1.5 text-xs text-muted-foreground">
+            Applies to the workspace behind this panel.
+          </p>
         {/if}
       </fieldset>
       <fieldset

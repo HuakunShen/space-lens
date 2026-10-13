@@ -1216,6 +1216,12 @@
       installAuditFixture(workbench as unknown as Parameters<typeof installAuditFixture>[0])
       workbench.phase = 'ready'
       view = 'apps'
+      // The fixture still runs the full appearance pipeline — the transparency
+      // row and glass detection live in the shared effects below, and an
+      // early return that skipped this initialization left them dead.
+      appearance = parseAppearance(window.localStorage.getItem(APPEARANCE_KEY))
+      preferencesReady = true
+      refreshGlassAvailable()
       void refreshAppAudit()
       return
     }
