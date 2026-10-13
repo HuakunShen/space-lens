@@ -11,6 +11,7 @@ import type { ResolvedServeConfig, ResolvedHost, ServeOptions } from './config.t
 import { resolveServeConfig } from './config.ts'
 import { EventRing } from './events.ts'
 import { buildApp } from './app.ts'
+import { resolveLocalScanBin } from './local-process.ts'
 import { ScanManager } from './scan-store.ts'
 import { createSystemTrash } from './trash.ts'
 
@@ -79,10 +80,26 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
     maxTotal: config.maxTotalScans,
     localScanBin: options.localScanBin,
   })
+  // The HTTP app-audit rides the same release CLI as protected scans (same
+  // env var / config field). Advertise the capability only when that binary
+  // resolves; otherwise the routes answer Unavailable gracefully.
+  let appAuditAvailable = false
+  try {
+    resolveLocalScanBin(options.localScanBin)
+    appAuditAvailable = true
+  } catch {
+    appAuditAvailable = false
+  }
   const capabilities: Capabilities = {
     apiMajor: API_MAJOR,
     contractVersion: CONTRACT_VERSION,
-    scan: { start: true, cancel: true, discovery: true, maxConcurrent: config.maxConcurrentScans },
+    scan: {
+      start: true,
+      cancel: true,
+      discovery: true,
+      appAudit: appAuditAvailable,
+      maxConcurrent: config.maxConcurrentScans,
+    },
     cleanup: { plan: config.allowCleanup, execute: config.allowCleanup, mode: config.allowCleanup ? 'trash' : 'none' },
     host: { folderPicker: false },
     icloud: 'unavailable',
@@ -97,6 +114,7 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
     health: healthPayload(serviceInstanceId),
     capabilities,
     allowlist: createClientAllowlist(config.allowCidr),
+    localScanBin: options.localScanBin,
   })
 
   let server: ServerType | null = null

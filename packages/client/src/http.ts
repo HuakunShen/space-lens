@@ -1,4 +1,8 @@
 import type {
+  AppAuditReport,
+  AppAuditRequest,
+  AppIcon,
+  AppIconRequest,
   Capabilities,
   ChildrenPage,
   ChildrenPageRequest,
@@ -106,6 +110,10 @@ export function createHttpService(options: HttpServiceOptions) {
       request<ChildrenPage>('/api/v1/tree/children', { method: 'POST', body: JSON.stringify(body) }),
     discover: (body: DiscoveryRequest) =>
       request<DiscoveryPage>('/api/v1/discovery', { method: 'POST', body: JSON.stringify(body) }),
+    appAudit: (body: AppAuditRequest) =>
+      request<AppAuditReport>('/api/v1/apps/audit', { method: 'POST', body: JSON.stringify(body) }),
+    appIcon: (body: AppIconRequest) =>
+      request<AppIcon>('/api/v1/apps/icon', { method: 'POST', body: JSON.stringify(body) }),
     plan: (body: CleanupPlanRequest) =>
       request<CleanupPlan>('/api/v1/cleanup/plan', { method: 'POST', body: JSON.stringify(body) }),
     execute: (body: CleanupExecuteRequest) =>

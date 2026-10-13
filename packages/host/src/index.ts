@@ -18,5 +18,6 @@ export { authoritiesFor, originsForAuthorities, checkOrigin } from './origins.ts
 export { ProblemError, Problems } from './problems.ts'
 export { ScanManager } from './scan-store.ts'
 export { LOCAL_SCAN_BIN_ENV, resolveLocalScanBin } from './local-process.ts'
+export { appAuditArgs, runAppAuditCli, runAppIconCli } from './app-audit.ts'
 export { PortInUseError, startServe, type RunningServer } from './server.ts'
 export { createSystemTrash, type TrashPort } from './trash.ts'

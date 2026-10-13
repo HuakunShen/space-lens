@@ -42,6 +42,12 @@ export interface ServeOptions {
   /** Absolute protected release scanner executable; defaults to env/repository lookup. */
   localScanBin?: string
   /**
+   * Home directory override for the app-storage audit CLI spawn. When set,
+   * the host passes `--home` to `spacelens app-audit`; otherwise the CLI
+   * inherits the host process environment (no flag is passed).
+   */
+  appAuditHome?: string
+  /**
    * `frame-ancestors` sources for served documents. Defaults to `['none']` —
    * the UI frames nobody. An embedder that mounts this host behind its own
    * route passes `['self']` so its same-origin page may frame the workbench.
@@ -76,6 +82,8 @@ export interface ResolvedServeConfig {
   maxConcurrentScans: number
   maxTotalScans: number
   frameAncestors: string[]
+  /** Home override for `spacelens app-audit --home`; null inherits the process env. */
+  appAuditHome: string | null
 }
 
 export function resolveBindHost(input: string | undefined): ResolvedHost {
@@ -200,5 +208,6 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
     maxConcurrentScans: options.maxConcurrentScans ?? 4,
     maxTotalScans: options.maxTotalScans ?? 8,
     frameAncestors: [...(options.frameAncestors ?? ["'none'"])],
+    appAuditHome: options.appAuditHome ?? null,
   }
 }

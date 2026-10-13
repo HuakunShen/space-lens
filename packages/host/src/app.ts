@@ -3,6 +3,9 @@ import { basename } from 'node:path'
 
 import type { Capabilities, DiscoveryRequest, Health, Session } from '@space-lens/contract'
 import {
+  AppAuditReportSchema,
+  AppAuditRequestSchema,
+  AppIconRequestSchema,
   ChildrenPageRequestSchema,
   CleanupExecuteRequestSchema,
   CleanupPlanRequestSchema,
@@ -12,6 +15,7 @@ import {
   SessionExchangeRequestSchema,
   TreeSliceRequestSchema,
 } from '@space-lens/contract'
+import type { AppAuditRequest } from '@space-lens/contract'
 import type { SessionRecord } from './auth.ts'
 import type { AuthService } from './auth.ts'
 import type { AssetHandler } from './assets.ts'
@@ -23,6 +27,8 @@ import { authoritiesFor, checkOrigin, originsForAuthorities, type OriginPolicy }
 import type { ResolvedServeConfig } from './config.ts'
 import type { ScanManager } from './scan-store.ts'
 import { mountedVolumes, volumeCapacities } from './volumes.ts'
+import { resolveLocalScanBin } from './local-process.ts'
+import { runAppAuditCli, runAppIconCli } from './app-audit.ts'
 
 export interface HostDeps {
   config: ResolvedServeConfig
@@ -33,6 +39,8 @@ export interface HostDeps {
   health: Health
   capabilities: Capabilities
   allowlist: ClientAllowlist
+  /** Absolute protected release CLI path; otherwise env/repository discovery is used. */
+  localScanBin?: string
 }
 
 type AppEnv = { Variables: { session: SessionRecord } }
@@ -55,7 +63,12 @@ function jsonResponse(payload: unknown, status: number, extraHeaders?: Record<st
 
 export function buildApp(deps: HostDeps): HonoApp {
   const app = new Hono<AppEnv>() as HonoApp
-  const { config, auth, scans, events, assets, health, capabilities, allowlist } = deps
+  const { config, auth, scans, events, assets, health, capabilities, allowlist, localScanBin } = deps
+
+  // App-storage audit spawns share one per-process guard: at most two
+  // concurrent CLI audits; the third caller gets a 429 LimitExceeded.
+  let activeAppAudits = 0
+  const MAX_CONCURRENT_APP_AUDITS = 2
 
   // The gate is built from the listener once the real port is known — never
   // from a request. Until rebindGate is called (right after bind), a
@@ -288,6 +301,48 @@ export function buildApp(deps: HostDeps): HonoApp {
     ensureScope(c.get('session'), 'cleanup:execute')
     const request = await parseBody<{ planId: string; confirm: true }>(c, CleanupExecuteRequestSchema)
     return c.json(await scans.execute(request.planId))
+  })
+
+  app.post('/api/v1/apps/audit', async (c) => {
+    ensureScope(c.get('session'), 'scan:read')
+    if (activeAppAudits >= MAX_CONCURRENT_APP_AUDITS) {
+      throw Problems.limit('app audit is busy; try again shortly')
+    }
+    const request = await parseBody<AppAuditRequest>(c, AppAuditRequestSchema)
+    // Same binary mechanism as protected scans: explicit config path or
+    // SPACLENS_LOCAL_SCAN_BIN env / repository discovery. Unresolved reads
+    // as the standard Unavailable problem.
+    const binary = resolveLocalScanBin(localScanBin)
+    activeAppAudits += 1
+    try {
+      let raw: unknown
+      try {
+        raw = await runAppAuditCli({ binary, request, homeOverride: config.appAuditHome })
+      } catch (error) {
+        throw Problems.internal(
+          `app audit failed: ${error instanceof Error ? error.message.slice(0, 500) : String(error)}`,
+        )
+      }
+      const parsed = AppAuditReportSchema.safeParse(raw)
+      if (!parsed.success) throw Problems.internal('app audit returned an unexpected report shape')
+      return c.json(parsed.data)
+    } finally {
+      activeAppAudits -= 1
+    }
+  })
+
+  app.post('/api/v1/apps/icon', async (c) => {
+    ensureScope(c.get('session'), 'scan:read')
+    const body = await parseBody<{ appPath: string }>(c, AppIconRequestSchema)
+    const binary = resolveLocalScanBin(localScanBin)
+    try {
+      return c.json(await runAppIconCli(binary, body.appPath))
+    } catch (error) {
+      // The binary-resolution failure above already threw Unavailable; only
+      // CLI execution failures (missing/unreadable icon) land here.
+      if (error instanceof ProblemError) throw error
+      throw Problems.notFound('no icon available for this app')
+    }
   })
 
   // 5. SSE: fetch-based clients (EventSource cannot send Authorization).

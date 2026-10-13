@@ -95,4 +95,37 @@ describe('http service', () => {
     expect(serviceError.code).toBe('Forbidden')
     expect(serviceError.status).toBe(403)
   })
+  it('posts app audit requests and decodes the report with its audit id', async () => {
+    const report = {
+      platform: 'macos',
+      generatedAt: '2026-10-13T00:00:00.000Z',
+      apps: [],
+      totalApps: 0,
+      truncated: false,
+      auditId: 'audit_abcdef1234567890abcdef',
+    }
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('http://localhost/api/v1/apps/audit')
+      expect(init?.method).toBe('POST')
+      expect((init?.headers as Record<string, string>).authorization).toBe('Bearer session')
+      expect(JSON.parse(init?.body as string)).toEqual({ minSize: 0, includeHeuristic: true, limit: 10 })
+      return jsonResponse(report, 200)
+    }) as typeof fetch
+    const service = createHttpService({ baseUrl: 'http://localhost', getToken: () => 'session', fetchImpl })
+    const decoded = await service.appAudit({ minSize: 0, includeHeuristic: true, limit: 10 })
+    expect(decoded.auditId).toBe('audit_abcdef1234567890abcdef')
+    expect(decoded.totalApps).toBe(0)
+  })
+  it('posts app icon requests and decodes the data url', async () => {
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('http://localhost/api/v1/apps/icon')
+      expect(init?.method).toBe('POST')
+      expect((init?.headers as Record<string, string>).authorization).toBe('Bearer session')
+      expect(JSON.parse(init?.body as string)).toEqual({ appPath: '/Applications/Foo.app' })
+      return jsonResponse({ dataUrl: 'data:image/png;base64,AAAA' }, 200)
+    }) as typeof fetch
+    const service = createHttpService({ baseUrl: 'http://localhost', getToken: () => 'session', fetchImpl })
+    const icon = await service.appIcon({ appPath: '/Applications/Foo.app' })
+    expect(icon.dataUrl).toBe('data:image/png;base64,AAAA')
+  })
 })
