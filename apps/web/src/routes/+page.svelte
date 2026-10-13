@@ -72,7 +72,7 @@
     markRecentAppStale,
     rememberRecentAppScan,
   } from '../lib/recent-apps'
-  import { auditFixtureActive, installAuditFixture } from '../lib/audit-fixture'
+  import { auditFixtureActive, installAuditFixture, sanitizeFixtureAttributes } from '../lib/audit-fixture'
   import { startDesktopEventStream } from '../lib/desktop-events'
 
   let ticketInput = $state('')
@@ -1214,6 +1214,7 @@
     // canned report, no host connection, cleanup planning refuses politely.
     if (auditFixtureActive()) {
       installAuditFixture(workbench as unknown as Parameters<typeof installAuditFixture>[0])
+      sanitizeFixtureAttributes()
       workbench.phase = 'ready'
       view = 'apps'
       // The fixture still runs the full appearance pipeline — the transparency

@@ -112,6 +112,19 @@ export function auditFixtureActive(): boolean {
   return typeof window !== 'undefined' && window.location.hash.includes('audit-fixture')
 }
 
+/**
+ * The glass surface styles only make sense over the desktop shell's native
+ * material; a plain browser has nothing behind them, so leftover
+ * `[macos]`/`[data-backdrop]` attributes (e.g. set during a debug session)
+ * render the page as washed-out translucency. The fixture strips them so it
+ * always shows the plain web theme.
+ */
+export function sanitizeFixtureAttributes(): void {
+  if (typeof document === 'undefined') return
+  document.documentElement.removeAttribute('macos')
+  delete document.documentElement.dataset.backdrop
+}
+
 /** Tiny placeholder logos so fixture screenshots look representative; real
  * logos come from the Tauri appIcon channel (icns -> png), which a browser
  * fixture cannot reach. Keyed by the fixture report's appPath values. */

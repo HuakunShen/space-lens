@@ -5,11 +5,13 @@
     --background: transparent;
     --primary: var(--color-system-accent, #007aff);
     --ring: var(--color-system-accent, #007aff);
-    --sidebar: rgb(245 245 245 / calc(64% * var(--glass-strength)));
-    --chrome: rgb(250 250 250 / calc(62% * var(--glass-strength)));
-    --card: rgb(255 255 255 / calc(68% * var(--glass-strength)));
-    --control: rgb(255 255 255 / calc(80% * var(--glass-strength)));
-    --native-content: rgb(255 255 255 / calc(92% * var(--glass-strength)));
+    /* Light glass sits over a milky material; surfaces need enough body to
+     * separate from it or every card melts into a washed-out white page. */
+    --sidebar: rgb(245 245 245 / calc(78% * var(--glass-strength)));
+    --chrome: rgb(250 250 250 / calc(76% * var(--glass-strength)));
+    --card: rgb(255 255 255 / calc(82% * var(--glass-strength)));
+    --control: rgb(255 255 255 / calc(88% * var(--glass-strength)));
+    --native-content: rgb(255 255 255 / calc(96% * var(--glass-strength)));
   }
   :root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
     --glass-strength: 1;
