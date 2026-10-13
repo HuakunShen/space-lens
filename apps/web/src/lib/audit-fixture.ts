@@ -146,6 +146,16 @@ export function installAuditFixture(workbench: {
   capabilities: unknown
   service: unknown
 }): void {
+  // Visual parity with the desktop shell: Tauri's native host injects the
+  // macOS system accent (blue) as --primary; the fixture mirrors it so
+  // screenshots and UI work match what the app renders.
+  if (typeof document !== 'undefined') {
+    const root = document.documentElement
+    root.style.setProperty('--color-system-accent', '#007aff')
+    root.style.setProperty('--color-system-accent-foreground', '#ffffff')
+    root.style.setProperty('--primary', '#007aff')
+    root.style.setProperty('--primary-foreground', '#ffffff')
+  }
   workbench.capabilities = {
     apiMajor: 1,
     contractVersion: 'fixture',

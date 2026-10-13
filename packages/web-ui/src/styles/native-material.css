@@ -3,7 +3,11 @@
   :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
     --glass-strength: 1;
     --background: transparent;
+    /* The native accent replaces --primary; its foreground must follow the
+     * accent (white on saturated accents, dark on pale ones like yellow),
+     * never the theme default that assumes shadcn's near-white primary. */
     --primary: var(--color-system-accent, #007aff);
+    --primary-foreground: var(--color-system-accent-foreground, #ffffff);
     --ring: var(--color-system-accent, #007aff);
     /* Light glass sits over a milky material; surfaces need enough body to
      * separate from it or every card melts into a washed-out white page. */
