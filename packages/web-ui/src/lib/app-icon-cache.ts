@@ -90,3 +90,44 @@ export function resetIconCache(): void {
   inFlight = 0
   fetcher = null
 }
+
+/**
+ * Visibility-gated icon loading. App icons cost a backend parse (icns → PNG
+ * over IPC), so a 400-app grid must not enqueue all of them at mount: the
+ * card registers itself here and the fetch is only requested when the
+ * element enters (or nears) the viewport. One shared IntersectionObserver
+ * serves every card; hitting the viewport detaches the element for good.
+ */
+const iconRequests = new Map<Element, () => void>()
+let iconObserver: IntersectionObserver | null = null
+
+function iconObserverInstance(): IntersectionObserver {
+  if (!iconObserver) {
+    iconObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue
+          const request = iconRequests.get(entry.target)
+          if (request) {
+            iconRequests.delete(entry.target)
+            iconObserver?.unobserve(entry.target)
+            request()
+          }
+        }
+      },
+      // Prefetch a screen ahead so scrolling rarely meets an empty avatar.
+      { rootMargin: '300px' },
+    )
+  }
+  return iconObserver
+}
+
+/** Observes `element`; calls `request` once when it becomes visible. */
+export function whenVisible(element: Element, request: () => void): () => void {
+  iconRequests.set(element, request)
+  iconObserverInstance().observe(element)
+  return () => {
+    iconRequests.delete(element)
+    iconObserverInstance().unobserve(element)
+  }
+}

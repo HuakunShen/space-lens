@@ -2,7 +2,7 @@
   import type { AppAuditEntry } from '@space-lens/contract'
   import { formatBytes } from '../../lib/format'
   import { initialsFor, purgeableTotal } from '../../lib/app-audit'
-  import { ensureIcon, readIcon, subscribeIcons } from '../../lib/app-icon-cache'
+  import { ensureIcon, readIcon, subscribeIcons, whenVisible } from '../../lib/app-icon-cache'
 
   interface Props {
     entry: AppAuditEntry
@@ -19,12 +19,17 @@
   let { entry, active, onOpen, onIcon, stale = false, scanning = false, scanDisabled = false, scanTitle }: Props = $props()
 
   // The icon cache is shared across cards: a failed logo stays failed and
-  // never re-enqueues, and at most four fetches run at once.
+  // never re-enqueues, and at most four fetches run at once. Icons are only
+  // requested when the card scrolls near the viewport — a grid of hundreds
+  // of apps must not parse every icns up front.
   let iconTick = $state(0)
+  let cardEl = $state<HTMLButtonElement>()
   $effect(() => subscribeIcons(() => (iconTick += 1)))
   $effect(() => {
     const appPath = entry.appPath
-    if (onIcon && appPath && entry.kind !== 'cli') ensureIcon(appPath, onIcon)
+    const element = cardEl
+    if (!onIcon || !appPath || entry.kind === 'cli' || !element) return
+    return whenVisible(element, () => ensureIcon(appPath, onIcon))
   })
   let icon = $derived.by(() => {
     void iconTick
@@ -42,6 +47,7 @@
 <button
   type="button"
   id={`app-card-${entry.id}`}
+  bind:this={cardEl}
   class="flex min-w-0 flex-col gap-2 rounded-lg border bg-card p-3 text-left hover:ring-1 hover:ring-ring"
   class:ring-1={active}
   class:ring-ring={active}
@@ -53,7 +59,14 @@
 >
   <div class="flex w-full items-start gap-2">
     {#if icon.status === 'ready' && icon.url}
-      <img src={icon.url} alt="" aria-hidden="true" class="size-8 shrink-0 rounded-lg object-contain" />
+      <img
+        src={icon.url}
+        alt=""
+        aria-hidden="true"
+        loading="lazy"
+        decoding="async"
+        class="size-8 shrink-0 rounded-lg object-contain"
+      />
     {:else if icon.status === 'failed'}
       <div
         class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-semibold text-muted-foreground"

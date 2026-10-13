@@ -122,7 +122,14 @@
     <div class="audit-drawer-body">
       <div class="flex items-start gap-3">
         {#if icon.status === 'ready' && icon.url}
-          <img src={icon.url} alt="" aria-hidden="true" class="size-10 shrink-0 rounded-lg object-contain" />
+          <img
+            src={icon.url}
+            alt=""
+            aria-hidden="true"
+            loading="lazy"
+            decoding="async"
+            class="size-10 shrink-0 rounded-lg object-contain"
+          />
         {:else if icon.status === 'failed'}
           <div
             class="flex size-10 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground"
