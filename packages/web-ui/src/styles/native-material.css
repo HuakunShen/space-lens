@@ -65,3 +65,18 @@
     --native-content: #181818;
   }
 }
+
+/* Overlay sheets must read as a layer ABOVE the glass, not as part of it:
+ * sheet content rides --background, which glass mode makes transparent, so
+ * without this every sheet was fully see-through (blur only). Unlayered on
+ * purpose — it must beat the `macos:bg-background` utility. */
+:root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
+  --sheet: rgb(250 250 250 / calc(95% * min(var(--glass-strength), 1)));
+}
+:root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
+  --sheet: rgb(24 24 24 / calc(95% * min(var(--glass-strength), 1)));
+}
+:root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])
+  :is([data-slot='sheet-content'], [data-slot='dialog-content'], [data-slot='alert-dialog-content']) {
+  background: var(--sheet);
+}
