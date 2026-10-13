@@ -59,6 +59,7 @@
     revealAvailable as revealGate,
   } from '../lib/gates'
   import { shouldApplyAuditReport } from '../lib/app-storage'
+  import { auditFixtureActive, installAuditFixture } from '../lib/audit-fixture'
   import { startDesktopEventStream } from '../lib/desktop-events'
 
   let ticketInput = $state('')
@@ -890,6 +891,15 @@
   }
 
   onMount(() => {
+    // UI fixture for the App Storage views in browser mode (`#audit-fixture`):
+    // canned report, no host connection, cleanup planning refuses politely.
+    if (auditFixtureActive()) {
+      installAuditFixture(workbench as unknown as Parameters<typeof installAuditFixture>[0])
+      workbench.phase = 'ready'
+      view = 'apps'
+      void refreshAppAudit()
+      return
+    }
     appearance = parseAppearance(window.localStorage.getItem(APPEARANCE_KEY))
     const storedMode = window.localStorage.getItem(CHART_MODE_KEY)
     chartMode = parseChartMode(storedMode)
@@ -966,9 +976,11 @@
       />
       <div class="picker-layout flex min-h-0 flex-1 max-md:flex-col max-md:overflow-auto windows:bg-sidebar">
         <section
-          class="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto p-8 max-md:p-5 windows:rounded-tl-lg windows:border windows:border-border windows:bg-background windows:px-8 linux:bg-background"
+          class="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto p-5 max-md:p-4 windows:rounded-tl-lg windows:border windows:border-border windows:bg-background linux:bg-background"
         >
-          <div class="my-auto mx-auto w-full max-w-4xl">
+          <!-- Full-width audit workspace: the list + drawer split needs every
+               pixel it can get, so no centered max-width shell here. -->
+          <div class="flex min-h-0 w-full flex-1 flex-col">
             <div class="mb-4">
               <button
                 type="button"

@@ -779,7 +779,17 @@
     overflow: auto;
   }
   .app-chart-slot {
-    height: 240px;
+    height: auto;
+    min-height: 240px;
+    display: flex;
+    flex-direction: column;
+  }
+  /* The stage is flex:1 1 0% + min-height:0 by design — it only gets a real
+     height from a bounded ancestor flex chain, which the workbench provides
+     and a drawer does not. Pin it here so the ring always has pixels. */
+  .app-chart-slot .chart-stage {
+    flex: 0 0 auto;
+    height: 190px;
   }
   .app-chart-loading {
     display: flex;

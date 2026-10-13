@@ -287,7 +287,7 @@
       </div>{/if}
   </div>
   <div class="discovery-filters">
-    <label class="relative flex min-w-0 flex-1 items-center gap-2"
+    <label class="relative flex min-w-40 flex-1 items-center gap-2"
       ><Search size={15} /><Input
         type="search"
         bind:value={query}
@@ -335,7 +335,12 @@
         {#if report}
           {#if viewMode === 'cards'}
             {#if filtered.length > 0}
-              <div class="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5" aria-label="Apps">
+              <!-- auto-fill on the card's minimum readable width: narrow hosts
+                   collapse to one column, wide ones grow columns for free -->
+              <div
+                class="grid gap-3 p-4 [grid-template-columns:repeat(auto-fill,minmax(230px,1fr))]"
+                aria-label="Apps"
+              >
                 {#each filtered as app (app.id)}
                   <AppAuditCard entry={app} active={app.id === selectedId} onOpen={openCard} onIcon={onIcon} />
                 {/each}
