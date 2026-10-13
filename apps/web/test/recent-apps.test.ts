@@ -22,8 +22,8 @@ function installStorage(): MemoryStorage {
     removeItem: (key: string) => {
       delete memory.store[key]
     },
-  };
-  (globalThis as unknown as { window: unknown }).window = { localStorage: storage }
+  }
+  ;(globalThis as unknown as { window: unknown }).window = { localStorage: storage }
   return memory
 }
 
@@ -32,7 +32,12 @@ const AUDIT = 'audit_abcdef1234567890abcdef'
 test('recent app scans persist the pinned shape with provenance and cap at five', () => {
   installStorage()
   assert.deepEqual(loadRecentAppScans(), [])
-  rememberRecentAppScan({ appId: 'raycast', appName: 'Raycast', auditId: AUDIT, generatedAt: '2026-10-13T00:00:00.000Z' })
+  rememberRecentAppScan({
+    appId: 'raycast',
+    appName: 'Raycast',
+    auditId: AUDIT,
+    generatedAt: '2026-10-13T00:00:00.000Z',
+  })
   const [entry] = loadRecentAppScans()
   assert.equal(entry?.appId, 'raycast')
   assert.equal(entry?.auditId, AUDIT)

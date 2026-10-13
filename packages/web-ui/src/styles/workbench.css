@@ -760,6 +760,16 @@
     container-type: inline-size;
     container-name: audit;
   }
+  /* V3: the audit generation line under the directory filters. */
+  .audit-generation {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    margin: 8px 0 0;
+  }
+  /* V3 picker Apps section under the scan form. */
+  .picker-apps {
+    min-width: 0;
+  }
   /* App storage master-detail: the split is the top-level row of the view.
    * The left column owns the heading, filters, grid, and footnote, while
    * the right rail is the drawer spanning the full height of the view.

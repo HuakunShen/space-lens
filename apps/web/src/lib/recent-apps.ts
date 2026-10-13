@@ -66,9 +66,7 @@ export function rememberRecentAppScan(input: {
 
 /** A11: successful cleanup marks the session stale (sizes changed). */
 export function markRecentAppStale(appId: string): void {
-  const next = loadRecentAppScans().map((entry) =>
-    entry.appId === appId ? { ...entry, stale: true } : entry,
-  )
+  const next = loadRecentAppScans().map((entry) => (entry.appId === appId ? { ...entry, stale: true } : entry))
   window.localStorage.setItem(RECENT_APP_KEY, JSON.stringify(next))
 }
 

@@ -1234,6 +1234,27 @@
     font-size: 0.65rem;
     margin-top: 0.45rem;
   }
+  /* A11 audit annotation + A12 accounting note in the chart inspector. */
+  .inspector-audit {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--foreground);
+    font-size: 0.7rem;
+    margin-top: 0.4rem;
+  }
+  .inspector-comment {
+    color: var(--muted-foreground);
+    font-size: 0.68rem;
+    line-height: 1.5;
+    margin-top: 0.25rem;
+  }
+  .inspector-accounting {
+    color: var(--muted-foreground);
+    font-size: 0.65rem;
+    font-style: italic;
+    margin-top: 0.4rem;
+  }
   .chart-summary {
     text-align: center;
     color: var(--muted-foreground);

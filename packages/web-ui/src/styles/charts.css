@@ -149,6 +149,16 @@
     stroke: #ffe293;
     stroke-width: 3;
   }
+  /* A12 accounting leaves: directory-own residuals, visually distinct from
+     truncation buckets — dashed, muted, never actionable. */
+  .arc.accounting,
+  .tile.accounting,
+  .bubble.accounting {
+    stroke-dasharray: 5 3;
+    stroke: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+    stroke-width: 1.5;
+    opacity: 0.62;
+  }
   .tile-share-pill {
     fill: rgb(0 20 50 / 22%);
     pointer-events: none;

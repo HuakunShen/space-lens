@@ -60,6 +60,15 @@
     outline: 2px solid var(--muted-foreground);
     outline-offset: -2px;
   }
+  /* A11 stale audit generation marker for app sessions and recents. */
+  .scan-sidebar .stale-dot {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    margin-left: auto;
+    border-radius: 9999px;
+    background: var(--amber-500, #f59e0b);
+  }
   .scan-sidebar .drive-card {
     flex: none;
     gap: 10px;
