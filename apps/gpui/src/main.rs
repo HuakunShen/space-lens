@@ -96,6 +96,8 @@ mod tests {
       IconName::House,
       IconName::BrushCleaning,
       IconName::GitBranch,
+      IconName::Package,
+      IconName::RefreshCw,
     ] {
       let path = icon.path();
       assert!(

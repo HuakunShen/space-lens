@@ -10,6 +10,7 @@ use gpui_kit::*;
 
 use crate::session::index::node_id_of;
 use crate::store::{ScanStore, StoreEvent};
+use crate::views::app_storage::AppStorageView;
 use crate::views::picker::{PickerEvent, PickerView};
 use crate::views::presentation::InspectorTab;
 use crate::views::theme::{
@@ -21,6 +22,7 @@ use crate::views::workbench::WorkbenchView;
 pub enum Phase {
   Picker,
   Workbench,
+  AppStorage,
 }
 
 pub struct AppState {
@@ -28,6 +30,7 @@ pub struct AppState {
   scan_store: Entity<ScanStore>,
   picker: Entity<PickerView>,
   workbench: Entity<WorkbenchView>,
+  app_storage: Entity<AppStorageView>,
   sidebar_visible: bool,
   _subscriptions: Vec<Subscription>,
 }
@@ -37,6 +40,7 @@ impl AppState {
     let scan_store = cx.new(|_| ScanStore::new());
     let picker = cx.new(|cx| PickerView::new(scan_store.clone(), window, cx));
     let workbench = cx.new(|cx| WorkbenchView::new(scan_store.clone(), window, cx));
+    let app_storage = cx.new(|_| AppStorageView::new());
     let mut subscriptions = vec![cx.subscribe(&picker, |this, _, event: &PickerEvent, cx| {
       match event {
         PickerEvent::ScanCompleted => this.phase = Phase::Workbench,
@@ -49,12 +53,14 @@ impl AppState {
     })];
     subscriptions.push(cx.observe(&workbench, |_, _, cx| cx.notify()));
     subscriptions.push(cx.observe(&picker, |_, _, cx| cx.notify()));
+    subscriptions.push(cx.observe(&app_storage, |_, _, cx| cx.notify()));
     subscriptions.push(cx.subscribe(&scan_store, |_, _, _: &StoreEvent, cx| cx.notify()));
     Self {
       phase: Phase::Picker,
       scan_store,
       picker,
       workbench,
+      app_storage,
       sidebar_visible: true,
       _subscriptions: subscriptions,
     }
@@ -88,10 +94,10 @@ impl AppState {
   }
 
   fn render_toolbar(&self, cx: &Context<Self>) -> Div {
-    let title = if self.phase == Phase::Picker {
-      "New Scan".to_string()
-    } else {
-      self.workbench.read(cx).focus_name(cx)
+    let title = match self.phase {
+      Phase::Picker => "New Scan".to_string(),
+      Phase::Workbench => self.workbench.read(cx).focus_name(cx),
+      Phase::AppStorage => "App Storage".to_string(),
     };
     let scanned = self.scan_store.read(cx).index().is_some();
     let staged = self.scan_store.read(cx).staged().len();
@@ -324,6 +330,19 @@ impl AppState {
       }
     }
     content = content.child(self.sidebar_heading("Tools", cx));
+    // App Storage audits installed apps independently of any scan, so unlike
+    // the scan-backed tools below it is never disabled.
+    content = content.child(
+      sidebar_button("tool-app-storage", "App Storage", IconName::Package, cx).on_click(
+        cx.listener(move |this, _, _, cx| {
+          this.phase = Phase::AppStorage;
+          this
+            .app_storage
+            .update(cx, |view, cx| view.ensure_started(cx));
+          cx.notify();
+        }),
+      ),
+    );
     for (tab, label, icon) in [
       (InspectorTab::Cleanup, "Cleanup", IconName::BrushCleaning),
       (InspectorTab::Git, "Git Repositories", IconName::GitBranch),
@@ -365,6 +384,7 @@ impl Render for AppState {
     let screen = match self.phase {
       Phase::Picker => self.picker.clone().into_any_element(),
       Phase::Workbench => self.workbench.clone().into_any_element(),
+      Phase::AppStorage => self.app_storage.clone().into_any_element(),
     };
     v_flex()
       .size_full()
