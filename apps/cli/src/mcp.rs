@@ -455,7 +455,13 @@ mod tests {
     std::fs::write(root.join("project/node_modules/vendor/package.json"), "{}").unwrap();
     std::fs::write(root.join("project/.gitignore"), "build\n").unwrap();
     std::fs::create_dir_all(root.join("project/build")).unwrap();
-    std::fs::write(root.join("project/build/heavy.bin"), [0u8; 2 * 1024 * 1024]).unwrap();
+    // Heap-allocated: a 2 MiB array temporary would live on the test thread's
+    // stack and overflow it (the CI runners run tests with tight stacks).
+    std::fs::write(
+      root.join("project/build/heavy.bin"),
+      vec![0u8; 2 * 1024 * 1024],
+    )
+    .unwrap();
     root
   }
 
