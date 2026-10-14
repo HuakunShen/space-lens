@@ -34,6 +34,67 @@ vendors/kuntu submodule itself):
 cargo install --git https://github.com/HuakunShen/space-lens --locked spacelens
 ```
 
+## Get the desktop app
+
+Installers are published on [GitHub Releases](https://github.com/HuakunShen/space-lens/releases/latest)
+by the tag-triggered desktop pipeline (`.github/workflows/workbench.yml` on `app-v*` tags):
+
+| Platform              | Artifacts                       |
+| --------------------- | ------------------------------- |
+| macOS (Apple Silicon) | `Space.Lens_<version>_aarch64.dmg` |
+| macOS (Intel)         | `Space.Lens_<version>_x64.dmg`  |
+| Linux x64             | `.deb` and `.AppImage`          |
+| Windows x64           | NSIS installer (`.exe`)         |
+
+Every release also carries the updater feed (`latest.json` + `.sig`, minisign-signed),
+the VS Code `.vsix`, and the rendered Homebrew cask (`space-lens.rb`).
+
+> **macOS without Apple code signing.** The binaries are ad-hoc signed only — there is no
+> Apple Developer ID behind them yet — so Gatekeeper blocks the first launch of a copy
+> downloaded from a browser. Clear the quarantine flag once, then open normally:
+>
+> ```sh
+> xattr -cr "/Applications/Space Lens.app"
+> ```
+>
+> (or right-click the app and choose **Open** once, or approve it under **System Settings →
+> Privacy & Security**). Installing through Homebrew is not affected — Homebrew does not
+> quarantine casks.
+
+Homebrew (macOS). The cask is versioned off the release DMG URLs and has a livecheck
+watching new releases:
+
+```sh
+brew install --cask HuakunShen/homebrew-tap/space-lens
+```
+
+The cask's source of truth lives in
+[`packaging/homebrew/Casks/space-lens.rb`](packaging/homebrew/Casks/space-lens.rb).
+Each `app-v*` release renders it with the real version + sha256 (`scripts/render-cask.py`)
+and attaches it to the GitHub release; the owner copies it into
+`HuakunShen/homebrew-tap` as `Casks/space-lens.rb`.
+
+### Updates
+
+The app checks `https://github.com/HuakunShen/space-lens/releases/latest/download/latest.json`
+(the `releases/latest` marker always points at the newest `app-v*` release — see
+[`docs/release.md`](docs/release.md)). Update packages are verified against the minisign
+public key shipped in `tauri.conf.json`, so an unsigned feed is refused.
+The cask sets `auto_updates true`, so Homebrew won't fight the in-app updater.
+
+### Build the desktop app from source
+
+```sh
+yarn install
+yarn desktop:build   # web desktop flavor -> apps/web/build-desktop, then tauri build
+# -> apps/desktop/src-tauri/target/release/bundle/macos/Space Lens.app (macOS)
+```
+
+`node scripts/build-desktop.ts --web-only` builds just the frontend (frontend-only changes).
+The order is load-bearing: Tauri embeds `apps/web/build-desktop` at compile time, so a
+stale frontend would ship silently. Details live in
+[`apps/desktop/README.md`](apps/desktop/README.md).
+
 ## Releasing
 
 Version bumping, publishing (crates.io / npm / Homebrew), tags, and the
@@ -265,7 +326,11 @@ platform capabilities, and read-only iCloud plans. It exposes no delete,
 Trash, cloud eviction, or download tool. MCP messages use newline-delimited
 JSON-RPC on stdin/stdout; diagnostics must not be written to stdout.
 
-## Web UI status
+## Web UI and desktop frontend
 
-The current `main` checkout has no `apps/web` workspace and no web start script. The Svelte Web UI and its standalone/Kunkun hosts live on the separate `kunkun-ext` branch. Do not switch the current dirty worktree just to run it; use a separate worktree and follow that branch's README instructions.
+`apps/web` is the SvelteKit workbench: one SPA, two flavors. `yarn workspace @space-lens/web build`
+is the browser flavor (served by `spacelens serve` and deployable to Cloudflare as a PWA);
+`yarn workspace @space-lens/web build:desktop` is the desktop flavor compiled into the Tauri
+shell (`apps/desktop`, `yarn desktop:build`). Both speak the same closed JSON contract
+(`@space-lens/contract`) over HTTP/SSE (browser) or Tauri IPC (desktop).
 
