@@ -158,9 +158,17 @@ struct DirtyGitArgs {
 struct AppAuditArgs {
   #[arg(long = "min-size", default_value_t = 0)]
   min_size: u64,
-  #[arg(long, conflicts_with = "no_heuristic", help = "Include apps without curated catalog entries (default on)")]
+  #[arg(
+    long,
+    conflicts_with = "no_heuristic",
+    help = "Include apps without curated catalog entries (default on)"
+  )]
   all: bool,
-  #[arg(long = "no-heuristic", conflicts_with = "all", help = "Exclude apps without curated catalog entries")]
+  #[arg(
+    long = "no-heuristic",
+    conflicts_with = "all",
+    help = "Exclude apps without curated catalog entries"
+  )]
   no_heuristic: bool,
   #[arg(long, default_value_t = 500)]
   limit: usize,
@@ -548,7 +556,10 @@ fn run_app_audit(args: AppAuditArgs) -> Result<()> {
   value
     .as_object_mut()
     .ok_or_else(|| anyhow::anyhow!("audit report did not serialize to an object"))?
-    .insert("auditId".to_string(), serde_json::Value::String(audit_id.clone()));
+    .insert(
+      "auditId".to_string(),
+      serde_json::Value::String(audit_id.clone()),
+    );
   if args.json {
     print_json(&value)?;
   } else {
@@ -751,7 +762,8 @@ mod tests {
 
   #[test]
   fn parses_app_icon_path() {
-    let cli = Cli::try_parse_from(["spacelens", "app-icon", "--path", "/Applications/Foo.app"]).unwrap();
+    let cli =
+      Cli::try_parse_from(["spacelens", "app-icon", "--path", "/Applications/Foo.app"]).unwrap();
     assert!(matches!(
       cli.command,
       Command::AppIcon(args) if args.path == Path::new("/Applications/Foo.app")

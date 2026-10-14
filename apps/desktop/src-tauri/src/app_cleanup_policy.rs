@@ -120,10 +120,10 @@ pub fn reject_configured_root(
   path: &Path,
   configured_roots: &[PathBuf],
 ) -> Result<(), PolicyError> {
-  if configured_roots
-    .iter()
-    .any(|root| fs::canonicalize(root).is_ok_and(|canonical| path == canonical))
-  {
+  if configured_roots.iter().any(|root| {
+    fs::canonicalize(root)
+      .is_ok_and(|canonical| normalize_canonical(&canonical) == normalize_canonical(path))
+  }) {
     return Err(PolicyError::forbidden(
       "configured roots cannot be cleaned up",
     ));
@@ -181,7 +181,9 @@ pub fn protected_metadata(path: &Path, roots: &[PathBuf]) -> Option<fs::Metadata
     return None;
   }
   let canonical = fs::canonicalize(path).ok()?;
-  if canonical != path || !roots.iter().any(|root| canonical.starts_with(root)) {
+  let canonical = normalize_canonical(&canonical);
+  if canonical != normalize_canonical(path) || !roots.iter().any(|root| canonical.starts_with(root))
+  {
     return None;
   }
   Some(metadata)
@@ -192,8 +194,20 @@ pub fn protected_metadata(path: &Path, roots: &[PathBuf]) -> Option<fs::Metadata
 /// `Group Containers` destinations are refused. Mirrors the standalone arm's
 /// historical gate; both routes now share it.
 pub fn strict_target_metadata(path: &Path) -> Option<fs::Metadata> {
+  use std::path::Component;
   let mut prefix = PathBuf::new();
   for component in path.components() {
+    // Drive prefixes (`C:`, `\\?\C:`) and the filesystem root are not
+    // probeable entries: `symlink_metadata` on a bare verbatim prefix fails
+    // on Windows, which would fail every probe closed. Real links can only
+    // hide in the remaining components.
+    if matches!(
+      component,
+      Component::Prefix(_) | Component::RootDir | Component::CurDir
+    ) {
+      prefix.push(component);
+      continue;
+    }
     prefix.push(component);
     let metadata = fs::symlink_metadata(&prefix).ok()?;
     if metadata.file_type().is_symlink() {
@@ -201,7 +215,7 @@ pub fn strict_target_metadata(path: &Path) -> Option<fs::Metadata> {
     }
   }
   let canonical = fs::canonicalize(path).ok()?;
-  if canonical != path {
+  if normalize_canonical(&canonical) != normalize_canonical(path) {
     return None;
   }
   if canonical
@@ -211,6 +225,25 @@ pub fn strict_target_metadata(path: &Path) -> Option<fs::Metadata> {
     return None;
   }
   fs::symlink_metadata(path).ok()
+}
+
+/// Map a canonicalized path back to the string form the audit registers.
+/// `fs::canonicalize` returns `\\?\`-prefixed extended-length paths on
+/// Windows (`\\?\C:\...`, `\\?\UNC\server\share\...`), which never equal the
+/// plain `C:\...` strings the audit records — without this mapping every
+/// Windows probe fails closed as `StalePlan`. Other platforms pass through.
+fn normalize_canonical(canonical: &Path) -> PathBuf {
+  #[cfg(windows)]
+  {
+    let text = canonical.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+      return PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = text.strip_prefix(r"\\?\") {
+      return PathBuf::from(rest);
+    }
+  }
+  canonical.to_path_buf()
 }
 
 /// Top-level (len, mtime_ms) stamp shared by plan fingerprints.
@@ -534,6 +567,43 @@ mod tests {
     ));
     // No issues at all: cleanable.
     assert!(location_folder_cleanable(&parent, &[], &authorized, false));
+  }
+
+  #[test]
+  fn canonical_normalization_keeps_registered_strings_comparable() {
+    // Non-Windows canonical forms already match the registered strings.
+    assert_eq!(
+      normalize_canonical(Path::new("/tmp/sl-probe")),
+      PathBuf::from("/tmp/sl-probe")
+    );
+    #[cfg(windows)]
+    {
+      assert_eq!(
+        normalize_canonical(Path::new(r"\\?\C:\Temp\sl-probe")),
+        PathBuf::from(r"C:\Temp\sl-probe")
+      );
+      assert_eq!(
+        normalize_canonical(Path::new(r"\\?\UNC\server\share\sl-probe")),
+        PathBuf::from(r"\\server\share\sl-probe")
+      );
+    }
+  }
+
+  #[test]
+  fn strict_probe_accepts_a_plain_directory_on_this_platform() {
+    // Regression test for the Windows CI gate: `canonicalize` returns
+    // `\\?\`-prefixed paths there, which must still match the registered
+    // string or every cleanup plan fails closed as `StalePlan`.
+    // Canonicalize up front like the audit traffic does (`/var` -> `/private/var`
+    // on macOS, `\\?\` verbatim on Windows).
+    let raw = std::env::temp_dir().join(format!("sl-policy-strict-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&raw);
+    std::fs::create_dir_all(&raw).unwrap();
+    let root = raw.canonicalize().unwrap();
+    std::fs::write(root.join("probe.bin"), vec![b'x'; 16]).unwrap();
+    assert!(strict_target_metadata(&root).is_some());
+    assert!(strict_target_metadata(&root.join("missing")).is_none());
+    let _ = std::fs::remove_dir_all(&root);
   }
 
   #[cfg(unix)]

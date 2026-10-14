@@ -12,12 +12,7 @@ fn temp_home(tag: &str) -> std::path::PathBuf {
 fn app_audit_empty_home_yields_valid_report_with_audit_id() {
   let home = temp_home("empty");
   let output = Command::new(env!("CARGO_BIN_EXE_spacelens"))
-    .args([
-      "app-audit",
-      "--json",
-      "--home",
-      home.to_str().unwrap(),
-    ])
+    .args(["app-audit", "--json", "--home", home.to_str().unwrap()])
     .output()
     .unwrap();
   let _ = std::fs::remove_dir_all(&home);
@@ -42,12 +37,22 @@ fn app_audit_empty_home_yields_valid_report_with_audit_id() {
   // macOS enumerates real /Applications bundles regardless of HOME, so the
   // app list is not necessarily empty; it must be a valid array consistent
   // with totalApps/truncated.
-  let apps = value.get("apps").and_then(|v| v.as_array()).expect("apps array");
-  let total = value.get("totalApps").and_then(|v| v.as_u64()).expect("totalApps");
+  let apps = value
+    .get("apps")
+    .and_then(|v| v.as_array())
+    .expect("apps array");
+  let total = value
+    .get("totalApps")
+    .and_then(|v| v.as_u64())
+    .expect("totalApps");
   assert_eq!(total as usize, {
     // totalApps counts before limit truncation; with the default limit 500
     // and a temp home it equals the returned length unless truncated.
-    if value.get("truncated").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if value
+      .get("truncated")
+      .and_then(|v| v.as_bool())
+      .unwrap_or(false)
+    {
       total as usize
     } else {
       apps.len()
@@ -76,10 +81,8 @@ fn app_audit_rejects_bad_limit_without_stdout_json() {
 
 #[test]
 fn app_icon_missing_path_fails_closed() {
-  let missing = std::env::temp_dir().join(format!(
-    "spacelens-cli-icon-missing-{}",
-    std::process::id()
-  ));
+  let missing =
+    std::env::temp_dir().join(format!("spacelens-cli-icon-missing-{}", std::process::id()));
   let _ = std::fs::remove_dir_all(&missing);
   let output = Command::new(env!("CARGO_BIN_EXE_spacelens"))
     .args(["app-icon", "--path", missing.to_str().unwrap()])
