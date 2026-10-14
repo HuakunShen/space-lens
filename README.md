@@ -1,5 +1,12 @@
 # Space Lens
 
+[![npm version](https://img.shields.io/npm/v/space-lens?logo=npm&label=npm)](https://www.npmjs.com/package/space-lens)
+[![npm downloads](https://img.shields.io/npm/dm/space-lens?logo=npm&label=downloads)](https://www.npmjs.com/package/space-lens)
+[![crates.io](https://img.shields.io/crates/v/spacelens?logo=rust)](https://crates.io/crates/spacelens)
+[![CI](https://github.com/HuakunShen/space-lens/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/HuakunShen/space-lens/actions/workflows/CI.yml)
+[![Workbench](https://github.com/HuakunShen/space-lens/actions/workflows/workbench.yml/badge.svg?branch=main)](https://github.com/HuakunShen/space-lens/actions/workflows/workbench.yml)
+[![License](https://img.shields.io/github/license/HuakunShen/space-lens)](LICENSE)
+
 Fast directory scanning and cleanup candidate utilities, powered by Rust and napi-rs.
 
 > **Where the engine went (2026-09-14):** the Rust engine that lived in

@@ -205,6 +205,11 @@ fn child_id_by_path(store: &EngineStore, scan_id: &str, parent_id: &str, want: &
     .id
 }
 
+// Walker-driven app scans need the pinned local traversal backend, which is
+// unix-only (kuntu NativeBackend answers Unsupported elsewhere) — same gate
+// as the protected-cleanup tests in local_scan.rs. Refusal-semantics tests
+// below stay ungated: on Windows they assert the typed-failure path.
+#[cfg(unix)]
 #[test]
 fn virtual_topology_ids_depths_and_sizes() {
   let fixture = Fixture::tagged("topology");
@@ -297,6 +302,11 @@ fn virtual_topology_ids_depths_and_sizes() {
     .any(|child| child.summary.depth == 2 && child.summary.path.ends_with("a.bin")));
 }
 
+// Walker-driven app scans need the pinned local traversal backend, which is
+// unix-only (kuntu NativeBackend answers Unsupported elsewhere) — same gate
+// as the protected-cleanup tests in local_scan.rs. Refusal-semantics tests
+// below stay ungated: on Windows they assert the typed-failure path.
+#[cfg(unix)]
 #[test]
 fn location_roots_cleanable_virtual_and_bundle_refused() {
   let fixture = Fixture::tagged("guards");
@@ -381,6 +391,11 @@ fn configured_roots_stay_refused_on_the_app_route() {
   assert_eq!(refused.code, "Forbidden");
 }
 
+// Walker-driven app scans need the pinned local traversal backend, which is
+// unix-only (kuntu NativeBackend answers Unsupported elsewhere) — same gate
+// as the protected-cleanup tests in local_scan.rs. Refusal-semantics tests
+// below stay ungated: on Windows they assert the typed-failure path.
+#[cfg(unix)]
 #[test]
 fn stale_audit_id_rejected_and_pinned_generation_cleans_up() {
   let fixture = Fixture::tagged("pinned");
@@ -431,6 +446,11 @@ fn stale_audit_id_rejected_and_pinned_generation_cleans_up() {
   }
 }
 
+// Walker-driven app scans need the pinned local traversal backend, which is
+// unix-only (kuntu NativeBackend answers Unsupported elsewhere) — same gate
+// as the protected-cleanup tests in local_scan.rs. Refusal-semantics tests
+// below stay ungated: on Windows they assert the typed-failure path.
+#[cfg(unix)]
 #[test]
 fn nested_locations_partition_and_accept_separate_roots() {
   let fixture = Fixture::tagged("nested");
@@ -672,6 +692,11 @@ fn truncated_evidence_is_conservatively_incomplete() {
   assert_eq!(refused.code, "InvalidRequest");
 }
 
+// Walker-driven app scans need the pinned local traversal backend, which is
+// unix-only (kuntu NativeBackend answers Unsupported elsewhere) — same gate
+// as the protected-cleanup tests in local_scan.rs. Refusal-semantics tests
+// below stay ungated: on Windows they assert the typed-failure path.
+#[cfg(unix)]
 #[test]
 fn grandchild_drift_fails_the_engine_plan_stale() {
   let fixture = Fixture::tagged("drift");
@@ -776,6 +801,11 @@ fn file_locations_become_stat_leaves_and_bundle_only_sessions_work() {
   assert_eq!(refused.code, "Forbidden");
 }
 
+// Walker-driven app scans need the pinned local traversal backend, which is
+// unix-only (kuntu NativeBackend answers Unsupported elsewhere) — same gate
+// as the protected-cleanup tests in local_scan.rs. Refusal-semantics tests
+// below stay ungated: on Windows they assert the typed-failure path.
+#[cfg(unix)]
 #[test]
 fn bundle_containment_runs_both_ways_on_the_engine_route() {
   let fixture = Fixture::tagged("containment");
@@ -881,6 +911,11 @@ fn cross_app_ownership_overlap_is_refused() {
   assert_eq!(refused.code, "Forbidden");
 }
 
+// Walker-driven app scans need the pinned local traversal backend, which is
+// unix-only (kuntu NativeBackend answers Unsupported elsewhere) — same gate
+// as the protected-cleanup tests in local_scan.rs. Refusal-semantics tests
+// below stay ungated: on Windows they assert the typed-failure path.
+#[cfg(unix)]
 #[test]
 fn dual_api_equivalence_for_identical_targets() {
   let fixture = Fixture::tagged("dual");
@@ -958,6 +993,11 @@ fn store_roots(store: &EngineStore) -> Vec<PathBuf> {
     .collect()
 }
 
+// Walker-driven app scans need the pinned local traversal backend, which is
+// unix-only (kuntu NativeBackend answers Unsupported elsewhere) — same gate
+// as the protected-cleanup tests in local_scan.rs. Refusal-semantics tests
+// below stay ungated: on Windows they assert the typed-failure path.
+#[cfg(unix)]
 #[test]
 fn symlink_ancestor_drift_is_stale_and_synthetic_inputs_rejected() {
   let fixture = Fixture::tagged("symlink");
@@ -1063,6 +1103,11 @@ fn session_isolation_at_the_engine_boundary() {
   assert_eq!(store.status(&scan_b).unwrap().state, "ready");
 }
 
+// Walker-driven app scans need the pinned local traversal backend, which is
+// unix-only (kuntu NativeBackend answers Unsupported elsewhere) — same gate
+// as the protected-cleanup tests in local_scan.rs. Refusal-semantics tests
+// below stay ungated: on Windows they assert the typed-failure path.
+#[cfg(unix)]
 #[test]
 fn discovery_never_surfaces_the_bundle_leaf() {
   let fixture = Fixture::tagged("discovery");
