@@ -2812,7 +2812,8 @@
               "scan:read",
               "scan:start",
               "cleanup:plan",
-              "cleanup:execute"
+              "cleanup:execute",
+              "ai:chat"
             ]
           }
         }

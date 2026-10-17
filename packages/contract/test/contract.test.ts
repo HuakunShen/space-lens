@@ -16,6 +16,7 @@ import {
   CapabilitiesSchema,
   RecentAppScanSchema,
   ScanSessionSchema,
+  SessionSchema,
   ScanStatusSchema,
   buildContractArtifacts,
   CleanupExecuteRequestSchema,
@@ -446,5 +447,17 @@ describe('generated artifacts', () => {
       writeFileSync(generatedPath, built)
     }
     expect(readFileSync(generatedPath, 'utf8')).toBe(built)
+  })
+})
+
+describe('session contract', () => {
+  it('accepts a session granted the ai:chat scope', () => {
+    const session = {
+      token: 'x'.repeat(32),
+      sessionId: 'sess_1',
+      expiresAt: '2026-10-18T00:00:00.000Z',
+      scopes: ['scan:read', 'ai:chat'],
+    }
+    expect(SessionSchema.parse(session).scopes).toContain('ai:chat')
   })
 })
