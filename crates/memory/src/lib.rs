@@ -16,6 +16,7 @@ pub mod history;
 pub mod ids;
 pub mod model;
 pub mod plan;
+pub mod platform;
 pub mod raw;
 pub mod safety;
 pub mod sampler;
