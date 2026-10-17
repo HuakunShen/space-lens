@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { renderMarkdown } from '../src/lib/ai/markdown.ts'
+import { renderMarkdown } from '../src/markdown.ts'
 
 test('escapes html and never emits attributes or links', () => {
   const html = renderMarkdown('<img src=x onerror=alert(1)> [a](javascript:alert(1)) <script>x</script>')

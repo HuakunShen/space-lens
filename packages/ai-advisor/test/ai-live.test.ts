@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { ChildrenPage, CollectorEntry, DiscoveryItem, TreeNodeSummary } from '@space-lens/contract'
-import { runAgent, toChatResponse } from '../src/lib/ai/agent.ts'
-import { PRESETS } from '../src/lib/ai/prompts.ts'
+import { runAgent, toChatResponse } from '../src/agent.ts'
+import { PRESETS } from '../src/prompts.ts'
 import type {
   CacheCandidatePage,
   ChatPort,
@@ -12,7 +12,7 @@ import type {
   ScanSummary,
   StageOutcome,
   StageRequestItem,
-} from '../src/lib/ai/types.ts'
+} from '../src/types.ts'
 
 /**
  * Opt-in live test. Runs preset 2 against a real OpenAI-compatible endpoint

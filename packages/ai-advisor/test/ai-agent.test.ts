@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { ChildrenPage, CollectorEntry, DiscoveryItem, TreeNodeSummary } from '@space-lens/contract'
-import { estimateContextTokens, runAgent, type AgentEvent } from '../src/lib/ai/agent.ts'
-import { PRESETS, SYSTEM_PROMPT } from '../src/lib/ai/prompts.ts'
+import { estimateContextTokens, runAgent, type AgentEvent } from '../src/agent.ts'
+import { PRESETS, SYSTEM_PROMPT } from '../src/prompts.ts'
 import {
   AGENT_LIMITS,
   AI_TOOLS,
@@ -12,7 +12,7 @@ import {
   createToolRuntime,
   executeTool,
   rememberNodes,
-} from '../src/lib/ai/tools.ts'
+} from '../src/tools.ts'
 import type {
   CacheCandidatePage,
   ChatMessage,
@@ -24,7 +24,7 @@ import type {
   ScanSummary,
   StageOutcome,
   StageRequestItem,
-} from '../src/lib/ai/types.ts'
+} from '../src/types.ts'
 
 // ---------------------------------------------------------------------------
 // Fixture tree: ~/Library/Caches, a project node_modules, Downloads with one

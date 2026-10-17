@@ -3209,6 +3209,18 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@space-lens/ai-advisor@workspace:*, @space-lens/ai-advisor@workspace:packages/ai-advisor":
+  version: 0.0.0-use.local
+  resolution: "@space-lens/ai-advisor@workspace:packages/ai-advisor"
+  dependencies:
+    "@space-lens/client": "workspace:*"
+    "@space-lens/contract": "workspace:*"
+    "@space-lens/web-ui": "workspace:*"
+    "@types/node": "npm:^25.9.3"
+    typescript: "npm:^6.0.3"
+  languageName: unknown
+  linkType: soft
+
 "@space-lens/cli@workspace:apps/tui":
   version: 0.0.0-use.local
   resolution: "@space-lens/cli@workspace:apps/tui"
@@ -3311,6 +3323,7 @@ __metadata:
   resolution: "@space-lens/web@workspace:apps/web"
   dependencies:
     "@fontsource-variable/inter": "npm:^5.2.8"
+    "@space-lens/ai-advisor": "workspace:*"
     "@space-lens/client": "workspace:*"
     "@space-lens/contract": "workspace:*"
     "@space-lens/web-ui": "workspace:*"

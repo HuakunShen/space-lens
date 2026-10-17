@@ -1,6 +1,6 @@
 import type { CollectorEntry, TreeNodeSummary } from '@space-lens/contract'
 import { canCollectNode, collectRefusalReason } from '@space-lens/web-ui/lib/app-scan'
-import { addSelection, selectedAncestor } from '../selection.ts'
+import { addSelection, selectedAncestor } from '@space-lens/web-ui/lib/selection'
 import type { CleanupRisk, StageOutcome, StageRejection, StageRequestItem } from './types.ts'
 
 /**

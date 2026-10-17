@@ -1,7 +1,14 @@
+import {
+  readConfig,
+  toChatResponse,
+  type AiChatPort,
+  type AiConfig,
+  type AiConfigInput,
+  type ChatRequest,
+  type ChatResponse,
+} from '@space-lens/ai-advisor'
 import type { TauriPorts } from '@space-lens/client'
 import { loadTauriPorts } from '../tauri-ports.ts'
-import { toChatResponse } from './agent.ts'
-import type { ChatPort, ChatRequest, ChatResponse } from './types.ts'
 
 /**
  * Slice C — the live `ChatPort`.
@@ -15,32 +22,6 @@ import type { ChatPort, ChatRequest, ChatResponse } from './types.ts'
  * write-only key rule: `hasKey` says whether a key is stored, and a `setConfig`
  * that omits `apiKey` keeps whatever is there.
  */
-
-export interface AiConfig {
-  baseUrl: string
-  model: string
-  /** True when a key is stored. The key itself is never handed back. */
-  hasKey: boolean
-  /** Sends `thinking: { type: 'disabled' }`; much faster on reasoning models (GLM, DeepSeek). */
-  disableThinking: boolean
-}
-
-export interface AiConfigInput {
-  baseUrl: string
-  model: string
-  /** Omitted keeps the stored key; `null` clears it; a string replaces it. */
-  apiKey?: string | null
-  /** Omitted keeps the stored value. */
-  disableThinking?: boolean
-}
-
-/** Config + chat, sharing one lazily loaded set of Tauri ports. */
-export interface AiChatPort {
-  /** The one non-streaming completion the agent loop consumes. */
-  chat: ChatPort
-  getConfig(): Promise<AiConfig>
-  setConfig(input: AiConfigInput): Promise<AiConfig>
-}
 
 export function createAiChatPort(loadPorts: () => Promise<TauriPorts> = loadTauriPorts): AiChatPort {
   let cached: Promise<TauriPorts> | null = null
@@ -66,18 +47,6 @@ export function createAiChatPort(loadPorts: () => Promise<TauriPorts> = loadTaur
       if (input.disableThinking !== undefined) payload.disableThinking = input.disableThinking
       return readConfig(await resolved.invoke('ai_set_config', payload))
     },
-  }
-}
-
-/** Reads the frozen config reply leniently; a stale host backfills defaults. */
-function readConfig(value: unknown): AiConfig {
-  if (typeof value !== 'object' || value === null) return { baseUrl: '', model: '', hasKey: false, disableThinking: false }
-  const record = value as { baseUrl?: unknown; model?: unknown; hasKey?: unknown; disableThinking?: unknown }
-  return {
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : '',
-    model: typeof record.model === 'string' ? record.model : '',
-    hasKey: record.hasKey === true,
-    disableThinking: record.disableThinking === true,
   }
 }
 

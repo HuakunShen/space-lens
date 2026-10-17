@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { CollectorEntry, TreeNodeSummary } from '@space-lens/contract'
-import { createStager } from '../src/lib/ai/stage.ts'
+import { createStager } from '../src/stage.ts'
 
 const node = (id: string, scanState: string): TreeNodeSummary =>
   ({ id, name: id, path: `/scan/${id}`, size: 1000, kind: 'directory', depth: 1, scanState }) as unknown as TreeNodeSummary

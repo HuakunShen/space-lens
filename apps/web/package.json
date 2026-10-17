@@ -32,6 +32,7 @@
     "wrangler": "^4.0.0"
   },
   "dependencies": {
+    "@space-lens/ai-advisor": "workspace:*",
     "@space-lens/client": "workspace:*",
     "@space-lens/contract": "workspace:*",
     "@space-lens/web-ui": "workspace:*",

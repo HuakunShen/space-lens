@@ -3,13 +3,20 @@
   import type { CollectorEntry, TreeNodeSummary } from '@space-lens/contract'
   import { Button, Input, Sheet, formatBytes } from '@space-lens/web-ui'
   import { describeError, workbench } from '../workbench.svelte.ts'
-  import { runAgent, type AgentEvent, type AgentStats } from './agent.ts'
-  import { aiDevActive, createAiChatPort, createBrowserDevChatPort, type AiConfig } from './chat-port.ts'
-  import { renderMarkdown } from './markdown.ts'
-  import { PRESETS } from './prompts.ts'
-  import { createStager, type StageMeta, type Stager } from './stage.ts'
-  import { lensPortFromService } from './tools.ts'
-  import type { CleanupRisk } from './types.ts'
+  import {
+    PRESETS,
+    createStager,
+    lensPortFromService,
+    renderMarkdown,
+    runAgent,
+    type AgentEvent,
+    type AgentStats,
+    type AiConfig,
+    type CleanupRisk,
+    type StageMeta,
+    type Stager,
+  } from '@space-lens/ai-advisor'
+  import { aiDevActive, createAiChatPort, createBrowserDevChatPort } from './chat-port.ts'
 
   /**
    * Slice C — the AI advisor drawer. Desktop-only (the page gates it on
