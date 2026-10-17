@@ -8,9 +8,11 @@
 
 #![deny(unsafe_code)]
 
+pub mod candidates;
 pub mod error;
 pub mod fake;
 pub mod group;
+pub mod history;
 pub mod ids;
 pub mod model;
 pub mod plan;
@@ -18,9 +20,11 @@ pub mod raw;
 pub mod safety;
 pub mod sampler;
 
+pub use candidates::candidates;
 pub use error::MemoryError;
 pub use fake::{FakeClock, FakeSignaller, FakeSleeper, Identity};
 pub use group::{build_groups, bundle_root, classify_kind, group_id_for, is_main_executable};
+pub use history::History;
 pub use ids::{AuditId, GroupId, PlanId, ProcessKey};
 pub use model::*;
 pub use plan::{AuditRing, PlanStore, SnapshotIndex};
