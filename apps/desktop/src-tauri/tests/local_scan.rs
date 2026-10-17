@@ -248,10 +248,18 @@ fn protected_prepare_preserves_explicit_nested_roots_and_only_deduplicates_exact
 fn protected_scan_keeps_skipped_symlinks_and_rejects_cleanup_of_skipped_entries() {
   let fixture = Fixture::new();
   std::os::unix::fs::symlink("no-such-target", fixture.0.join("link")).unwrap();
-  // A skipped child marks its directory partial, so `part` is a plannable
-  // (non-root) entry with scan_state "partial".
-  std::fs::create_dir_all(fixture.0.join("part")).unwrap();
-  std::os::unix::fs::symlink("no-such-target", fixture.0.join("part/inner")).unwrap();
+  // A symlink child never makes its folder partial (it is not followed, so the
+  // measurement stays complete) ...
+  std::fs::create_dir_all(fixture.0.join("linked")).unwrap();
+  std::os::unix::fs::symlink("no-such-target", fixture.0.join("linked/inner")).unwrap();
+  // ... but an unreadable child does: `part` is a plannable (non-root) entry
+  // with scan_state "partial".
+  std::fs::create_dir_all(fixture.0.join("part/denied")).unwrap();
+  std::fs::set_permissions(
+    fixture.0.join("part/denied"),
+    std::os::unix::fs::PermissionsExt::from_mode(0o000),
+  )
+  .unwrap();
   let mut store = EngineStore::new(vec![fixture.0.clone()]);
   let session = store.start_scan(fixture.request()).unwrap();
   let children = root_children(&mut store, &session.scan_id);
@@ -282,16 +290,26 @@ fn protected_scan_keeps_skipped_symlinks_and_rejects_cleanup_of_skipped_entries(
     .find(|node| node.name == "part")
     .unwrap();
   assert_eq!(part.scan_state.as_deref(), Some("partial"));
-  assert_eq!(
-    store
-      .plan(&CleanupPlanRequest {
-        scan_id: session.scan_id,
-        node_ids: vec![part.id.clone()],
-      })
-      .unwrap_err()
-      .code,
-    "InvalidRequest"
-  );
+  let linked = children
+    .items
+    .iter()
+    .find(|node| node.name == "linked")
+    .unwrap();
+  assert_eq!(linked.scan_state.as_deref(), Some("complete"));
+  let rejected = store
+    .plan(&CleanupPlanRequest {
+      scan_id: session.scan_id,
+      node_ids: vec![part.id.clone()],
+    })
+    .unwrap_err()
+    .code;
+  // Let the fixture clean up after itself.
+  std::fs::set_permissions(
+    fixture.0.join("part/denied"),
+    std::os::unix::fs::PermissionsExt::from_mode(0o755),
+  )
+  .unwrap();
+  assert_eq!(rejected, "InvalidRequest");
 }
 
 #[cfg(unix)]
