@@ -148,3 +148,302 @@ mod macos {
     );
   }
 }
+
+/// The unix signaller against a real child process (§4.2 and T9 of
+/// docs/memory-cleaner-plan.md): [`UnixSignaller`] reads a live process's exact
+/// identity and delivers a real signal, and a one-process plan built through
+/// [`PlanStore`] runs to `Exited` or, when the planned start time no longer
+/// matches, to `IdentityChanged` without signalling.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod unix_signal {
+  use spacelens_memory::fake::FakeClock;
+  use spacelens_memory::group::build_groups;
+  use spacelens_memory::plan::{AuditRing, PlanStore, SnapshotIndex};
+  use spacelens_memory::platform::unix_signal::UnixSignaller;
+  use spacelens_memory::platform::NullApps;
+  use spacelens_memory::safety::SafetyContext;
+  use spacelens_memory::sampler::{Signaller, Sleeper};
+  use spacelens_memory::{
+    MemoryBreakdown, MemoryPressure, MemorySnapshot, Platform, PressureLevel, PressureSource,
+    RawProcess, TerminateExecuteRequest, TerminateMethod, TerminateMode, TerminateOrigin,
+    TerminatePlanRequest, TerminateStatus, TerminateTarget,
+  };
+  use std::collections::{HashMap, HashSet};
+  use std::process::{Child, Command};
+  use std::time::Duration;
+
+  /// The instant the plan and its execution are both dated at, so the plan has
+  /// not expired by the time it runs.
+  const NOW: i64 = 1_700_000_000_000;
+
+  /// The session the plans are built in.
+  const SESSION: &str = "sess_unix_signal_live";
+
+  /// A `/bin/sleep 30` child that is always killed and reaped when it drops, so
+  /// a failed assertion cannot leave a stray process behind.
+  struct SleepChild {
+    child: Option<Child>,
+  }
+
+  impl SleepChild {
+    /// Spawn `/bin/sleep 30`, returning the guard and the child pid.
+    fn spawn() -> (Self, u32) {
+      let child = Command::new("/bin/sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawning /bin/sleep 30 must succeed");
+      let pid = child.id();
+      (SleepChild { child: Some(child) }, pid)
+    }
+
+    /// Whether the child is still running (not yet exited).
+    fn is_alive(&mut self) -> bool {
+      matches!(self.child.as_mut().map(Child::try_wait), Some(Ok(None)))
+    }
+  }
+
+  impl Drop for SleepChild {
+    fn drop(&mut self) {
+      if let Some(mut child) = self.child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+      }
+    }
+  }
+
+  /// A [`Sleeper`] that really waits, so the execution poll loop gives the
+  /// kernel time to deliver `SIGTERM` to the child.
+  struct RealSleeper;
+
+  impl Sleeper for RealSleeper {
+    fn sleep_ms(&self, ms: u64) {
+      std::thread::sleep(Duration::from_millis(ms));
+    }
+  }
+
+  /// The raw process for a live child, read through the real signaller.
+  fn raw_process(signaller: &UnixSignaller, pid: u32) -> RawProcess {
+    let (start_time_us, uid, ppid, zombie) = signaller
+      .identity(pid)
+      .expect("a freshly spawned child has a readable identity");
+    RawProcess {
+      pid,
+      ppid,
+      start_time_us,
+      uid,
+      name: "sleep".to_string(),
+      exe: Some("/bin/sleep".into()),
+      cpu_percent: None,
+      footprint_bytes: None,
+      resident_bytes: None,
+      virtual_bytes: None,
+      zombie,
+    }
+  }
+
+  /// The safety context to plan the target under.
+  ///
+  /// The service is this test process, but the target is not one of its
+  /// ancestors, descendants or its group: a real service never plans a process
+  /// it spawned. The self-child relation a directly spawned `/bin/sleep` would
+  /// otherwise have (S6, covered by `tests/safety.rs`) is deliberately not
+  /// modelled here, because this test is about the signaller's identity read
+  /// and signal delivery, not the ancestry rules.
+  fn planning_context(own_pid: u32, current_uid: Option<u32>) -> SafetyContext {
+    SafetyContext {
+      own_pid,
+      current_uid,
+      ancestors: HashSet::new(),
+      descendants: HashSet::new(),
+      own_group: None,
+    }
+  }
+
+  /// The snapshot index and context for a single-process sample.
+  fn index_for(
+    raw: &RawProcess,
+    own_pid: u32,
+    current_uid: Option<u32>,
+  ) -> (SnapshotIndex, SafetyContext) {
+    let processes = [raw.clone()];
+    let (groups, rows) = build_groups(&processes, &[], None, current_uid);
+    let snapshot = MemorySnapshot {
+      sequence: 1,
+      sampled_at: "2026-10-18T00:00:00.000Z".to_string(),
+      interval_ms: 1_000,
+      platform: if cfg!(target_os = "macos") {
+        Platform::Macos
+      } else {
+        Platform::Linux
+      },
+      breakdown: MemoryBreakdown {
+        total_bytes: 16_000_000_000,
+        used_bytes: 8_000_000_000,
+        free_bytes: 4_000_000_000,
+        available_bytes: Some(6_000_000_000),
+        app_bytes: None,
+        wired_bytes: None,
+        compressed_bytes: None,
+        cached_files_bytes: None,
+        swap_total_bytes: 0,
+        swap_used_bytes: 0,
+      },
+      pressure: MemoryPressure {
+        level: PressureLevel::Normal,
+        source: PressureSource::Kernel,
+        available_percent: Some(70.0),
+      },
+      groups,
+      processes: rows,
+      notes: Vec::new(),
+    };
+    let index = SnapshotIndex::new(&snapshot, &processes, &HashMap::new(), NOW);
+    let context = planning_context(own_pid, current_uid);
+    (index, context)
+  }
+
+  /// A generator of 16-character `[0-9a-zA-Z]` bodies under `prefix`, matching
+  /// the `tplan_`/`aud_` identifier patterns.
+  fn counter(prefix: &'static str) -> impl FnMut() -> String {
+    let mut n = 0u64;
+    move || {
+      n += 1;
+      format!("{prefix}{n:016x}")
+    }
+  }
+
+  #[test]
+  fn graceful_plan_sigterms_a_live_child_to_exit() {
+    let signaller = UnixSignaller::new();
+    let (mut child, pid) = SleepChild::spawn();
+    let raw = raw_process(&signaller, pid);
+    let (index, context) = index_for(&raw, signaller.own_pid(), signaller.current_uid());
+
+    let mut store = PlanStore::new();
+    let mut plan_ids = counter("tplan_");
+    let request = TerminatePlanRequest {
+      targets: vec![TerminateTarget::Process {
+        pid,
+        start_time_us: raw.start_time_us,
+      }],
+      mode: TerminateMode::Graceful,
+      origin: TerminateOrigin::Manual,
+    };
+    let plan = store
+      .build(SESSION, &request, &index, &context, NOW, &mut plan_ids)
+      .expect("building a one-process plan must succeed");
+    assert_eq!(plan.entries.len(), 1, "the sleep child must be planned");
+    assert!(
+      plan.refused.is_empty(),
+      "a plain sleep child is not refused"
+    );
+
+    let clock = FakeClock::new(NOW);
+    let mut apps = NullApps;
+    let mut audit = AuditRing::new();
+    let mut audit_ids = counter("aud_");
+    let outcome = store
+      .execute(
+        SESSION,
+        &TerminateExecuteRequest {
+          plan_id: plan.plan_id.clone(),
+          confirm: true,
+        },
+        &context,
+        &signaller,
+        &mut apps,
+        &clock,
+        &RealSleeper,
+        &mut audit,
+        &mut audit_ids,
+      )
+      .expect("executing the plan must succeed");
+
+    assert_eq!(outcome.results.len(), 1);
+    assert_eq!(
+      outcome.results[0].status,
+      TerminateStatus::Exited,
+      "the child must have exited after the graceful signal"
+    );
+    assert_eq!(outcome.results[0].method, TerminateMethod::Sigterm);
+    assert_eq!(audit.len(), 1, "one executed entry is audited");
+    assert!(
+      !child.is_alive(),
+      "a reaped child is no longer running when the guard drops"
+    );
+  }
+
+  #[test]
+  fn a_tampered_start_time_is_identity_changed_and_nothing_is_signalled() {
+    let signaller = UnixSignaller::new();
+    let (mut child, pid) = SleepChild::spawn();
+    let live = raw_process(&signaller, pid);
+
+    // Tamper the plan index: pretend the process started one microsecond later
+    // than it did, so the execution-time identity read cannot match (S15).
+    let mut tampered = live.clone();
+    tampered.start_time_us += 1;
+
+    let (index, context) = index_for(&tampered, signaller.own_pid(), signaller.current_uid());
+
+    let mut store = PlanStore::new();
+    let mut plan_ids = counter("tplan_");
+    let request = TerminatePlanRequest {
+      targets: vec![TerminateTarget::Process {
+        pid,
+        start_time_us: tampered.start_time_us,
+      }],
+      mode: TerminateMode::Graceful,
+      origin: TerminateOrigin::Manual,
+    };
+    let plan = store
+      .build(SESSION, &request, &index, &context, NOW, &mut plan_ids)
+      .expect("building a one-process plan must succeed");
+    assert_eq!(plan.entries.len(), 1);
+
+    let clock = FakeClock::new(NOW);
+    let mut apps = NullApps;
+    let mut audit = AuditRing::new();
+    let mut audit_ids = counter("aud_");
+    let outcome = store
+      .execute(
+        SESSION,
+        &TerminateExecuteRequest {
+          plan_id: plan.plan_id.clone(),
+          confirm: true,
+        },
+        &context,
+        &signaller,
+        &mut apps,
+        &clock,
+        &RealSleeper,
+        &mut audit,
+        &mut audit_ids,
+      )
+      .expect("executing the plan must succeed");
+
+    assert_eq!(outcome.results.len(), 1);
+    assert_eq!(
+      outcome.results[0].status,
+      TerminateStatus::IdentityChanged,
+      "a start time that no longer matches must not be signalled (S15)"
+    );
+    assert!(
+      child.is_alive(),
+      "an identity-changed entry must not be signalled, so the child is still alive"
+    );
+  }
+
+  #[test]
+  fn default_signaller_reads_the_current_user() {
+    let signaller = spacelens_memory::platform::default_signaller();
+    assert!(
+      signaller.current_uid().is_some(),
+      "a unix build can always read the current uid"
+    );
+    let own = signaller
+      .identity(signaller.own_pid())
+      .expect("the current process has an identity");
+    assert!(own.0 > 0, "the current process started after the epoch");
+  }
+}

@@ -6,13 +6,17 @@
 //! [`portable`] is the sysinfo-only sampler that runs wherever sysinfo does but
 //! reads no per-process footprint and no kernel pressure; [`macos`] wraps it
 //! with the footprint, exact start time, VM page counters and kernel pressure
-//! that only macOS offers. The unix signaller (T9) and the AppKit application
-//! directory (T11) replace the defaults below as they land.
+//! that only macOS offers. [`unix_signal`] is the `kill(2)`-based signaller for
+//! every unix, and the AppKit application directory (T11) replaces the default
+//! below as it lands.
 
 pub mod portable;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
+
+#[cfg(unix)]
+pub mod unix_signal;
 
 use crate::error::MemoryError;
 use crate::raw::{AppInfo, QuitAck, Signal};
@@ -49,9 +53,18 @@ pub fn default_apps() -> Box<dyn AppDirectory> {
 
 /// The signaller for the platform this binary is built for.
 ///
-/// Unix gets `UnixSignaller` (T9). Until then, and permanently on Windows, this
-/// is [`UnsupportedSignaller`], whose every `send` fails with `ENOSYS` (38) so
-/// no signal can leave the process.
+/// Unix gets [`unix_signal::UnixSignaller`], which reads a process's exact
+/// identity and delivers `SIGTERM`/`SIGKILL`; Windows gets
+/// [`UnsupportedSignaller`], whose every `send` fails with `ENOSYS` (38) so no
+/// signal can leave the process.
+#[cfg(unix)]
+pub fn default_signaller() -> Box<dyn Signaller> {
+  Box::new(unix_signal::UnixSignaller::new())
+}
+
+/// The signaller for platforms with no process signalling (see the unix
+/// overload above).
+#[cfg(not(unix))]
 pub fn default_signaller() -> Box<dyn Signaller> {
   Box::new(UnsupportedSignaller)
 }
