@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { appScanAvailable, cleanupAvailable, discoveryAvailable, gitignoredAvailable, appAuditAvailable } from '../src/lib/gates.ts'
+import {
+  aiAvailable,
+  appScanAvailable,
+  cleanupAvailable,
+  discoveryAvailable,
+  gitignoredAvailable,
+  appAuditAvailable,
+} from '../src/lib/gates.ts'
 import type { Capabilities, ScanStatus } from '@space-lens/contract'
 
 const capabilities = (
@@ -89,6 +96,16 @@ test('app scans need the host flag and the submit arm', () => {
   // service method missing (older adapters, HTTP this round) -> hidden
   assert.equal(appScanAvailable({ capabilities: scanCapabilities, service: {} }), false)
   assert.equal(appScanAvailable({ capabilities: scanCapabilities, service: null }), false)
+})
+
+test('the AI advisor is desktop-only and needs the Tauri invoke', () => {
+  const ports = { invoke: () => Promise.reject(new Error('unused')) }
+  assert.equal(aiAvailable({ desktop: true, ports }), true)
+  // The browser build has no key store or chat proxy -> hidden.
+  assert.equal(aiAvailable({ desktop: false, ports }), false)
+  // Desktop but the ports have not loaded yet (or lack invoke) -> hidden.
+  assert.equal(aiAvailable({ desktop: true, ports: null }), false)
+  assert.equal(aiAvailable({ desktop: true, ports: {} }), false)
 })
 
 test('cleanup stays desktop-only for covered scans and capability-gated everywhere', () => {

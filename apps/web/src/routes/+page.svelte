@@ -40,7 +40,7 @@
   import { CHART_MODE_KEY, TREEMAP_DENSITY_KEY, parseChartMode, parseTreemapDensity } from '../lib/chart-mode'
   import { checkForAppUpdate, currentAppVersion, installAppUpdate } from '../lib/updater'
   import type { UpdateStatus } from '../lib/updater'
-  import { ServiceError } from '@space-lens/client'
+  import { ServiceError, type TauriPorts } from '@space-lens/client'
   import {
     clearToken,
     describeError,
@@ -58,12 +58,15 @@
   } from '../lib/workbench.svelte'
   import { restoreCollector, shouldApplyPlan, stashCollector } from '../lib/session-isolation'
   import {
+    aiAvailable as aiGate,
     cleanupAvailable as cleanupGate,
     discoveryAvailable as discoveryGate,
     gitignoredAvailable as gitignoredGate,
     appAuditAvailable as appAuditGate,
     appScanAvailable as appScanGate,
   } from '../lib/gates'
+  import AiPanel from '../lib/ai/panel.svelte'
+  import { aiDevActive } from '../lib/ai/chat-port'
   import { shouldApplyAuditReport } from '../lib/app-storage'
   import {
     forgetRecentAppScan,
@@ -79,6 +82,10 @@
   let passwordInput = $state('')
   let explicitUrlInput = $state('')
   let collectorOpen = $state(false)
+  let aiOpen = $state(false)
+  // Loaded with the desktop service; the AI drawer is gated on it (or on the
+  // `#ai-dev` browser debugging mode) so the shipped browser build never shows it.
+  let aiPorts = $state<TauriPorts | null>(null)
   let settingsOpen = $state(false)
   let sidebarVisible = $state(true)
   let chartVisible = $state(true)
@@ -333,6 +340,7 @@
       coverage: workbench.status?.coverage,
     }),
   )
+  const aiAvailable = $derived(aiGate({ desktop: __SPACLENS_DESKTOP__, ports: aiPorts, browserDev: aiDevActive() }))
   const selectedItems = $derived(
     workbench.items.filter((item) => item.name.toLowerCase().includes(browseSearch.toLowerCase())),
   )
@@ -532,6 +540,8 @@
         })),
   )
   const collectedIds = $derived(new Set(workbench.collector.map((entry) => entry.nodeId)))
+  /** The list ticks every directly staged row (manual or AI) plus covered descendants. */
+  const listCheckedIds = $derived(new Set([...collectedIds, ...coveredIds]))
   const collectorTotal = $derived(workbench.collector.reduce((total, entry) => total + entry.size, 0))
   const targets = $derived.by<ScanTarget[]>(() => {
     const current = workbench.targets ?? []
@@ -581,6 +591,7 @@
         import('../lib/tauri-ports'),
       ])
       const ports = await loadTauriPorts()
+      aiPorts = ports
       desktopHome = (await ports.homeDir?.().catch(() => null)) ?? null
       const service = createTauriService(ports)
       workbench.capabilities = await service.capabilities()
@@ -1425,6 +1436,8 @@
       onToggleOrientation={toggleOrientation}
       onOpenCollector={() => (collectorOpen = true)}
       onOpenSettings={() => (settingsOpen = true)}
+      onOpenAi={aiAvailable ? () => (aiOpen = !aiOpen) : undefined}
+      {aiOpen}
     />
     <div class="workspace-body">
       {#if sidebarVisible}
@@ -1655,7 +1668,7 @@
                   totalSize={workbench.slice?.focusNode.size ?? 0}
                   items={selectedItems}
                   hoveredId={workbench.hoveredId}
-                  collectedIds={coveredIds}
+                  collectedIds={listCheckedIds}
                   onHover={(id) => (workbench.hoveredId = id)}
                   onOpen={(node) => void focus(node)}
                   onCollect={collect}
@@ -1755,6 +1768,15 @@
       }}
       onDelete={() => void reviewCleanup()}
       onConfirm={() => void confirmCleanup()}
+    />
+    <AiPanel
+      open={aiOpen}
+      available={aiAvailable}
+      onClose={() => (aiOpen = false)}
+      onOpenCollector={() => {
+        aiOpen = false
+        collectorOpen = true
+      }}
     />
   </div>
 {/if}

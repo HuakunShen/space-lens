@@ -96,3 +96,22 @@ export function cleanupAvailable(input: {
   // server contract); the desktop shell owns the same report locally.
   return input.desktop || !input.coverage
 }
+
+export interface AiGateInput {
+  /** Only the desktop shell ships the BYOK key store and the `ai_chat` proxy. */
+  desktop: boolean
+  /** Injected Tauri ports; null until `loadTauriPorts()` has resolved. */
+  ports: { invoke?: unknown } | null
+  /** `#ai-dev` browser debugging mode (fetch straight to the endpoint). */
+  browserDev?: boolean
+}
+
+/**
+ * The AI advisor is desktop-only: the browser build has no key store and no
+ * HTTPS proxy, so the drawer and its settings stay hidden there. The invoke
+ * half covers the window between mount and the async port load.
+ */
+export function aiAvailable(input: AiGateInput): boolean {
+  if (input.browserDev === true) return true
+  return input.desktop && typeof input.ports?.invoke === 'function'
+}

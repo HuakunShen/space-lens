@@ -1,3 +1,4 @@
+mod ai;
 pub mod app_cleanup;
 pub mod app_cleanup_policy;
 pub mod commands;
@@ -40,6 +41,9 @@ pub fn run() {
       commands::sl_host_request,
       commands::sl_events_subscribe,
       commands::sl_events_unsubscribe,
+      ai::ai_get_config,
+      ai::ai_set_config,
+      ai::ai_chat,
     ])
     .run(tauri::generate_context!())
     .expect("error while running Space Lens desktop");

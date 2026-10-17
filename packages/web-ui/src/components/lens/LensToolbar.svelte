@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FolderPlus, Inbox, PanelLeft, ChartPie, Settings, Menu, Columns3, Rows3 } from '@lucide/svelte'
+  import { FolderPlus, Inbox, PanelLeft, ChartPie, Settings, Menu, Columns3, Rows3, Sparkles } from '@lucide/svelte'
   const iconClass =
     'toolbar-icon macos:size-7 macos:rounded-md linux:size-9 linux:rounded-lg linux:bg-(--control) linux:text-foreground linux:shadow-xs windows:size-8 windows:rounded-[4px] focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none'
   interface Props {
@@ -13,12 +13,15 @@
     orientation?: 'horizontal' | 'vertical'
     collectorCount?: number
     busy?: boolean
+    /** Shown only when the host provides the AI advisor. */
+    aiOpen?: boolean
     onNewScan?: () => void
     onToggleSidebar?: () => void
     onToggleChart?: () => void
     onToggleOrientation?: () => void
     onOpenCollector?: () => void
     onOpenSettings?: () => void
+    onOpenAi?: () => void
   }
   let {
     title,
@@ -30,12 +33,14 @@
     orientation = 'horizontal',
     collectorCount = 0,
     busy = false,
+    aiOpen = false,
     onNewScan,
     onToggleSidebar,
     onToggleChart,
     onToggleOrientation,
     onOpenCollector,
     onOpenSettings,
+    onOpenAi,
   }: Props = $props()
 </script>
 
@@ -114,6 +119,16 @@
       >
         {#if orientation === 'vertical'}<Columns3 size={17} />{:else}<Rows3 size={17} />{/if}
       </button>
+    {/if}
+    {#if onOpenAi}
+      <button
+        class={iconClass}
+        type="button"
+        onclick={onOpenAi}
+        aria-label="AI advisor"
+        aria-pressed={aiOpen}
+        title="AI advisor"><Sparkles size={17} /></button
+      >
     {/if}
     {#if onOpenSettings}
       <button class={iconClass} type="button" onclick={onOpenSettings} aria-label="Settings" title="Settings"
