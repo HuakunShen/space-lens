@@ -5,7 +5,16 @@ import type { ScanSession, ScanStatus, TreeSlice, ChildrenPage, CleanupPlan } fr
 
 export interface BridgeRequest {
   id: number
-  kind: 'pair' | 'scan.start' | 'scan.status' | 'tree.slice' | 'tree.children'
+  kind:
+    | 'pair'
+    | 'scan.start'
+    | 'scan.status'
+    | 'tree.slice'
+    | 'tree.children'
+    | 'ai.config'
+    | 'ai.setConfig'
+    | 'ai.chat'
+    | 'reveal'
   paths?: string[]
   scanId?: string
   nodeId?: string
@@ -14,6 +23,10 @@ export interface BridgeRequest {
   offset?: number
   limit?: number
   sort?: 'size' | 'name' | 'path'
+  ai?: { baseUrl?: string; model?: string; apiKey?: string | null; disableThinking?: boolean }
+  messages?: unknown[]
+  tools?: unknown[]
+  path?: string
 }
 
 export type BridgeAnswerPayload =
@@ -22,6 +35,12 @@ export type BridgeAnswerPayload =
   | { kind: 'scan.status'; status: ScanStatus }
   | { kind: 'tree.slice'; slice: TreeSlice }
   | { kind: 'tree.children'; page: ChildrenPage }
+  | {
+      kind: 'ai.config'
+      config: { baseUrl: string; model: string; hasKey: boolean; disableThinking: boolean; managed: false }
+    }
+  | { kind: 'ai.chat'; completion: unknown }
+  | { kind: 'reveal'; revealed: boolean }
 
 export interface BridgeAnswer {
   id: number

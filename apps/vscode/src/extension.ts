@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
 import { createHttpService } from '@space-lens/client'
 import { recentRoots, rememberRoot, startMachineService, type RunningService } from './supervisor'
+import { createAiBridge, isPathWithin, type AiBridge } from './ai-bridge'
 import type { BridgeMessage, BridgeRequest } from './protocol'
 
 const HOST_ROOT = __dirname
@@ -24,7 +25,13 @@ export class Workbench {
     rootPath: null,
   }
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  private readonly ai: AiBridge
+
+  constructor(private readonly context: vscode.ExtensionContext) {
+    // The key lives in VS Code's secret store; the rest of the AI config in
+    // global state. Both are injected so `ai-bridge` stays free of `vscode`.
+    this.ai = createAiBridge({ state: context.globalState, secrets: context.secrets })
+  }
 
   async open(rootPath?: string): Promise<void> {
     const target = rootPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
@@ -192,6 +199,34 @@ export class Workbench {
           answer = { id: request.id, ok: true, answer: { kind: 'tree.children', page } }
           break
         }
+        case 'ai.config': {
+          answer = { id: request.id, ok: true, answer: { kind: 'ai.config', config: await this.ai.getConfig() } }
+          break
+        }
+        case 'ai.setConfig': {
+          answer = { id: request.id, ok: true, answer: { kind: 'ai.config', config: await this.ai.setConfig(request.ai ?? {}) } }
+          break
+        }
+        case 'ai.chat': {
+          const completion = await this.ai.chat({
+            messages: (request.messages ?? []) as Record<string, unknown>[],
+            tools: request.tools as Record<string, unknown>[] | undefined,
+          })
+          answer = { id: request.id, ok: true, answer: { kind: 'ai.chat', completion } }
+          break
+        }
+        case 'reveal': {
+          if (!(await this.reveal(request.path))) {
+            answer = {
+              id: request.id,
+              ok: false,
+              problem: { code: 'InvalidRequest', message: 'Refusing to reveal a path outside the scanned root.' },
+            }
+            break
+          }
+          answer = { id: request.id, ok: true, answer: { kind: 'reveal', revealed: true } }
+          break
+        }
         default:
           answer = { id: request.id, ok: false, problem: { code: 'UnsupportedOperation', message: `unknown kind` } }
       }
@@ -200,6 +235,32 @@ export class Workbench {
       answer = { id: request.id, ok: false, problem: { code: 'Unavailable', message } }
     }
     void this.state.panel.webview.postMessage(answer)
+  }
+
+  /**
+   * Reveals `path` in the OS file manager, but only when it is the scanned root
+   * or a path inside it and it actually exists. The sandboxed webview can name
+   * any path; this is the one gate between that name and the OS.
+   */
+  private async reveal(path: string | undefined): Promise<boolean> {
+    if (typeof path !== 'string') return false
+    if (this.state.rootPath === null) return false
+    if (!isPathWithin(this.state.rootPath, path)) return false
+    let exists = false
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      exists = require('node:fs').existsSync(path)
+    } catch {
+      exists = false
+    }
+    if (!exists) return false
+    await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(path))
+    return true
+  }
+
+  /** Clears the stored AI API key; used by the `spacelens.clearAiKey` command. */
+  async clearAiKey(): Promise<void> {
+    await this.ai.clearKey()
   }
 
   private startPolling(): void {
@@ -241,6 +302,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('spacelens.shutdown', () => {
       void workbench.shutdown()
+    }),
+    vscode.commands.registerCommand('spacelens.clearAiKey', async () => {
+      await workbench.clearAiKey()
+      void vscode.window.showInformationMessage('Space Lens: AI API key cleared.')
     }),
     new vscode.Disposable(() => {
       void workbench.shutdown()

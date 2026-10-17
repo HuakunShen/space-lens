@@ -632,7 +632,10 @@ function describe(error: unknown): string {
  * slice, `children` and `cacheCandidates` are the existing `children`/`discover`
  * methods (discovery is always asked for a page, never the 200-row default).
  */
-export function lensPortFromService(service: WorkbenchService, scanId: string, stage: LensPort['stage']): LensPort {
+/** The slice of `WorkbenchService` the tools read; `discover` is optional so a bridge without it still works. */
+export type LensService = Pick<WorkbenchService, 'scanStatus' | 'treeSlice' | 'children'> & Partial<Pick<WorkbenchService, 'discover'>>
+
+export function lensPortFromService(service: LensService, scanId: string, stage: LensPort['stage']): LensPort {
   const rootId = async (): Promise<string> => {
     const status = await service.scanStatus(scanId)
     const id = status.rootIds[0]

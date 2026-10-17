@@ -7305,8 +7305,10 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "space-lens-vscode@workspace:apps/vscode"
   dependencies:
+    "@space-lens/ai-advisor": "workspace:*"
     "@space-lens/client": "workspace:*"
     "@space-lens/contract": "workspace:*"
+    "@space-lens/host": "workspace:*"
     "@space-lens/web-ui": "workspace:*"
     "@sveltejs/vite-plugin-svelte": "npm:^7.1.2"
     "@tailwindcss/vite": "npm:^4.3.0"

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import {
     BreadcrumbBar,
+    Button,
     ChildList,
     ScanPicker,
     StateBanner,
@@ -14,6 +15,7 @@
   } from '@space-lens/web-ui'
   import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanStatus, ScanTarget, TreeNodeSummary, TreeSlice } from '@space-lens/contract'
+  import AiPanel from './AiPanel.svelte'
 
   interface vscodeApi {
     postMessage(message: unknown): void
@@ -33,6 +35,7 @@
   let items = $state<TreeNodeSummary[]>([])
   let hoveredId = $state<string | null>(null)
   let activeScanId = $state<string | null>(null)
+  let aiOpen = $state(false)
 
   // The webview has no localStorage of its own worth keeping — VS Code
   // restores `setState` between sessions, so the chart choice rides along
@@ -190,6 +193,11 @@
     {#if errorMessage}
       <StateBanner state="error" title="Something failed" detail={errorMessage} />
     {/if}
+    {#if activeScanId !== null}
+      <div class="flex items-center justify-end">
+        <Button.Root variant="outline" size="sm" onclick={() => (aiOpen = !aiOpen)}>AI advisor</Button.Root>
+      </div>
+    {/if}
     <div class="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div class="flex min-w-0 flex-col items-center gap-3">
         <DiskChart
@@ -209,6 +217,15 @@
       </div>
       <ChildList colorMode={chartMode === 'sunburst' ? 'sunburst' : 'standard'} items={items} hoveredId={hoveredId} collectedIds={collectedIds} onHover={(id) => (hoveredId = id)} onOpen={(node) => void focus(node)} onCollect={() => {}} onContext={() => {}} />
     </div>
+    {#if aiOpen && activeScanId !== null}
+      <AiPanel
+        request={request}
+        scanId={activeScanId}
+        focusNodeId={slice?.focusNode.id}
+        rootPath={status?.label ?? null}
+        onClose={() => (aiOpen = false)}
+      />
+    {/if}
     <StatusBar {status} collectorTotal={0} collectorCount={0} onOpenCollector={() => {}} onCancel={() => {}} />
   </div>
 {/if}
