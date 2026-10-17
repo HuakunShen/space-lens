@@ -3,23 +3,38 @@
 //! implementation for the platform this binary is built for, so the service,
 //! the CLI and the desktop app never name a platform type directly.
 //!
-//! Only [`portable`] exists today: a sysinfo-only sampler that runs wherever
-//! sysinfo does but reads no per-process footprint and no kernel pressure. The
-//! macOS footprint sampler (T8), the unix signaller (T9) and the AppKit
-//! application directory (T11) replace the defaults below as they land.
+//! [`portable`] is the sysinfo-only sampler that runs wherever sysinfo does but
+//! reads no per-process footprint and no kernel pressure; [`macos`] wraps it
+//! with the footprint, exact start time, VM page counters and kernel pressure
+//! that only macOS offers. The unix signaller (T9) and the AppKit application
+//! directory (T11) replace the defaults below as they land.
 
 pub mod portable;
+
+#[cfg(target_os = "macos")]
+pub mod macos;
 
 use crate::error::MemoryError;
 use crate::raw::{AppInfo, QuitAck, Signal};
 use crate::sampler::{AppDirectory, ProcessSampler, Signaller};
 
+#[cfg(target_os = "macos")]
+pub use macos::MacSampler;
 pub use portable::PortableSampler;
 
 /// The sampler for the platform this binary is built for.
 ///
-/// This is the portable, sysinfo-only sampler everywhere until the macOS
-/// footprint sampler arrives (T8); it is the final answer on Linux and Windows.
+/// macOS gets [`MacSampler`], which enriches the portable reading with the
+/// footprint, exact start time, VM page counters and kernel pressure; every
+/// other platform gets the portable, sysinfo-only [`PortableSampler`].
+#[cfg(target_os = "macos")]
+pub fn default_sampler() -> Box<dyn ProcessSampler> {
+  Box::new(MacSampler::new())
+}
+
+/// The sampler for platforms without a native enrichment (see the macOS
+/// overload above).
+#[cfg(not(target_os = "macos"))]
 pub fn default_sampler() -> Box<dyn ProcessSampler> {
   Box::new(PortableSampler::new())
 }

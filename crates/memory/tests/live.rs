@@ -6,7 +6,8 @@
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod portable {
-  use spacelens_memory::platform::default_sampler;
+  use spacelens_memory::platform::PortableSampler;
+  use spacelens_memory::sampler::ProcessSampler;
   use spacelens_memory::{Platform, RawProcess, RawSample};
   use std::time::Duration;
 
@@ -22,7 +23,7 @@ mod portable {
   #[test]
   fn two_samples_contain_the_current_process() {
     let own_pid = std::process::id();
-    let mut sampler = default_sampler();
+    let mut sampler = PortableSampler::new();
     assert_ne!(
       sampler.platform(),
       Platform::Unsupported,
@@ -69,6 +70,81 @@ mod portable {
     assert!(
       second.system.pressure.available_percent.is_some(),
       "derived pressure carries the share it was derived from"
+    );
+  }
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+  use spacelens_memory::platform::{default_sampler, macos::MacSampler, PortableSampler};
+  use spacelens_memory::sampler::ProcessSampler;
+  use spacelens_memory::{Platform, PressureLevel, PressureSource, RawProcess, RawSample};
+
+  /// The one process every sample must contain.
+  fn own_process(sample: &RawSample, pid: u32) -> &RawProcess {
+    sample
+      .processes
+      .iter()
+      .find(|process| process.pid == pid)
+      .unwrap_or_else(|| panic!("sample does not contain the current process {pid}"))
+  }
+
+  #[test]
+  fn own_process_has_a_footprint_exact_start_and_kernel_pressure() {
+    let own_pid = std::process::id();
+
+    let mut portable = PortableSampler::new();
+    let sysinfo_sample = portable.sample().expect("portable sample");
+    let mut macos = MacSampler::new();
+    let macos_sample = macos.sample().expect("macOS sample");
+
+    let sysinfo_own = own_process(&sysinfo_sample, own_pid);
+    let macos_own = own_process(&macos_sample, own_pid);
+
+    let footprint = macos_own
+      .footprint_bytes
+      .expect("the current process always has a readable footprint");
+    assert!(
+      footprint > 0,
+      "the footprint of a live process is never zero"
+    );
+
+    let drift = macos_own.start_time_us.abs_diff(sysinfo_own.start_time_us);
+    assert!(
+      drift <= 1_000_000,
+      "the exact start time ({}) must be within 1 s of sysinfo's ({})",
+      macos_own.start_time_us,
+      sysinfo_own.start_time_us
+    );
+
+    let pressure = &macos_sample.system.pressure;
+    assert_ne!(
+      pressure.level,
+      PressureLevel::Unknown,
+      "macOS always reports a kernel memory-pressure level"
+    );
+    assert_eq!(
+      pressure.source,
+      PressureSource::Kernel,
+      "the macOS level comes from the kernel, not a derivation"
+    );
+    assert!(
+      macos_sample.system.vm.is_some(),
+      "the macOS sampler reads the VM page counters"
+    );
+  }
+
+  #[test]
+  fn default_sampler_is_the_macos_enrichment() {
+    let own_pid = std::process::id();
+    let mut sampler = default_sampler();
+    assert_eq!(sampler.platform(), Platform::Macos);
+
+    let sample = sampler.sample().expect("default sample");
+    let own = own_process(&sample, own_pid);
+    assert!(
+      own.footprint_bytes.is_some_and(|bytes| bytes > 0),
+      "the default macOS sampler reads per-process footprints"
     );
   }
 }
