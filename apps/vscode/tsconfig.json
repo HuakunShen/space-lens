@@ -10,5 +10,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "webview/**/*.ts", "webview/**/*.svelte", "esbuild.mjs", "webview/vite.config.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "webview/**/*.ts", "webview/**/*.svelte", "esbuild.mjs", "webview/vite.config.ts"]
 }

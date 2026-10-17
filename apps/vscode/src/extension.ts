@@ -1,6 +1,7 @@
 import * as vscode from 'vscode'
 import { createHttpService } from '@space-lens/client'
 import { recentRoots, rememberRoot, startMachineService, type RunningService } from './supervisor'
+import { createAiBridge, isPathWithin, type AiBridge } from './ai-bridge'
 import type { BridgeMessage, BridgeRequest } from './protocol'
 
 const HOST_ROOT = __dirname
@@ -24,7 +25,16 @@ export class Workbench {
     rootPath: null,
   }
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  private readonly ai: AiBridge
+
+  /** In-flight `ai.chatStream` requests, keyed by request id. */
+  private readonly streams = new Map<number, AbortController>()
+
+  constructor(private readonly context: vscode.ExtensionContext) {
+    // The key lives in VS Code's secret store; the rest of the AI config in
+    // global state. Both are injected so `ai-bridge` stays free of `vscode`.
+    this.ai = createAiBridge({ state: context.globalState, secrets: context.secrets })
+  }
 
   async open(rootPath?: string): Promise<void> {
     const target = rootPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
@@ -77,6 +87,7 @@ export class Workbench {
   async shutdown(): Promise<void> {
     if (this.state.pollTimer !== null) clearInterval(this.state.pollTimer)
     this.state.pollTimer = null
+    this.abortStreams()
     this.state.panel?.dispose()
     this.state.panel = null
     this.state.service?.stop()
@@ -84,6 +95,12 @@ export class Workbench {
     this.state.token = null
     this.state.scanId = null
     this.state.rootPath = null
+  }
+
+  /** Aborts every in-flight `ai.chatStream`; the owning `answer` settles on its own. */
+  private abortStreams(): void {
+    for (const controller of this.streams.values()) controller.abort()
+    this.streams.clear()
   }
 
   private async startService(rootPath: string): Promise<void> {
@@ -139,6 +156,9 @@ export class Workbench {
     })
     panel.onDidDispose(() => {
       if (this.state.panel === panel) this.state.panel = null
+      // A disposed webview has nowhere to receive chunks; stop the upstream
+      // requests rather than stream into the void.
+      this.abortStreams()
     })
     this.startPolling()
   }
@@ -192,6 +212,72 @@ export class Workbench {
           answer = { id: request.id, ok: true, answer: { kind: 'tree.children', page } }
           break
         }
+        case 'ai.config': {
+          answer = { id: request.id, ok: true, answer: { kind: 'ai.config', config: await this.ai.getConfig() } }
+          break
+        }
+        case 'ai.setConfig': {
+          answer = { id: request.id, ok: true, answer: { kind: 'ai.config', config: await this.ai.setConfig(request.ai ?? {}) } }
+          break
+        }
+        case 'ai.chat': {
+          const completion = await this.ai.chat({
+            messages: (request.messages ?? []) as Record<string, unknown>[],
+            tools: request.tools as Record<string, unknown>[] | undefined,
+          })
+          answer = { id: request.id, ok: true, answer: { kind: 'ai.chat', completion } }
+          break
+        }
+        case 'ai.chatStream': {
+          // The request id doubles as the run id: chunks are tagged with it and
+          // `ai.cancel` names it. Rejecting a duplicate keeps one controller per id.
+          if (this.streams.has(request.id)) {
+            answer = {
+              id: request.id,
+              ok: false,
+              problem: { code: 'InvalidRequest', message: `A stream with id ${request.id} is already running.` },
+            }
+            break
+          }
+          const controller = new AbortController()
+          this.streams.set(request.id, controller)
+          try {
+            await this.ai.chatStream({
+              messages: (request.messages ?? []) as Record<string, unknown>[],
+              tools: request.tools as Record<string, unknown>[] | undefined,
+              signal: controller.signal,
+              onChunk: (text) => {
+                const panel = this.state.panel
+                if (panel === null) return
+                void panel.webview.postMessage({ kind: 'ai.chunk', id: request.id, text } satisfies BridgeMessage)
+              },
+            })
+            answer = { id: request.id, ok: true, answer: { kind: 'ai.chatStream', done: true } }
+          } finally {
+            this.streams.delete(request.id)
+          }
+          break
+        }
+        case 'ai.cancel': {
+          const runId = request.runId
+          const controller = typeof runId === 'number' ? this.streams.get(runId) : undefined
+          controller?.abort()
+          // Cancelling an already-finished (or unknown) run is a no-op, not an error.
+          answer = { id: request.id, ok: true, answer: { kind: 'ai.cancel', cancelled: controller !== undefined } }
+          break
+        }
+        case 'reveal': {
+          if (!(await this.reveal(request.path))) {
+            answer = {
+              id: request.id,
+              ok: false,
+              problem: { code: 'InvalidRequest', message: 'Refusing to reveal a path outside the scanned root.' },
+            }
+            break
+          }
+          answer = { id: request.id, ok: true, answer: { kind: 'reveal', revealed: true } }
+          break
+        }
         default:
           answer = { id: request.id, ok: false, problem: { code: 'UnsupportedOperation', message: `unknown kind` } }
       }
@@ -199,7 +285,35 @@ export class Workbench {
       const message = error instanceof Error ? error.message : String(error)
       answer = { id: request.id, ok: false, problem: { code: 'Unavailable', message } }
     }
-    void this.state.panel.webview.postMessage(answer)
+    // The panel can be disposed while a stream is in flight; drop the answer
+    // rather than dereferencing a null panel.
+    void this.state.panel?.webview.postMessage(answer)
+  }
+
+  /**
+   * Reveals `path` in the OS file manager, but only when it is the scanned root
+   * or a path inside it and it actually exists. The sandboxed webview can name
+   * any path; this is the one gate between that name and the OS.
+   */
+  private async reveal(path: string | undefined): Promise<boolean> {
+    if (typeof path !== 'string') return false
+    if (this.state.rootPath === null) return false
+    if (!isPathWithin(this.state.rootPath, path)) return false
+    let exists = false
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      exists = require('node:fs').existsSync(path)
+    } catch {
+      exists = false
+    }
+    if (!exists) return false
+    await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(path))
+    return true
+  }
+
+  /** Clears the stored AI API key; used by the `spacelens.clearAiKey` command. */
+  async clearAiKey(): Promise<void> {
+    await this.ai.clearKey()
   }
 
   private startPolling(): void {
@@ -241,6 +355,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('spacelens.shutdown', () => {
       void workbench.shutdown()
+    }),
+    vscode.commands.registerCommand('spacelens.clearAiKey', async () => {
+      await workbench.clearAiKey()
+      void vscode.window.showInformationMessage('Space Lens: AI API key cleared.')
     }),
     new vscode.Disposable(() => {
       void workbench.shutdown()

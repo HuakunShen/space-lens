@@ -31,6 +31,12 @@ export const CapabilitiesSchema = z.strictObject({
     appLocationReveal: z.boolean().optional(),
   }),
   icloud: z.enum(['unavailable']),
+  /**
+   * True when the host is configured with an operator-owned AI advisor
+   * (`packages/contract/src/ai.ts`). Absent on older hosts, which never
+   * advertise it.
+   */
+  ai: z.boolean().optional(),
 })
 
 export type Capabilities = z.infer<typeof CapabilitiesSchema>

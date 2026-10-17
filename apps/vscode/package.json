@@ -30,6 +30,11 @@
         "command": "spacelens.shutdown",
         "title": "Shutdown Service",
         "category": "Space Lens"
+      },
+      {
+        "command": "spacelens.clearAiKey",
+        "title": "Clear AI API Key",
+        "category": "Space Lens"
       }
     ],
     "configuration": {
@@ -45,6 +50,7 @@
   },
   "scripts": {
     "compile": "node esbuild.mjs && vite build --config webview/vite.config.ts",
+    "test": "node --test 'test/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "package": "yarn compile && npx -y @vscode/vsce package --no-dependencies -o space-lens-$npm_package_version.vsix"
   },
@@ -59,8 +65,10 @@
     "vite": "^8.0.16"
   },
   "dependencies": {
+    "@space-lens/ai-advisor": "workspace:*",
     "@space-lens/client": "workspace:*",
     "@space-lens/contract": "workspace:*",
+    "@space-lens/host": "workspace:*",
     "@space-lens/web-ui": "workspace:*"
   }
 }

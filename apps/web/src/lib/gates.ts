@@ -96,3 +96,24 @@ export function cleanupAvailable(input: {
   // server contract); the desktop shell owns the same report locally.
   return input.desktop || !input.coverage
 }
+
+export interface AiGateInput {
+  /** Only the desktop shell ships the BYOK key store and the `ai_chat` proxy. */
+  desktop: boolean
+  /** Injected Tauri ports; null until `loadTauriPorts()` has resolved. */
+  ports: { invoke?: unknown } | null
+  /** The HTTP host declares and serves the advisor (`capabilities.ai` + `aiChat`). */
+  hostAi: boolean
+}
+
+/**
+ * The AI advisor is available either through the desktop shell's BYOK proxy
+ * (its own key store and `invoke`) or through an HTTP host that serves an
+ * operator-configured advisor. The invoke half covers the window between mount
+ * and the async port load; a plain browser host without the routes stays
+ * hidden.
+ */
+export function aiAvailable(input: AiGateInput): boolean {
+  if (input.desktop && typeof input.ports?.invoke === 'function') return true
+  return input.hostAi
+}

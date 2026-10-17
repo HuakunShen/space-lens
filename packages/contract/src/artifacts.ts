@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { AiChatRequestSchema, AiConfigViewSchema } from './ai.ts'
 import { CapabilitiesSchema, HealthSchema } from './capabilities.ts'
 import {
   AppCleanupExecuteRequestSchema,
@@ -68,6 +69,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   Session: SessionSchema,
   EventEnvelope: EventEnvelopeSchema,
   Problem: ProblemSchema,
+  AiConfigView: AiConfigViewSchema,
+  AiChatRequest: AiChatRequestSchema,
 }
 
 export function buildContractArtifacts(): Record<string, string> {

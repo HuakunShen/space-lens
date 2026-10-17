@@ -128,4 +128,39 @@ describe('http service', () => {
     const icon = await service.appIcon({ appPath: '/Applications/Foo.app' })
     expect(icon.dataUrl).toBe('data:image/png;base64,AAAA')
   })
+  it('reads the managed ai config and posts chat through the host', async () => {
+    const calls: string[] = []
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${String(input)}`)
+      expect((init?.headers as Record<string, string>).authorization).toBe('Bearer session')
+      if (String(input).endsWith('/api/v1/ai/config')) {
+        return jsonResponse(
+          {
+            baseUrl: 'https://api.example.com/v1',
+            model: 'glm-4.6',
+            hasKey: true,
+            disableThinking: false,
+            managed: true,
+          },
+          200,
+        )
+      }
+      expect(init?.method).toBe('POST')
+      expect(JSON.parse(init?.body as string)).toEqual({ messages: [{ role: 'user', content: 'hi' }] })
+      return jsonResponse({ id: 'cmpl_1', choices: [] }, 200)
+    }) as typeof fetch
+    const service = createHttpService({ baseUrl: 'http://localhost', getToken: () => 'session', fetchImpl })
+
+    const view = await service.aiConfig()
+    expect(view).toEqual({
+      baseUrl: 'https://api.example.com/v1',
+      model: 'glm-4.6',
+      hasKey: true,
+      disableThinking: false,
+      managed: true,
+    })
+    const reply = (await service.aiChat({ messages: [{ role: 'user', content: 'hi' }] })) as { id: string }
+    expect(reply.id).toBe('cmpl_1')
+    expect(calls).toEqual(['GET http://localhost/api/v1/ai/config', 'POST http://localhost/api/v1/ai/chat'])
+  })
 })

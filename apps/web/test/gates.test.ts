@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { appScanAvailable, cleanupAvailable, discoveryAvailable, gitignoredAvailable, appAuditAvailable } from '../src/lib/gates.ts'
+import {
+  aiAvailable,
+  appScanAvailable,
+  cleanupAvailable,
+  discoveryAvailable,
+  gitignoredAvailable,
+  appAuditAvailable,
+} from '../src/lib/gates.ts'
 import type { Capabilities, ScanStatus } from '@space-lens/contract'
 
 const capabilities = (
@@ -89,6 +96,20 @@ test('app scans need the host flag and the submit arm', () => {
   // service method missing (older adapters, HTTP this round) -> hidden
   assert.equal(appScanAvailable({ capabilities: scanCapabilities, service: {} }), false)
   assert.equal(appScanAvailable({ capabilities: scanCapabilities, service: null }), false)
+})
+
+test('the AI advisor needs the desktop proxy or an HTTP host that serves it', () => {
+  const ports = { invoke: () => Promise.reject(new Error('unused')) }
+  // Desktop shell: its own BYOK key store plus the invoke proxy.
+  assert.equal(aiAvailable({ desktop: true, ports, hostAi: false }), true)
+  // HTTP host advertising `capabilities.ai` + `aiChat` -> available in the browser.
+  assert.equal(aiAvailable({ desktop: false, ports: null, hostAi: true }), true)
+  assert.equal(aiAvailable({ desktop: true, ports, hostAi: true }), true)
+  // Neither: a plain browser build with no host advisor stays hidden.
+  assert.equal(aiAvailable({ desktop: false, ports: null, hostAi: false }), false)
+  // Desktop but the ports have not loaded yet (or lack invoke), no host advisor -> hidden.
+  assert.equal(aiAvailable({ desktop: true, ports: null, hostAi: false }), false)
+  assert.equal(aiAvailable({ desktop: true, ports: {}, hostAi: false }), false)
 })
 
 test('cleanup stays desktop-only for covered scans and capability-gated everywhere', () => {

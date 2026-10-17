@@ -59,9 +59,13 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
   const config = resolveServeConfig(options)
   const serviceInstanceId = `inst_${randomBytes(6).toString('hex')}`
   const hostedPassword = config.hostedPassword === null ? null : hashHostedPassword(config.hostedPassword)
-  const scopes = config.allowCleanup
-    ? ['scan:read', 'scan:start', 'cleanup:plan', 'cleanup:execute']
-    : ['scan:read', 'scan:start']
+  const scopes = [
+    'scan:read',
+    'scan:start',
+    ...(config.allowCleanup ? ['cleanup:plan', 'cleanup:execute'] : []),
+    // The AI scope is granted only when the operator configured an advisor.
+    ...(config.ai !== null ? ['ai:chat'] : []),
+  ]
 
   const auth = new AuthService({
     serviceInstanceId,
@@ -103,6 +107,7 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
     cleanup: { plan: config.allowCleanup, execute: config.allowCleanup, mode: config.allowCleanup ? 'trash' : 'none' },
     host: { folderPicker: false },
     icloud: 'unavailable',
+    ai: config.ai !== null,
   }
 
   const app = buildApp({

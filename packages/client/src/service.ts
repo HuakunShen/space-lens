@@ -6,6 +6,8 @@ import type {
   AppCleanupPlanRequest,
   AppIconRequest,
   AppIcon,
+  AiChatRequest,
+  AiConfigView,
   AppScanStartRequest,
   Capabilities,
   ChildrenPageRequest,
@@ -70,4 +72,18 @@ export interface WorkbenchService {
    * presence, decides whether the picker button exists.
    */
   pickFolder?(title?: string): Promise<string | null>
+  /**
+   * Operator-owned AI advisor over the HTTP host. Optional: the Tauri desktop
+   * adapter uses its own BYOK IPC instead (`@space-lens/ai-advisor`), and older
+   * hosts predate the routes.
+   */
+  aiConfig?(): Promise<AiConfigView>
+  aiChat?(body: AiChatRequest): Promise<unknown>
+  /**
+   * Streams one chat completion through the host. The host sends `stream: true`
+   * and forwards the upstream SSE bytes as raw text chunks; `onChunk` receives
+   * each decoded piece (chunk boundaries are not line boundaries). Throws the
+   * same `ServiceError` as the other methods on a non-2xx response.
+   */
+  aiChatStream?(body: AiChatRequest, onChunk: (text: string) => void, signal?: AbortSignal): Promise<void>
 }
