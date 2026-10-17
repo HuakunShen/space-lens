@@ -1,6 +1,14 @@
 import { z } from 'zod'
 
-export const SCOPES = ['scan:read', 'scan:start', 'cleanup:plan', 'cleanup:execute', 'ai:chat'] as const
+export const SCOPES = [
+  'scan:read',
+  'scan:start',
+  'cleanup:plan',
+  'cleanup:execute',
+  'ai:chat',
+  'memory:read',
+  'memory:terminate',
+] as const
 
 export type Scope = (typeof SCOPES)[number]
 

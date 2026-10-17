@@ -11,8 +11,41 @@ import {
   CleanupPlanSchema,
 } from './cleanup.ts'
 import { EventEnvelopeSchema } from './events.ts'
+import {
+  AuditLogSchema,
+  AuditRecordSchema,
+  CandidateReasonSchema,
+  CandidatesRequestSchema,
+  FreeUpCandidateSchema,
+  FreeUpCandidatesSchema,
+  GroupSeriesSchema,
+  HistoryRequestSchema,
+  MemoryBreakdownSchema,
+  MemoryHistorySchema,
+  MemoryPressureSchema,
+  MemorySnapshotSchema,
+  ProcessGroupSchema,
+  ProcessRowSchema,
+  SystemPointSchema,
+  TerminateExecuteRequestSchema,
+  TerminateOutcomeSchema,
+  TerminatePlanEntrySchema,
+  TerminatePlanRequestSchema,
+  TerminatePlanSchema,
+  TerminateRefusalSchema,
+  TerminateResultSchema,
+  TerminateTargetSchema,
+} from './memory.ts'
 import { DiscoveryKindSchema, DiscoveryRequestSchema, DiscoveryItemSchema, DiscoveryPageSchema } from './discovery.ts'
-import { AppAuditRequestSchema, AppAuditReportSchema, AppIconRequestSchema, AppIconSchema, AppScanOriginSchema, AppScanStartRequestSchema, RecentAppScanSchema } from './apps.ts'
+import {
+  AppAuditRequestSchema,
+  AppAuditReportSchema,
+  AppIconRequestSchema,
+  AppIconSchema,
+  AppScanOriginSchema,
+  AppScanStartRequestSchema,
+  RecentAppScanSchema,
+} from './apps.ts'
 import {
   LocalScanReportSchema,
   LocalScanNodeSchema,
@@ -71,6 +104,29 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   Problem: ProblemSchema,
   AiConfigView: AiConfigViewSchema,
   AiChatRequest: AiChatRequestSchema,
+  MemoryBreakdown: MemoryBreakdownSchema,
+  MemoryPressure: MemoryPressureSchema,
+  ProcessRow: ProcessRowSchema,
+  ProcessGroup: ProcessGroupSchema,
+  MemorySnapshot: MemorySnapshotSchema,
+  TerminateTarget: TerminateTargetSchema,
+  TerminatePlanRequest: TerminatePlanRequestSchema,
+  TerminatePlanEntry: TerminatePlanEntrySchema,
+  TerminateRefusal: TerminateRefusalSchema,
+  TerminatePlan: TerminatePlanSchema,
+  TerminateExecuteRequest: TerminateExecuteRequestSchema,
+  TerminateResult: TerminateResultSchema,
+  TerminateOutcome: TerminateOutcomeSchema,
+  CandidateReason: CandidateReasonSchema,
+  FreeUpCandidate: FreeUpCandidateSchema,
+  FreeUpCandidates: FreeUpCandidatesSchema,
+  CandidatesRequest: CandidatesRequestSchema,
+  SystemPoint: SystemPointSchema,
+  GroupSeries: GroupSeriesSchema,
+  MemoryHistory: MemoryHistorySchema,
+  HistoryRequest: HistoryRequestSchema,
+  AuditRecord: AuditRecordSchema,
+  AuditLog: AuditLogSchema,
 }
 
 export function buildContractArtifacts(): Record<string, string> {

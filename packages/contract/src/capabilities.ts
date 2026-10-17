@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { CLEANUP_MODES } from './cleanup.ts'
+import { MEMORY_PLATFORMS } from './memory.ts'
 import { API_MAJOR, CONTRACT_VERSION } from './version.ts'
 
 const UintSchema = z.number().int().nonnegative()
@@ -37,6 +38,24 @@ export const CapabilitiesSchema = z.strictObject({
    * advertise it.
    */
   ai: z.boolean().optional(),
+  /**
+   * Memory view and process control (crates/memory). Absent on older hosts and
+   * on machine-mode hosts that never pass the allow flags, in which case the
+   * Memory view stays hidden.
+   */
+  memory: z
+    .strictObject({
+      /** snapshot/history/candidates/audit readable. */
+      sample: z.boolean(),
+      /** plan/execute available to this session's host config. */
+      terminate: z.boolean(),
+      /** AppKit quit works (macOS + appkit feature). */
+      gracefulAppQuit: z.boolean(),
+      /** desktop-only "Reopen" from audit. */
+      reopen: z.boolean(),
+      platform: z.enum(MEMORY_PLATFORMS),
+    })
+    .optional(),
 })
 
 export type Capabilities = z.infer<typeof CapabilitiesSchema>

@@ -1,0 +1,350 @@
+{
+  "MemoryBreakdown": {
+    "totalBytes": 51539607552,
+    "usedBytes": 33500744909,
+    "freeBytes": 1073741824,
+    "availableBytes": 21474836480,
+    "appBytes": 18253611008,
+    "wiredBytes": 4294967296,
+    "compressedBytes": 7086696038,
+    "cachedFilesBytes": 3865470566,
+    "swapTotalBytes": 2147483648,
+    "swapUsedBytes": 3221225472
+  },
+  "MemoryPressure": {
+    "level": "normal",
+    "source": "kernel",
+    "availablePercent": 73.5
+  },
+  "ProcessRow": {
+    "pid": 4321,
+    "ppid": 1,
+    "startTimeUs": 1729180800000000,
+    "name": "Dia",
+    "ownedByCurrentUser": true,
+    "groupId": "grp_0123456789abcdef",
+    "kind": "app",
+    "cpuPercent": 12.5,
+    "footprintBytes": 426770432,
+    "residentBytes": 398458880,
+    "virtualBytes": 5153960755,
+    "restricted": false,
+    "protection": null
+  },
+  "ProcessGroup": {
+    "groupId": "grp_0123456789abcdef",
+    "name": "Dia",
+    "bundleId": "com.dia.app",
+    "bundlePath": "/Applications/Dia.app",
+    "kind": "app",
+    "mainPid": 4321,
+    "pids": [
+      4321,
+      4322
+    ],
+    "cpuPercent": 12.5,
+    "footprintBytes": 426770432,
+    "residentBytes": 398458880,
+    "frontmost": false,
+    "lastFrontmostAt": "2026-10-18T10:00:00.000Z",
+    "startedAt": "2026-10-18T09:00:00.000Z",
+    "protection": null
+  },
+  "MemorySnapshot": {
+    "sequence": 3,
+    "sampledAt": "2026-10-18T10:05:00.000Z",
+    "intervalMs": 1000,
+    "platform": "macos",
+    "breakdown": {
+      "totalBytes": 51539607552,
+      "usedBytes": 33500744909,
+      "freeBytes": 1073741824,
+      "availableBytes": 21474836480,
+      "appBytes": 18253611008,
+      "wiredBytes": 4294967296,
+      "compressedBytes": 7086696038,
+      "cachedFilesBytes": 3865470566,
+      "swapTotalBytes": 2147483648,
+      "swapUsedBytes": 3221225472
+    },
+    "pressure": {
+      "level": "normal",
+      "source": "kernel",
+      "availablePercent": 73.5
+    },
+    "groups": [
+      {
+        "groupId": "grp_0123456789abcdef",
+        "name": "Dia",
+        "bundleId": "com.dia.app",
+        "bundlePath": "/Applications/Dia.app",
+        "kind": "app",
+        "mainPid": 4321,
+        "pids": [
+          4321,
+          4322
+        ],
+        "cpuPercent": 12.5,
+        "footprintBytes": 426770432,
+        "residentBytes": 398458880,
+        "frontmost": false,
+        "lastFrontmostAt": "2026-10-18T10:00:00.000Z",
+        "startedAt": "2026-10-18T09:00:00.000Z",
+        "protection": null
+      }
+    ],
+    "processes": [
+      {
+        "pid": 4321,
+        "ppid": 1,
+        "startTimeUs": 1729180800000000,
+        "name": "Dia",
+        "ownedByCurrentUser": true,
+        "groupId": "grp_0123456789abcdef",
+        "kind": "app",
+        "cpuPercent": 12.5,
+        "footprintBytes": 426770432,
+        "residentBytes": 398458880,
+        "virtualBytes": 5153960755,
+        "restricted": false,
+        "protection": null
+      }
+    ],
+    "notes": [
+      "cpuWarmingUp",
+      "restrictedProcesses"
+    ]
+  },
+  "TerminateTarget": {
+    "kind": "group",
+    "groupId": "grp_0123456789abcdef"
+  },
+  "TerminatePlanRequest": {
+    "targets": [
+      {
+        "kind": "group",
+        "groupId": "grp_0123456789abcdef"
+      }
+    ],
+    "mode": "graceful",
+    "origin": "manual"
+  },
+  "TerminatePlanEntry": {
+    "pid": 4321,
+    "startTimeUs": 1729180800000000,
+    "name": "Dia",
+    "groupId": "grp_0123456789abcdef",
+    "footprintBytes": 426770432,
+    "method": "appQuit",
+    "risks": [
+      "appMayPromptToSave",
+      "endsChildProcesses"
+    ],
+    "descendantCount": 1
+  },
+  "TerminateRefusal": {
+    "pid": 1,
+    "groupId": null,
+    "name": "launchd",
+    "code": "protected",
+    "protection": "init"
+  },
+  "TerminatePlan": {
+    "planId": "tplan_0123456789ABCDEF",
+    "mode": "graceful",
+    "origin": "manual",
+    "entries": [
+      {
+        "pid": 4321,
+        "startTimeUs": 1729180800000000,
+        "name": "Dia",
+        "groupId": "grp_0123456789abcdef",
+        "footprintBytes": 426770432,
+        "method": "appQuit",
+        "risks": [
+          "appMayPromptToSave",
+          "endsChildProcesses"
+        ],
+        "descendantCount": 1
+      }
+    ],
+    "refused": [
+      {
+        "pid": 1,
+        "groupId": null,
+        "name": "launchd",
+        "code": "protected",
+        "protection": "init"
+      }
+    ],
+    "expectedReleaseBytes": 426770432,
+    "createdAt": "2026-10-18T10:05:00.000Z",
+    "expiresAt": "2026-10-18T10:06:00.000Z"
+  },
+  "TerminateExecuteRequest": {
+    "planId": "tplan_0123456789ABCDEF",
+    "confirm": true
+  },
+  "TerminateResult": {
+    "pid": 4321,
+    "startTimeUs": 1729180800000000,
+    "name": "Dia",
+    "status": "exited",
+    "method": "appQuit",
+    "errno": null
+  },
+  "TerminateOutcome": {
+    "planId": "tplan_0123456789ABCDEF",
+    "results": [
+      {
+        "pid": 4321,
+        "startTimeUs": 1729180800000000,
+        "name": "Dia",
+        "status": "exited",
+        "method": "appQuit",
+        "errno": null
+      }
+    ],
+    "releasedBytesEstimate": 426770432,
+    "auditIds": [
+      "aud_0123456789ABCDEF"
+    ]
+  },
+  "CandidateReason": {
+    "code": "large",
+    "bytes": 426770432,
+    "minutes": null,
+    "cpuPercent": null,
+    "count": null,
+    "fromBytes": null
+  },
+  "FreeUpCandidate": {
+    "groupId": "grp_0123456789abcdef",
+    "name": "Dia",
+    "footprintBytes": 426770432,
+    "reasons": [
+      {
+        "code": "large",
+        "bytes": 426770432,
+        "minutes": null,
+        "cpuPercent": null,
+        "count": null,
+        "fromBytes": null
+      }
+    ],
+    "risks": [
+      "unsavedWorkMayBeLost"
+    ],
+    "preselected": false
+  },
+  "FreeUpCandidates": {
+    "sequence": 3,
+    "pressure": {
+      "level": "normal",
+      "source": "kernel",
+      "availablePercent": 73.5
+    },
+    "observedMinutes": 6,
+    "candidates": [
+      {
+        "groupId": "grp_0123456789abcdef",
+        "name": "Dia",
+        "footprintBytes": 426770432,
+        "reasons": [
+          {
+            "code": "large",
+            "bytes": 426770432,
+            "minutes": null,
+            "cpuPercent": null,
+            "count": null,
+            "fromBytes": null
+          }
+        ],
+        "risks": [
+          "unsavedWorkMayBeLost"
+        ],
+        "preselected": false
+      }
+    ],
+    "potentialReleaseBytes": 426770432
+  },
+  "CandidatesRequest": {
+    "exclude": []
+  },
+  "SystemPoint": {
+    "at": "2026-10-18T10:05:00.000Z",
+    "usedBytes": 33500744909,
+    "compressedBytes": 7086696038,
+    "swapUsedBytes": 3221225472,
+    "pressure": "normal"
+  },
+  "GroupSeries": {
+    "groupId": "grp_0123456789abcdef",
+    "name": "Dia",
+    "footprintBytes": [
+      null,
+      426770432,
+      430000000
+    ]
+  },
+  "MemoryHistory": {
+    "stepMs": 1000,
+    "points": [
+      {
+        "at": "2026-10-18T10:05:00.000Z",
+        "usedBytes": 33500744909,
+        "compressedBytes": 7086696038,
+        "swapUsedBytes": 3221225472,
+        "pressure": "normal"
+      }
+    ],
+    "groups": [
+      {
+        "groupId": "grp_0123456789abcdef",
+        "name": "Dia",
+        "footprintBytes": [
+          null,
+          426770432,
+          430000000
+        ]
+      }
+    ]
+  },
+  "HistoryRequest": {
+    "groupIds": [
+      "grp_0123456789abcdef"
+    ]
+  },
+  "AuditRecord": {
+    "auditId": "aud_0123456789ABCDEF",
+    "at": "2026-10-18T10:05:10.000Z",
+    "origin": "manual",
+    "mode": "graceful",
+    "method": "appQuit",
+    "pid": 4321,
+    "startTimeUs": 1729180800000000,
+    "name": "Dia",
+    "groupName": "Dia",
+    "bundleId": "com.dia.app",
+    "status": "exited",
+    "footprintBytes": 426770432
+  },
+  "AuditLog": {
+    "records": [
+      {
+        "auditId": "aud_0123456789ABCDEF",
+        "at": "2026-10-18T10:05:10.000Z",
+        "origin": "manual",
+        "mode": "graceful",
+        "method": "appQuit",
+        "pid": 4321,
+        "startTimeUs": 1729180800000000,
+        "name": "Dia",
+        "groupName": "Dia",
+        "bundleId": "com.dia.app",
+        "status": "exited",
+        "footprintBytes": 426770432
+      }
+    ]
+  }
+}
