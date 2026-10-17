@@ -8,6 +8,7 @@ import {
   AI_CONFIG_KEY,
   AI_SECRET_KEY,
   DEFAULT_AI_BASE_URL,
+  MAX_STREAM_BODY_BYTES,
   createAiBridge,
   isPathWithin,
   type AiSecretStore,
@@ -60,6 +61,7 @@ interface CapturedRequest {
   url: string
   headers: Record<string, string>
   body: unknown
+  signal: AbortSignal | null | undefined
 }
 
 function bodyText(body: BodyInit | null | undefined): string {
@@ -83,6 +85,7 @@ function makeFetch(respond: (request: CapturedRequest) => Response | Promise<Res
       url,
       headers: { ...((init?.headers as Record<string, string> | undefined) ?? {}) },
       body: JSON.parse(bodyText(init?.body)) as unknown,
+      signal: init?.signal,
     }
     requests.push(request)
     return respond(request)
@@ -288,6 +291,174 @@ test('chat refuses when the model is only whitespace', async () => {
   const bridge = createAiBridge({ state: makeState(), secrets: makeSecrets(), fetchImpl: neverFetch })
   await bridge.setConfig({ model: '   ' })
   await assert.rejects(() => bridge.chat({ messages: [] }), /AI model is not set/)
+})
+
+// ------------------------------------------------------------------ chatStream
+
+const streamEncoder = new TextEncoder()
+
+/** A response whose body is exactly `chunks`, in order, as raw bytes. */
+function streamResponse(chunks: readonly Uint8Array[], status = 200): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk)
+      controller.close()
+    },
+  })
+  return new Response(body, { status, headers: { 'content-type': 'text/event-stream' } })
+}
+
+/** Collects the text forwarded to `onChunk`, in order. */
+function collector(): { chunks: string[]; onChunk: (text: string) => void } {
+  const chunks: string[] = []
+  return { chunks, onChunk: (text) => chunks.push(text) }
+}
+
+test('chatStream forwards chunks in order, with stream:true and the thinking flag/tools in the body', async () => {
+  const chunks = [
+    streamEncoder.encode('data: {"delta":"he'),
+    streamEncoder.encode('llo"}\n\n'),
+    streamEncoder.encode('data: [DONE]\n\n'),
+  ]
+  const secrets = makeSecrets()
+  const { impl, requests } = makeFetch(() => streamResponse(chunks))
+  const bridge = createAiBridge({ state: makeState(), secrets, fetchImpl: impl })
+  await bridge.setConfig({ baseUrl: LOOPBACK_BASE, model: 'llama3', apiKey: KEY, disableThinking: true })
+
+  const sink = collector()
+  const result = await bridge.chatStream({
+    messages: [{ role: 'user', content: 'hi' }],
+    tools: [{ type: 'function' }],
+    onChunk: sink.onChunk,
+  })
+
+  assert.equal(result, undefined)
+  assert.deepEqual(sink.chunks, ['data: {"delta":"he', 'llo"}\n\n', 'data: [DONE]\n\n'])
+  assert.equal(sink.chunks.join(''), 'data: {"delta":"hello"}\n\ndata: [DONE]\n\n')
+  assert.equal(requests[0].url, `${LOOPBACK_BASE}/chat/completions`)
+  assert.equal(requests[0].headers.authorization, `Bearer ${KEY}`)
+  assert.deepEqual(requests[0].body, {
+    model: 'llama3',
+    messages: [{ role: 'user', content: 'hi' }],
+    thinking: { type: 'disabled' },
+    tools: [{ type: 'function' }],
+    stream: true,
+  })
+})
+
+test('chatStream reassembles a multibyte character split across chunks', async () => {
+  // 'a€b' with the three-byte '€' (E2 82 AC) split between the first two chunks.
+  const part1 = Uint8Array.from([0x61, 0xe2])
+  const part2 = Uint8Array.from([0x82, 0xac])
+  const part3 = Uint8Array.from([0x62])
+  const { impl } = makeFetch(() => streamResponse([part1, part2, part3]))
+  const bridge = createAiBridge({ state: makeState(), secrets: makeSecrets(), fetchImpl: impl })
+  await bridge.setConfig({ baseUrl: LOOPBACK_BASE, model: 'm' })
+
+  const sink = collector()
+  await bridge.chatStream({ messages: [], onChunk: sink.onChunk })
+
+  assert.equal(sink.chunks.join(''), 'a€b')
+  // The split byte is buffered, not emitted as a replacement character.
+  assert.equal(sink.chunks.includes('\uFFFD'), false)
+})
+
+test('chatStream redacts the key in a non-ok response and forwards no chunks', async () => {
+  const secrets = makeSecrets()
+  const { impl } = makeFetch(() => new Response(`invalid api key: ${KEY}`, { status: 401 }))
+  const bridge = createAiBridge({ state: makeState(), secrets, fetchImpl: impl })
+  await bridge.setConfig({ baseUrl: LOOPBACK_BASE, model: 'm', apiKey: KEY })
+
+  const sink = collector()
+  await assert.rejects(
+    () => bridge.chatStream({ messages: [], onChunk: sink.onChunk }),
+    (error: Error) => {
+      assert.equal(error.message.includes(KEY), false, error.message)
+      assert.ok(error.message.includes('[redacted]'), error.message)
+      assert.ok(error.message.includes(`${LOOPBACK_BASE}/chat/completions`), error.message)
+      return true
+    },
+  )
+  assert.deepEqual(sink.chunks, [])
+})
+
+test('chatStream clips an oversized error body to 300 characters', async () => {
+  const { impl } = makeFetch(() => new Response('x'.repeat(5_000), { status: 500 }))
+  const bridge = createAiBridge({ state: makeState(), secrets: makeSecrets(), fetchImpl: impl })
+  await bridge.setConfig({ baseUrl: LOOPBACK_BASE, model: 'm' })
+
+  await assert.rejects(
+    () => bridge.chatStream({ messages: [], onChunk: () => undefined }),
+    (error: Error) => {
+      const prefix = `AI request failed with 500 at ${LOOPBACK_BASE}/chat/completions: `
+      assert.ok(error.message.startsWith(prefix), error.message.slice(0, 120))
+      const clipped = error.message.slice(prefix.length)
+      assert.equal(clipped.length, 301) // 300 characters plus the ellipsis
+      assert.ok(clipped.endsWith('…'))
+      return true
+    },
+  )
+})
+
+test('chatStream aborts the upstream read when the caller signal fires', async () => {
+  const controller = new AbortController()
+  let pulls = 0
+
+  // An endless body that errors as soon as the (combined) request signal aborts.
+  const impl: typeof fetch = async (_input, init) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(streamController) {
+        init?.signal?.addEventListener(
+          'abort',
+          () => streamController.error(new DOMException('The operation was aborted.', 'AbortError')),
+          { once: true },
+        )
+      },
+      pull(streamController) {
+        pulls += 1
+        streamController.enqueue(streamEncoder.encode(`data: ${pulls}\n\n`))
+      },
+    })
+    return new Response(body, { status: 200 })
+  }
+  const bridge = createAiBridge({ state: makeState(), secrets: makeSecrets(), fetchImpl: impl })
+  await bridge.setConfig({ baseUrl: LOOPBACK_BASE, model: 'm' })
+
+  const seen: string[] = []
+  await assert.rejects(() =>
+    bridge.chatStream({
+      messages: [],
+      signal: controller.signal,
+      onChunk: (text) => {
+        seen.push(text)
+        controller.abort()
+      },
+    }),
+  )
+  assert.ok(seen.length >= 1, 'at least one chunk was forwarded before the abort')
+  assert.ok(pulls < 5, `reading stopped promptly (pulled ${pulls} times)`)
+})
+
+test('chatStream refuses when no model is set, without calling fetch', async () => {
+  const bridge = createAiBridge({ state: makeState(), secrets: makeSecrets(), fetchImpl: neverFetch })
+  await assert.rejects(
+    () => bridge.chatStream({ messages: [], onChunk: () => undefined }),
+    /AI model is not set/,
+  )
+})
+
+test('chatStream fails when the forwarded body crosses the 4 MiB cap', async () => {
+  const oversized = new Uint8Array(MAX_STREAM_BODY_BYTES + 1)
+  const { impl } = makeFetch(() => streamResponse([oversized]))
+  const bridge = createAiBridge({ state: makeState(), secrets: makeSecrets(), fetchImpl: impl })
+  await bridge.setConfig({ baseUrl: LOOPBACK_BASE, model: 'm' })
+
+  const sink = collector()
+  await assert.rejects(
+    () => bridge.chatStream({ messages: [], onChunk: sink.onChunk }),
+    /too large/,
+  )
+  assert.deepEqual(sink.chunks, [])
 })
 
 // ------------------------------------------------------------------ isPathWithin

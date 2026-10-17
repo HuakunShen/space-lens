@@ -27,6 +27,9 @@ export class Workbench {
 
   private readonly ai: AiBridge
 
+  /** In-flight `ai.chatStream` requests, keyed by request id. */
+  private readonly streams = new Map<number, AbortController>()
+
   constructor(private readonly context: vscode.ExtensionContext) {
     // The key lives in VS Code's secret store; the rest of the AI config in
     // global state. Both are injected so `ai-bridge` stays free of `vscode`.
@@ -84,6 +87,7 @@ export class Workbench {
   async shutdown(): Promise<void> {
     if (this.state.pollTimer !== null) clearInterval(this.state.pollTimer)
     this.state.pollTimer = null
+    this.abortStreams()
     this.state.panel?.dispose()
     this.state.panel = null
     this.state.service?.stop()
@@ -91,6 +95,12 @@ export class Workbench {
     this.state.token = null
     this.state.scanId = null
     this.state.rootPath = null
+  }
+
+  /** Aborts every in-flight `ai.chatStream`; the owning `answer` settles on its own. */
+  private abortStreams(): void {
+    for (const controller of this.streams.values()) controller.abort()
+    this.streams.clear()
   }
 
   private async startService(rootPath: string): Promise<void> {
@@ -146,6 +156,9 @@ export class Workbench {
     })
     panel.onDidDispose(() => {
       if (this.state.panel === panel) this.state.panel = null
+      // A disposed webview has nowhere to receive chunks; stop the upstream
+      // requests rather than stream into the void.
+      this.abortStreams()
     })
     this.startPolling()
   }
@@ -215,6 +228,44 @@ export class Workbench {
           answer = { id: request.id, ok: true, answer: { kind: 'ai.chat', completion } }
           break
         }
+        case 'ai.chatStream': {
+          // The request id doubles as the run id: chunks are tagged with it and
+          // `ai.cancel` names it. Rejecting a duplicate keeps one controller per id.
+          if (this.streams.has(request.id)) {
+            answer = {
+              id: request.id,
+              ok: false,
+              problem: { code: 'InvalidRequest', message: `A stream with id ${request.id} is already running.` },
+            }
+            break
+          }
+          const controller = new AbortController()
+          this.streams.set(request.id, controller)
+          try {
+            await this.ai.chatStream({
+              messages: (request.messages ?? []) as Record<string, unknown>[],
+              tools: request.tools as Record<string, unknown>[] | undefined,
+              signal: controller.signal,
+              onChunk: (text) => {
+                const panel = this.state.panel
+                if (panel === null) return
+                void panel.webview.postMessage({ kind: 'ai.chunk', id: request.id, text } satisfies BridgeMessage)
+              },
+            })
+            answer = { id: request.id, ok: true, answer: { kind: 'ai.chatStream', done: true } }
+          } finally {
+            this.streams.delete(request.id)
+          }
+          break
+        }
+        case 'ai.cancel': {
+          const runId = request.runId
+          const controller = typeof runId === 'number' ? this.streams.get(runId) : undefined
+          controller?.abort()
+          // Cancelling an already-finished (or unknown) run is a no-op, not an error.
+          answer = { id: request.id, ok: true, answer: { kind: 'ai.cancel', cancelled: controller !== undefined } }
+          break
+        }
         case 'reveal': {
           if (!(await this.reveal(request.path))) {
             answer = {
@@ -234,7 +285,9 @@ export class Workbench {
       const message = error instanceof Error ? error.message : String(error)
       answer = { id: request.id, ok: false, problem: { code: 'Unavailable', message } }
     }
-    void this.state.panel.webview.postMessage(answer)
+    // The panel can be disposed while a stream is in flight; drop the answer
+    // rather than dereferencing a null panel.
+    void this.state.panel?.webview.postMessage(answer)
   }
 
   /**

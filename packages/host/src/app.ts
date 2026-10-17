@@ -30,7 +30,7 @@ import type { ScanManager } from './scan-store.ts'
 import { mountedVolumes, volumeCapacities } from './volumes.ts'
 import { resolveLocalScanBin } from './local-process.ts'
 import { runAppAuditCli, runAppIconCli } from './app-audit.ts'
-import { forwardChatCompletion } from './ai.ts'
+import { forwardChatCompletion, forwardChatStream } from './ai.ts'
 
 export interface HostDeps {
   config: ResolvedServeConfig
@@ -378,16 +378,30 @@ export function buildApp(deps: HostDeps): HonoApp {
     const ai = requireAi()
     ensureScope(c.get('session'), 'ai:chat')
     const request = await parseBody<AiChatRequest>(c, AiChatRequestSchema)
-    return c.json(
-      await forwardChatCompletion({
-        endpoint: ai.endpoint,
-        model: ai.model,
-        apiKey: ai.apiKey,
-        disableThinking: ai.disableThinking,
-        messages: request.messages,
-        tools: request.tools,
-      }),
-    )
+    const forwarded = {
+      endpoint: ai.endpoint,
+      model: ai.model,
+      apiKey: ai.apiKey,
+      disableThinking: ai.disableThinking,
+      messages: request.messages,
+      tools: request.tools,
+    }
+    if (request.stream === true) {
+      // Every failure before the first forwarded byte (bad request, timeout,
+      // non-2xx upstream) is thrown here and answered with the normal problem
+      // JSON; only a live stream reaches the non-JSON response below. A client
+      // disconnect aborts the upstream request through this same signal.
+      const stream = await forwardChatStream({ ...forwarded, signal: c.req.raw.signal })
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-store',
+          'x-accel-buffering': 'no',
+        },
+      })
+    }
+    return c.json(await forwardChatCompletion(forwarded))
   })
 
   // 6. SSE: fetch-based clients (EventSource cannot send Authorization).

@@ -71,14 +71,19 @@ export function createHttpService(options: HttpServiceOptions) {
   const doFetch = options.fetchImpl ?? fetch
   const base = options.baseUrl.replace(/\/$/, '')
 
-  const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  /** Shared by every method: JSON content type plus the current bearer token. */
+  const authHeaders = (extra?: HeadersInit): Record<string, string> => {
     const token = options.getToken()
     const headers: Record<string, string> = {
       'content-type': 'application/json',
-      ...(init?.headers as Record<string, string>),
+      ...(extra as Record<string, string> | undefined),
     }
     if (token !== null) headers.authorization = `Bearer ${token}`
-    const response = await doFetch(`${base}${path}`, { ...init, headers })
+    return headers
+  }
+
+  const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
+    const response = await doFetch(`${base}${path}`, { ...init, headers: authHeaders(init?.headers) })
     if (!response.ok) await raiseProblem(response)
     if (response.status === 204) return undefined as T
     return (await response.json()) as T
@@ -125,6 +130,37 @@ export function createHttpService(options: HttpServiceOptions) {
     /** Forwards one non-streaming chat completion through the host. */
     aiChat: (body: AiChatRequest) =>
       request<unknown>('/api/v1/ai/chat', { method: 'POST', body: JSON.stringify(body) }),
+    /**
+     * Forwards one streaming chat completion. The host answers
+     * `text/event-stream` and this decodes each raw chunk as UTF-8 (a multi-byte
+     * character may be split across chunks, hence `{ stream: true }`); it does
+     * not parse SSE. `signal` aborts both the local read and the upstream call.
+     */
+    aiChatStream: async (
+      body: AiChatRequest,
+      onChunk: (text: string) => void,
+      signal?: AbortSignal,
+    ): Promise<void> => {
+      const response = await doFetch(`${base}/api/v1/ai/chat`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ ...body, stream: true }),
+        signal,
+      })
+      if (!response.ok) await raiseProblem(response)
+      const stream = response.body
+      if (stream === null) return
+      const reader = stream.getReader()
+      const decoder = new TextDecoder()
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value !== undefined) onChunk(decoder.decode(value, { stream: true }))
+      }
+      // Flush a trailing multi-byte sequence the final chunk may have split.
+      const tail = decoder.decode()
+      if (tail !== '') onChunk(tail)
+    },
   }
 }
 

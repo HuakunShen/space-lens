@@ -53,6 +53,14 @@ export interface ChatTool {
 export interface ChatRequest {
   messages: ChatMessage[]
   tools?: ChatTool[]
+  /**
+   * A streaming-capable port calls this for every assistant text delta and
+   * still resolves the fully assembled response; a port that does not stream
+   * simply ignores it.
+   */
+  onText?: (delta: string) => void
+  /** Set when the caller aborted the run, so the transport can cancel. */
+  signal?: AbortSignal
 }
 
 export interface ChatChoice {

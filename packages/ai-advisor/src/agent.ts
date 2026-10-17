@@ -28,6 +28,7 @@ export type AgentEndReason = 'final' | 'rounds' | 'budget' | 'error'
 
 export type AgentEvent =
   | { type: 'assistant'; round: number; text: string | null; toolCalls: string[] }
+  | { type: 'text-delta'; round: number; text: string }
   | { type: 'tool'; round: number; name: string; content: string }
   | { type: 'staged'; entries: CollectorEntry[] }
   | { type: 'end'; reason: AgentEndReason }
@@ -132,10 +133,15 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResult> {
 
     let response: ChatResponse
     try {
-      response = await options.chat({ messages, tools: [...AI_TOOLS] })
+      response = await options.chat({
+        messages,
+        tools: [...AI_TOOLS],
+        signal: options.signal,
+        onText: (text) => options.onEvent?.({ type: 'text-delta', round: rounds, text }),
+      })
     } catch (error) {
       endReason = 'error'
-      text = `The model request failed: ${describe(error)}`
+      text = options.signal?.aborted ? 'The run was cancelled.' : `The model request failed: ${describe(error)}`
       break
     }
 

@@ -8,8 +8,8 @@
     lensPortFromService,
     readConfig,
     renderMarkdown,
+    streamChat,
     runAgent,
-    toChatResponse,
     type AgentEvent,
     type AgentStats,
     type AiChatPort,
@@ -38,15 +38,22 @@
 
   /** The webview bridge: posts a request and resolves the whole `{id, ok, answer}` message. */
   type BridgeRequest = <T>(request: Record<string, unknown>) => Promise<T>
+  /** Streamed bridge request: raw upstream text chunks arrive through `onChunk`. */
+  type BridgeStream = (
+    request: Record<string, unknown>,
+    onChunk: (text: string) => void,
+    signal?: AbortSignal,
+  ) => Promise<void>
 
   interface Props {
     request: BridgeRequest
+    requestStream: BridgeStream
     scanId: string
     focusNodeId: string | undefined
     rootPath: string | null
     onClose: () => void
   }
-  let { request, scanId, focusNodeId, rootPath, onClose }: Props = $props()
+  let { request, requestStream, scanId, focusNodeId, rootPath, onClose }: Props = $props()
 
   interface StagedItem {
     entry: CollectorEntry
@@ -75,6 +82,8 @@
   let transcript = $state<TranscriptItem[]>([])
   let staged = $state<StagedItem[]>([])
   let stats = $state<AgentStats | null>(null)
+  /** Assistant text streamed so far this round; cleared when the round's message lands. */
+  let liveText = $state('')
   let controller: AbortController | null = null
   let revealErrors = $state<Record<string, string>>({})
   let revealingId = $state<string | null>(null)
@@ -116,12 +125,11 @@
 
   const port: AiChatPort = {
     async chat(body: ChatRequest) {
-      const reply = await request<{ answer: { completion: unknown } }>({
-        kind: 'ai.chat',
-        messages: body.messages,
-        tools: body.tools,
-      })
-      return toChatResponse(reply.answer.completion)
+      return streamChat(
+        (onChunk) =>
+          requestStream({ kind: 'ai.chatStream', messages: body.messages, tools: body.tools }, onChunk, body.signal),
+        body.onText,
+      )
     },
     async getConfig(): Promise<AiConfig> {
       const reply = await request<{ answer: { config: unknown } }>({ kind: 'ai.config' })
@@ -208,7 +216,10 @@
   }
 
   function appendEvent(event: AgentEvent, stager: Stager): void {
-    if (event.type === 'assistant') {
+    if (event.type === 'text-delta') {
+      liveText += event.text
+    } else if (event.type === 'assistant') {
+      liveText = ''
       transcript = [...transcript, { kind: 'assistant', round: event.round, text: event.text, tools: event.toolCalls }]
     } else if (event.type === 'tool') {
       transcript = [...transcript, { kind: 'tool', round: event.round, name: event.name, content: event.content }]
@@ -254,6 +265,7 @@
       error = describeError(failed)
     } finally {
       running = false
+      liveText = ''
       controller = null
     }
   }
@@ -389,7 +401,7 @@
       aria-label="Ask the AI about this scan"
     />
     {#if running}
-      <Button.Root type="button" variant="ghost" size="sm" onclick={cancel}>Cancel</Button.Root>
+      <Button.Root type="button" variant="ghost" size="sm" onclick={cancel}>Stop</Button.Root>
     {:else}
       <Button.Root type="submit" size="sm" disabled={question.trim() === ''}>Ask</Button.Root>
     {/if}
@@ -435,6 +447,10 @@
         stats.bytesSent,
       )} sent
     </p>
+  {/if}
+
+  {#if liveText !== ''}
+    <div class="ai-md text-sm" aria-live="polite" aria-label="Assistant is typing">{@html renderMarkdown(liveText)}</div>
   {/if}
 
   {#if transcript.length > 0}

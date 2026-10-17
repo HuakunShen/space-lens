@@ -44,6 +44,8 @@ pub fn run() {
       ai::ai_get_config,
       ai::ai_set_config,
       ai::ai_chat,
+      ai::ai_chat_stream,
+      ai::ai_chat_cancel,
     ])
     .run(tauri::generate_context!())
     .expect("error while running Space Lens desktop");

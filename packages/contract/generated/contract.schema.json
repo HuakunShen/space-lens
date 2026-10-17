@@ -3516,6 +3516,9 @@
             },
             "additionalProperties": {}
           }
+        },
+        "stream": {
+          "type": "boolean"
         }
       },
       "required": [

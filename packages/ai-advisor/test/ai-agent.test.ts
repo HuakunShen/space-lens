@@ -943,3 +943,54 @@ test('the catalogue and the prompt rules match the plan', () => {
   assert.match(SYSTEM_PROMPT, /"keep" is informational/)
   assert.match(SYSTEM_PROMPT, /id\|name\|MB\|kind\|children/)
 })
+
+// ---------------------------------------------------------------------------
+// Streaming and cancellation
+// ---------------------------------------------------------------------------
+
+test('a streaming port emits text-delta events before the assistant turn', async () => {
+  const lens = makeLens()
+  const chat: ChatPort = async (request) => {
+    request.onText?.('node_')
+    request.onText?.('modules')
+    return final('node_modules is 3.8 MB.')
+  }
+  const events: AgentEvent[] = []
+
+  const result = await runAgent({
+    chat,
+    lens: lens.lens,
+    userMessage: 'where did my space go?',
+    onEvent: (event) => events.push(event),
+  })
+
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ['text-delta', 'text-delta', 'assistant', 'end'],
+  )
+  const deltas = events.flatMap((event) => (event.type === 'text-delta' ? [event.text] : []))
+  assert.deepEqual(deltas, ['node_', 'modules'])
+  const first = events[0]
+  assert.equal(first.type === 'text-delta' ? first.round : -1, 1)
+  assert.equal(result.text, 'node_modules is 3.8 MB.')
+  assert.equal(result.endReason, 'final')
+})
+
+test('an abort during the request becomes "The run was cancelled."', async () => {
+  const lens = makeLens()
+  const controller = new AbortController()
+  const chat: ChatPort = async () => {
+    controller.abort()
+    throw new Error('aborted')
+  }
+
+  const result = await runAgent({
+    chat,
+    lens: lens.lens,
+    userMessage: 'stop',
+    signal: controller.signal,
+  })
+
+  assert.equal(result.text, 'The run was cancelled.')
+  assert.equal(result.endReason, 'error')
+})

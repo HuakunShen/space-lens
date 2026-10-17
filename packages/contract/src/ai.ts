@@ -23,5 +23,11 @@ const AiMessageSchema = z.record(z.string(), z.unknown())
 export const AiChatRequestSchema = z.strictObject({
   messages: z.array(AiMessageSchema).min(1).max(2000),
   tools: z.array(z.record(z.string(), z.unknown())).max(64).optional(),
+  /**
+   * When `true` the host forwards the upstream body as `text/event-stream` raw
+   * chunks instead of one parsed JSON body. Optional so every existing caller
+   * (and host) keeps working unchanged.
+   */
+  stream: z.boolean().optional(),
 })
 export type AiChatRequest = z.infer<typeof AiChatRequestSchema>

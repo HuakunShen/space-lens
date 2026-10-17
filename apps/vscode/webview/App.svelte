@@ -72,8 +72,53 @@
     })
   }
 
+  // Streamed answers: the extension host pushes `{kind:'ai.chunk', id, text}` while the
+  // request with that id is still pending.
+  const chunkHandlers = new Map<number, (text: string) => void>()
+
+  /** One streamed bridge request; `signal` abort asks the host to cancel the upstream call. */
+  function requestStream(
+    req: Record<string, unknown>,
+    onChunk: (text: string) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const id = nextId++
+    return new Promise<void>((resolve, reject) => {
+      const cleanup = (): void => {
+        chunkHandlers.delete(id)
+        signal?.removeEventListener('abort', onAbort)
+      }
+      const onAbort = (): void => {
+        vscode.postMessage({ id: nextId++, kind: 'ai.cancel', runId: id })
+      }
+      chunkHandlers.set(id, onChunk)
+      pending.set(id, {
+        resolve: () => {
+          cleanup()
+          resolve()
+        },
+        reject: (problem: { code: string; message: string }) => {
+          cleanup()
+          reject(problem)
+        },
+      } as Pending)
+      if (signal?.aborted === true) {
+        cleanup()
+        pending.delete(id)
+        reject({ code: 'Cancelled', message: 'cancelled' })
+        return
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      vscode.postMessage({ id, ...req })
+    })
+  }
+
   window.addEventListener('message', (event) => {
     const message = event.data as Record<string, unknown>
+    if (message.kind === 'ai.chunk') {
+      chunkHandlers.get(message.id as number)?.(String(message.text ?? ''))
+      return
+    }
     if (message.kind === 'push') {
       status = message.status as ScanStatus
       if (status.state === 'ready' && activeScanId !== null) void loadRoot(activeScanId)
@@ -220,6 +265,7 @@
     {#if aiOpen && activeScanId !== null}
       <AiPanel
         request={request}
+        requestStream={requestStream}
         scanId={activeScanId}
         focusNodeId={slice?.focusNode.id}
         rootPath={status?.label ?? null}

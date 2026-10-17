@@ -4,13 +4,16 @@
 //! the tool budget; Rust owns exactly two things it cannot own itself: the API
 //! key and the HTTPS call. The key is stored in the app config dir `ai.json`
 //! (0600) and is never handed back to the renderer — `ai_get_config` reports
-//! only whether one exists. The command set is closed: three commands, no raw
-//! URL, no header passthrough, so the WebView can ask for one non-streaming
-//! chat completion and nothing else.
+//! only whether one exists. The command set is closed: no raw URL, no header
+//! passthrough, so the WebView can ask for one chat completion — buffered
+//! (`ai_chat`) or streamed chunk-by-chunk (`ai_chat_stream`, cancelled by
+//! `ai_chat_cancel`) — and nothing else.
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -34,6 +37,14 @@ const MAX_REQUEST_BODY_BYTES: usize = 1024 * 1024;
 /// The same budget on the way back: a runaway (or hostile) endpoint must never
 /// make the shell buffer an unbounded body.
 const MAX_RESPONSE_BODY_BYTES: usize = 2 * 1024 * 1024;
+/// The streamed-body cap. A streamed body is forwarded, not buffered, but a
+/// runaway endpoint must still be stopped: past this many forwarded bytes the
+/// reader aborts and reports an error. Larger than the buffered cap because a
+/// full SSE transcript is verbatim upstream bytes, not a re-serialized object.
+const MAX_STREAM_RESPONSE_BODY_BYTES: usize = 4 * 1024 * 1024;
+/// How many body chunks may queue between the reader task and the command
+/// before the reader waits. Bounded backpressure, never unbounded memory.
+const STREAM_CHANNEL_CAPACITY: usize = 16;
 
 // ------------------------------------------------------------------- config
 
@@ -398,14 +409,7 @@ pub async fn ai_chat(
     .map_err(|error| redact(error, key.as_deref()))?;
   let text = String::from_utf8_lossy(&bytes);
   if !status.is_success() {
-    return Err(redact(
-      format!(
-        "AI request failed with {status} at {}: {}",
-        endpoint,
-        truncate(&text, MAX_ERROR_BODY_CHARS)
-      ),
-      key.as_deref(),
-    ));
+    return Err(upstream_error(status, &endpoint, &text, key.as_deref()));
   }
   serde_json::from_slice(&bytes).map_err(|error| {
     redact(
@@ -418,10 +422,340 @@ pub async fn ai_chat(
   })
 }
 
+// ----------------------------------------------------------------- streaming
+
+/// In-flight streamed runs, keyed by the WebView's run id. `ai_chat_stream`
+/// registers its reader task; `ai_chat_cancel` aborts it, which drops the
+/// upstream `Response` and so aborts the connection. A `std` mutex is enough:
+/// every operation is a constant-time map touch, and the run's `Drop` guard
+/// (which must run on the sync path) needs a sync lock.
+static STREAM_RUNS: LazyLock<Mutex<HashMap<String, Box<dyn RunAbort>>>> =
+  LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn stream_runs() -> MutexGuard<'static, HashMap<String, Box<dyn RunAbort>>> {
+  // A poisoned lock still holds a valid map; a cancelled reader must never
+  // wedge the registry for every later run.
+  STREAM_RUNS
+    .lock()
+    .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// One thing `ai_chat_cancel` can do to an in-flight run. The trait is the seam
+/// the registry tests use without spawning a task or touching the network.
+trait RunAbort: Send + Sync {
+  fn abort_run(&self);
+}
+
+impl RunAbort for tauri::async_runtime::JoinHandle<()> {
+  fn abort_run(&self) {
+    self.abort();
+  }
+}
+
+/// Removes (and aborts) a run when the command returns for any reason —
+/// success, error and cancel all drop this guard.
+struct RunGuard(String);
+
+impl Drop for RunGuard {
+  fn drop(&mut self) {
+    if let Some(abort) = stream_runs().remove(&self.0) {
+      abort.abort_run();
+    }
+  }
+}
+
+/// Claims a run id. A duplicate id that is still in flight is refused, and the
+/// caller's freshly spawned reader is aborted rather than leaked.
+fn register_run(run_id: &str, abort: Box<dyn RunAbort>) -> Result<(), String> {
+  let mut runs = stream_runs();
+  if runs.contains_key(run_id) {
+    abort.abort_run();
+    return Err(format!(
+      "an AI stream is already running for run id {run_id}"
+    ));
+  }
+  runs.insert(run_id.to_string(), abort);
+  Ok(())
+}
+
+/// Fires the cancellation for one run. Returns whether a run was in flight; the
+/// run itself then resolves with `Err("cancelled")` and removes its own entry.
+fn cancel_run(run_id: &str) -> bool {
+  match stream_runs().get(run_id) {
+    Some(abort) => {
+      abort.abort_run();
+      true
+    }
+    None => false,
+  }
+}
+
+/// One event from the reader task to the command.
+enum StreamPart {
+  /// Raw upstream body bytes, forwarded verbatim. A chunk may split a UTF-8
+  /// character; the command's decoder carries the tail into the next chunk.
+  Chunk(Vec<u8>),
+  /// The upstream body ended cleanly.
+  End,
+  /// The stream failed; the message is already redacted.
+  Failed(String),
+}
+
+/// The streaming variant of `chat_body`: byte-for-byte the same object plus
+/// `"stream": true`. The flag is added here so the non-streaming `ai_chat`
+/// output is untouched and every streaming caller requests the same body.
+fn stream_chat_body(
+  model: &str,
+  messages: &[Value],
+  tools: Option<&[Value]>,
+  disable_thinking: bool,
+) -> Value {
+  let mut body = chat_body(model, messages, tools, disable_thinking);
+  body["stream"] = json!(true);
+  body
+}
+
+/// The one non-2xx message shape, shared by `ai_chat` and `ai_chat_stream` so
+/// the two cannot drift: the status, the endpoint, and 300 chars of the body,
+/// with the key stripped.
+fn upstream_error(
+  status: reqwest::StatusCode,
+  endpoint: &str,
+  text: &str,
+  key: Option<&str>,
+) -> String {
+  redact(
+    format!(
+      "AI request failed with {status} at {endpoint}: {}",
+      truncate(text, MAX_ERROR_BODY_CHARS)
+    ),
+    key,
+  )
+}
+
+/// The reader half of a streamed completion. It never parses SSE and never
+/// buffers the body; the only accounting is the 4 MiB forwarded-byte cap. Every
+/// outcome — clean end, upstream error, cap breach — is reported to the command
+/// as a `StreamPart`, and a dropped receiver stops it (dropping the response
+/// aborts the connection).
+async fn pump_stream(
+  request: reqwest::RequestBuilder,
+  endpoint: String,
+  key: Option<String>,
+  tx: tauri::async_runtime::Sender<StreamPart>,
+) {
+  let response = match request.send().await {
+    Ok(response) => response,
+    Err(error) => {
+      let _ = tx
+        .send(StreamPart::Failed(redact(
+          format!("AI request failed: {error}"),
+          key.as_deref(),
+        )))
+        .await;
+      return;
+    }
+  };
+  let status = response.status();
+  if !status.is_success() {
+    // Non-2xx is not a stream: clip it exactly like `ai_chat` and send no
+    // chunks.
+    let message = match read_capped_body(response, MAX_RESPONSE_BODY_BYTES).await {
+      Ok(bytes) => upstream_error(
+        status,
+        &endpoint,
+        &String::from_utf8_lossy(&bytes),
+        key.as_deref(),
+      ),
+      Err(error) => redact(error, key.as_deref()),
+    };
+    let _ = tx.send(StreamPart::Failed(message)).await;
+    return;
+  }
+  let mut response = response;
+  let mut forwarded = 0usize;
+  loop {
+    match response.chunk().await {
+      Ok(Some(chunk)) => {
+        if let Err(error) = ensure_within_cap(
+          "AI response body",
+          forwarded.saturating_add(chunk.len()),
+          MAX_STREAM_RESPONSE_BODY_BYTES,
+        ) {
+          let _ = tx.send(StreamPart::Failed(error)).await;
+          return;
+        }
+        forwarded += chunk.len();
+        if tx.send(StreamPart::Chunk(chunk.to_vec())).await.is_err() {
+          // The command is gone; dropping the response aborts the connection.
+          return;
+        }
+      }
+      Ok(None) => {
+        let _ = tx.send(StreamPart::End).await;
+        return;
+      }
+      Err(error) => {
+        let message = redact(
+          format!("AI response could not be read: {error}"),
+          key.as_deref(),
+        );
+        let _ = tx.send(StreamPart::Failed(message)).await;
+        return;
+      }
+    }
+  }
+}
+
+/// Carries a UTF-8 character that was split across two body chunks into the
+/// next decode: the tail bytes are deferred, never lossy-replaced, so the
+/// caller only ever sees whole characters. A genuinely invalid byte sequence is
+/// replaced at once instead of stalling the stream.
+struct ChunkDecoder {
+  pending: Vec<u8>,
+}
+
+impl ChunkDecoder {
+  fn new() -> Self {
+    Self {
+      pending: Vec::new(),
+    }
+  }
+
+  /// Decodes one body chunk, returning the text that is safe to forward now.
+  fn push(&mut self, bytes: &[u8]) -> String {
+    if self.pending.is_empty() {
+      // Fast path: a self-contained chunk, the common case.
+      if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+      }
+    }
+    self.pending.extend_from_slice(bytes);
+    match std::str::from_utf8(&self.pending) {
+      Ok(text) => {
+        let out = text.to_string();
+        self.pending.clear();
+        out
+      }
+      Err(error) => {
+        let valid = error.valid_up_to();
+        let out = String::from_utf8_lossy(&self.pending[..valid]).into_owned();
+        match error.error_len() {
+          // The tail is a truncated character: keep it for the next chunk.
+          None => {
+            self.pending.drain(..valid);
+            out
+          }
+          // The tail is a real error: replace it now, never defer it.
+          Some(_) => {
+            let tail = String::from_utf8_lossy(&self.pending[valid..]).into_owned();
+            self.pending.clear();
+            out + &tail
+          }
+        }
+      }
+    }
+  }
+
+  /// Flushes a trailing truncated character (lossy) when the body ends.
+  fn finish(&mut self) -> Option<String> {
+    if self.pending.is_empty() {
+      return None;
+    }
+    let text = String::from_utf8_lossy(&self.pending).into_owned();
+    self.pending.clear();
+    Some(text)
+  }
+}
+
+/// Forwards one streamed chat completion. Every upstream body chunk crosses
+/// `on_chunk` as a UTF-8 string and the WebView assembles deltas and tool calls
+/// (`@space-lens/ai-advisor`'s stream parser). The body is capped at 1 MiB and
+/// the forwarded bytes at 4 MiB; a non-2xx upstream produces the same redacted
+/// error as `ai_chat` and no chunks. Cancelling the run id aborts the upstream
+/// request and resolves with `Err("cancelled")`.
+#[tauri::command]
+pub async fn ai_chat_stream(
+  app: AppHandle,
+  messages: Vec<Value>,
+  tools: Option<Vec<Value>>,
+  run_id: String,
+  on_chunk: tauri::ipc::Channel<String>,
+) -> Result<(), String> {
+  let config = load_config(&config_path(&app)?);
+  if config.model.trim().is_empty() {
+    return Err("AI model is not set".to_string());
+  }
+  if messages.is_empty() {
+    return Err("ai_chat_stream needs at least one message".to_string());
+  }
+  if run_id.trim().is_empty() {
+    return Err("ai_chat_stream needs a run id".to_string());
+  }
+  let endpoint = chat_endpoint(&config.base_url)?;
+  let key = config.api_key.filter(|key| !key.is_empty());
+  // Serialized once and checked before the key is attached, exactly like
+  // `ai_chat`: the 1 MiB cap refuses an oversized transcript before a request.
+  let body = encode_chat_body(&stream_chat_body(
+    &config.model,
+    &messages,
+    tools.as_deref(),
+    config.disable_thinking,
+  ))?;
+  let mut request = build_client()?
+    .post(&endpoint)
+    .header(reqwest::header::CONTENT_TYPE, "application/json")
+    .body(body);
+  if let Some(key) = key.as_deref() {
+    request = request.bearer_auth(key);
+  }
+
+  let (tx, mut rx) = tauri::async_runtime::channel::<StreamPart>(STREAM_CHANNEL_CAPACITY);
+  let reader = tauri::async_runtime::spawn(pump_stream(request, endpoint, key, tx));
+  // Rejects a duplicate in-flight id; on refusal the freshly spawned reader is
+  // aborted inside `register_run` rather than leaked.
+  register_run(&run_id, Box::new(reader))?;
+  // Removes (and aborts) the run on every exit path below.
+  let _guard = RunGuard(run_id.clone());
+
+  let mut decoder = ChunkDecoder::new();
+  loop {
+    match rx.recv().await {
+      Some(StreamPart::Chunk(bytes)) => {
+        let text = decoder.push(&bytes);
+        if !text.is_empty() {
+          on_chunk
+            .send(text)
+            .map_err(|error| format!("AI stream chunk could not be delivered: {error}"))?;
+        }
+      }
+      Some(StreamPart::End) => {
+        if let Some(text) = decoder.finish() {
+          on_chunk
+            .send(text)
+            .map_err(|error| format!("AI stream chunk could not be delivered: {error}"))?;
+        }
+        return Ok(());
+      }
+      Some(StreamPart::Failed(message)) => return Err(message),
+      // The reader was aborted (cancel) or dropped without an `End`.
+      None => return Err("cancelled".to_string()),
+    }
+  }
+}
+
+/// Cancels an in-flight `ai_chat_stream` by its run id. Returns whether a run
+/// was found; that run then resolves with `Err("cancelled")`.
+#[tauri::command]
+pub fn ai_chat_cancel(run_id: String) -> bool {
+  cancel_run(&run_id)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
-  use std::sync::atomic::{AtomicU32, Ordering};
+  use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+  use std::sync::Arc;
 
   static TEMP_SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -728,5 +1062,146 @@ mod tests {
     let clipped = truncate(&long, MAX_ERROR_BODY_CHARS);
     assert_eq!(clipped.chars().count(), MAX_ERROR_BODY_CHARS + 1);
     assert_eq!(truncate("short", MAX_ERROR_BODY_CHARS), "short");
+  }
+
+  // ------------------------------------------------------------- streaming
+
+  #[test]
+  fn stream_body_adds_the_stream_flag_and_keeps_thinking_and_tools() {
+    let messages = vec![json!({ "role": "user", "content": "hi" })];
+    let streaming = stream_chat_body("glm-4.6", &messages, None, false);
+    assert_eq!(streaming["stream"], json!(true));
+    assert_eq!(streaming["model"], "glm-4.6");
+    assert_eq!(streaming["messages"], json!(messages));
+
+    // `thinking` and `tools` behave exactly as the non-streaming builder's.
+    assert_eq!(
+      stream_chat_body("m", &messages, None, true)["thinking"],
+      json!({ "type": "disabled" })
+    );
+    assert!(stream_chat_body("m", &messages, None, false)
+      .get("thinking")
+      .is_none());
+    assert!(stream_chat_body("m", &messages, Some(&[]), false)
+      .get("tools")
+      .is_none());
+    let tools = vec![json!({ "type": "function" })];
+    assert_eq!(
+      stream_chat_body("m", &messages, Some(&tools), false)["tools"],
+      json!(tools)
+    );
+
+    // The non-streaming body is untouched: no `stream` key.
+    assert!(chat_body("m", &messages, None, false)
+      .get("stream")
+      .is_none());
+  }
+
+  #[test]
+  fn stream_cap_is_the_four_mebibytes_the_design_sets() {
+    assert_eq!(MAX_STREAM_RESPONSE_BODY_BYTES, 4 * 1024 * 1024);
+  }
+
+  #[test]
+  fn chunk_decoder_carries_a_split_multibyte_character() {
+    let mut decoder = ChunkDecoder::new();
+    // "🙂" is F0 9F 99 82; split it after the first byte.
+    assert_eq!(
+      decoder.push(&[b'a', 0xF0]),
+      "a",
+      "the incomplete character must be deferred, not replaced"
+    );
+    assert_eq!(decoder.push(&[0x9F, 0x99, 0x82, b'b']), "🙂b");
+    assert_eq!(decoder.finish(), None);
+
+    // A 3-byte character split at every byte still reassembles exactly.
+    let text = "日本語";
+    let mut decoder = ChunkDecoder::new();
+    let mut out = String::new();
+    for byte in text.as_bytes() {
+      out.push_str(&decoder.push(std::slice::from_ref(byte)));
+    }
+    out.push_str(&decoder.finish().unwrap_or_default());
+    assert_eq!(out, text);
+  }
+
+  #[test]
+  fn chunk_decoder_replaces_invalid_bytes_without_stalling() {
+    // A lone 0xFF is invalid, not truncated: replace it now.
+    let mut decoder = ChunkDecoder::new();
+    assert_eq!(decoder.push(&[b'a', 0xFF, b'b']), "a\u{fffd}b");
+    assert_eq!(decoder.finish(), None);
+
+    // An invalid lead byte does not swallow the valid character after it.
+    let mut decoder = ChunkDecoder::new();
+    assert_eq!(decoder.push(&[0xF0, 0x41]), "\u{fffd}A");
+
+    // A truncated tail at end-of-body is flushed lossily, exactly once.
+    let mut decoder = ChunkDecoder::new();
+    assert_eq!(decoder.push(&[0xF0, 0x9F]), "");
+    assert_eq!(decoder.finish(), Some("\u{fffd}".to_string()));
+    assert_eq!(decoder.finish(), None);
+  }
+
+  /// A registry probe: records the abort without spawning anything.
+  struct ProbeAbort(Arc<AtomicBool>);
+
+  impl RunAbort for ProbeAbort {
+    fn abort_run(&self) {
+      self.0.store(true, Ordering::SeqCst);
+    }
+  }
+
+  #[test]
+  fn stream_registry_registers_rejects_duplicates_and_cancels() {
+    let run_id = format!("run-{}-registry", std::process::id());
+    let aborted = Arc::new(AtomicBool::new(false));
+    register_run(&run_id, Box::new(ProbeAbort(aborted.clone()))).unwrap();
+    assert!(
+      !aborted.load(Ordering::SeqCst),
+      "registration is not a cancel"
+    );
+
+    // A duplicate in-flight id is refused, and the caller's handle is aborted
+    // rather than leaked.
+    let duplicate = Arc::new(AtomicBool::new(false));
+    let error = register_run(&run_id, Box::new(ProbeAbort(duplicate.clone()))).unwrap_err();
+    assert!(error.contains("already running"), "{error}");
+    assert!(duplicate.load(Ordering::SeqCst));
+
+    // Cancel fires the registered run's abort.
+    assert!(cancel_run(&run_id));
+    assert!(aborted.load(Ordering::SeqCst));
+
+    // The entry survives cancel until the run's guard removes it.
+    drop(RunGuard(run_id.clone()));
+    assert!(
+      !cancel_run(&run_id),
+      "a removed run is no longer cancellable"
+    );
+  }
+
+  #[test]
+  fn stream_registry_guard_cleans_up_the_entry() {
+    let run_id = format!("run-{}-cleanup", std::process::id());
+    register_run(
+      &run_id,
+      Box::new(ProbeAbort(Arc::new(AtomicBool::new(false)))),
+    )
+    .unwrap();
+    assert!(cancel_run(&run_id));
+    {
+      let _guard = RunGuard(run_id.clone());
+    }
+    // Dropping the guard removed the entry, so the id is free and a later
+    // cancel is a no-op.
+    assert!(!cancel_run(&run_id));
+    // The id can be registered again.
+    register_run(
+      &run_id,
+      Box::new(ProbeAbort(Arc::new(AtomicBool::new(false)))),
+    )
+    .unwrap();
+    drop(RunGuard(run_id.clone()));
   }
 }

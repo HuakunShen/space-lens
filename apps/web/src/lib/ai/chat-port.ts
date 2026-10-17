@@ -1,6 +1,7 @@
 import type { AiChatRequest } from '@space-lens/contract'
 import {
   readConfig,
+  streamChat,
   toChatResponse,
   type AiChatPort,
   type AiConfig,
@@ -10,6 +11,7 @@ import {
 } from '@space-lens/ai-advisor'
 import type { TauriPorts, WorkbenchService } from '@space-lens/client'
 import { loadTauriPorts } from '../tauri-ports.ts'
+import { streamTauriChat } from './tauri-stream.ts'
 
 /**
  * Slice C — the live `ChatPort`.
@@ -30,12 +32,16 @@ export function createAiChatPort(loadPorts: () => Promise<TauriPorts> = loadTaur
 
   return {
     async chat(request: ChatRequest): Promise<ChatResponse> {
-      const resolved = await ports()
-      const body = await resolved.invoke('ai_chat', {
-        messages: request.messages,
-        ...(request.tools === undefined ? {} : { tools: request.tools }),
-      })
-      return toChatResponse(body)
+      await ports()
+      return streamChat(
+        (onChunk) =>
+          streamTauriChat(
+            { messages: request.messages, ...(request.tools === undefined ? {} : { tools: request.tools }) },
+            onChunk,
+            request.signal,
+          ),
+        request.onText,
+      )
     },
     async getConfig(): Promise<AiConfig> {
       const resolved = await ports()
@@ -58,7 +64,7 @@ export function createAiChatPort(loadPorts: () => Promise<TauriPorts> = loadTaur
  * DSH plugin talk to `spacelens serve` this way; the endpoint and key never
  * reach the page.
  */
-export function createServiceAiChatPort(service: Pick<WorkbenchService, 'aiConfig' | 'aiChat'>): AiChatPort {
+export function createServiceAiChatPort(service: Pick<WorkbenchService, 'aiConfig' | 'aiChat' | 'aiChatStream'>): AiChatPort {
   return {
     async chat(request: ChatRequest): Promise<ChatResponse> {
       const aiChat = service.aiChat
@@ -69,7 +75,9 @@ export function createServiceAiChatPort(service: Pick<WorkbenchService, 'aiConfi
         messages: request.messages,
         ...(request.tools === undefined ? {} : { tools: request.tools }),
       } as unknown as AiChatRequest
-      return toChatResponse(await aiChat(body))
+      const aiChatStream = service.aiChatStream
+      if (aiChatStream === undefined) return toChatResponse(await aiChat(body))
+      return streamChat((onChunk) => aiChatStream(body, onChunk, request.signal), request.onText)
     },
     async getConfig(): Promise<AiConfig> {
       const aiConfig = service.aiConfig

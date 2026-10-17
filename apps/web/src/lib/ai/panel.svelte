@@ -65,6 +65,8 @@
   let transcript = $state<TranscriptItem[]>([])
   let staged = $state<StagedItem[]>([])
   let stats = $state<AgentStats | null>(null)
+  /** Assistant text streamed so far this round; cleared when the round's message lands. */
+  let liveText = $state('')
   let controller: AbortController | null = null
 
   // Plain (non-reactive) guard: the effect re-runs on `open`/`available`/`port`,
@@ -141,7 +143,10 @@
   }
 
   function appendEvent(event: AgentEvent, stager: Stager): void {
-    if (event.type === 'assistant') {
+    if (event.type === 'text-delta') {
+      liveText += event.text
+    } else if (event.type === 'assistant') {
+      liveText = ''
       transcript = [...transcript, { kind: 'assistant', round: event.round, text: event.text, tools: event.toolCalls }]
     } else if (event.type === 'tool') {
       transcript = [...transcript, { kind: 'tool', round: event.round, name: event.name, content: event.content }]
@@ -190,6 +195,7 @@
       error = describeError(failed)
     } finally {
       running = false
+      liveText = ''
       controller = null
     }
   }
@@ -331,7 +337,7 @@
             aria-label="Ask the AI about this scan"
           />
           {#if running}
-            <Button.Root type="button" variant="ghost" size="sm" onclick={cancel}>Cancel</Button.Root>
+            <Button.Root type="button" variant="ghost" size="sm" onclick={cancel}>Stop</Button.Root>
           {:else}
             <Button.Root type="submit" size="sm" disabled={!scanReady || question.trim() === ''}>Ask</Button.Root>
           {/if}
@@ -367,6 +373,10 @@
               stats.bytesSent,
             )} sent
           </p>
+        {/if}
+
+        {#if liveText !== ''}
+          <div class="ai-md text-sm" aria-live="polite" aria-label="Assistant is typing">{@html renderMarkdown(liveText)}</div>
         {/if}
 
         {#if transcript.length > 0}

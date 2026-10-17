@@ -21,6 +21,8 @@ export const CHAT_TIMEOUT_MS = 120_000
 /** `docs/ai-advisor-plan.md` item 5: 1 MiB of request, 2 MiB of response. */
 export const MAX_REQUEST_BODY_BYTES = 1024 * 1024
 export const MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024
+/** A streamed reply is forwarded, not buffered, but still has a hard ceiling. */
+export const MAX_STREAM_BODY_BYTES = 4 * 1024 * 1024
 /** The response tail kept in an error message: enough to see "invalid api key", never a proxy's HTML page. */
 export const MAX_ERROR_BODY_CHARS = 300
 export const CHAT_COMPLETIONS_PATH = '/chat/completions'
@@ -246,4 +248,127 @@ export async function forwardChatCompletion(input: ForwardChatInput): Promise<un
       ),
     )
   }
+}
+
+/**
+ * Forwards one streaming chat completion. The request carries `stream: true`
+ * and the upstream response body is passed through as raw text chunks — never
+ * parsed here. A shared parser in `@space-lens/ai-advisor` assembles the deltas.
+ *
+ * The 1 MiB request cap is the same as the non-streaming call and is checked
+ * before the key is attached. A non-2xx upstream reads the (capped) body and
+ * throws the same redacted `Problems.unavailable`, so the route can still answer
+ * a problem JSON before any byte is sent. The forwarded bytes are capped at
+ * 4 MiB: the crossing chunk is refused, the upstream reader is cancelled, and
+ * the returned stream errors. Cancelling the returned stream (or aborting the
+ * caller's signal) cancels the upstream request.
+ */
+export async function forwardChatStream(
+  input: ForwardChatInput & { signal?: AbortSignal | undefined },
+): Promise<ReadableStream<Uint8Array>> {
+  const doFetch = input.fetchImpl ?? fetch
+  // Checked before the key is attached, exactly like the non-streaming call.
+  let body: Uint8Array<ArrayBuffer>
+  try {
+    body = encodeChatBody({
+      ...buildChatBody({
+        model: input.model,
+        messages: input.messages,
+        tools: input.tools,
+        disableThinking: input.disableThinking,
+      }),
+      stream: true,
+    })
+  } catch (error) {
+    throw Problems.invalid(errorMessage(error))
+  }
+
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  if (input.apiKey !== null) headers.authorization = `Bearer ${input.apiKey}`
+
+  const timeout = AbortSignal.timeout(CHAT_TIMEOUT_MS)
+  const signal = input.signal === undefined ? timeout : AbortSignal.any([timeout, input.signal])
+
+  let response: Response
+  try {
+    response = await doFetch(input.endpoint, { method: 'POST', headers, body, redirect: 'error', signal })
+  } catch (error) {
+    if (isTimeout(error)) throw Problems.timeout('AI request timed out after 120s')
+    throw Problems.unavailable(redact(`AI request failed: ${errorMessage(error)}`, input.apiKey))
+  }
+
+  if (!response.ok) {
+    let text: string
+    try {
+      text = new TextDecoder().decode(await readCappedBody(response, MAX_RESPONSE_BODY_BYTES))
+    } catch (error) {
+      if (error instanceof ProblemError) throw error
+      throw Problems.unavailable(redact(errorMessage(error), input.apiKey))
+    }
+    throw Problems.unavailable(
+      redact(
+        `AI request failed with ${response.status} at ${input.endpoint}: ${truncate(text, MAX_ERROR_BODY_CHARS)}`,
+        input.apiKey,
+      ),
+    )
+  }
+
+  const upstream = response.body?.getReader()
+  if (upstream === undefined) {
+    return new ReadableStream<Uint8Array>({ start: (controller) => controller.close() })
+  }
+
+  let forwarded = 0
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      let read: Awaited<ReturnType<typeof upstream.read>>
+      try {
+        read = await upstream.read()
+      } catch (error) {
+        try {
+          controller.error(error)
+        } catch {
+          // the consumer already closed or cancelled the stream
+        }
+        return
+      }
+      if (read.done) {
+        try {
+          controller.close()
+        } catch {
+          // already closed
+        }
+        return
+      }
+      const chunk = read.value
+      if (chunk === undefined) return
+      if (forwarded + chunk.length > MAX_STREAM_BODY_BYTES) {
+        // Refuse the crossing chunk, drop the upstream, and fail the stream at
+        // the same place the non-streaming path fails its cap.
+        await upstream.cancel().catch(() => undefined)
+        try {
+          controller.error(
+            Problems.unavailable(
+              redact(
+                `AI response body is too large (${forwarded + chunk.length} bytes; the limit is ${MAX_STREAM_BODY_BYTES} bytes)`,
+                input.apiKey,
+              ),
+            ),
+          )
+        } catch {
+          // already closed
+        }
+        return
+      }
+      forwarded += chunk.length
+      try {
+        controller.enqueue(chunk)
+      } catch {
+        // already closed
+      }
+    },
+    async cancel(reason) {
+      await upstream.cancel(reason).catch(() => undefined)
+    },
+  })
 }

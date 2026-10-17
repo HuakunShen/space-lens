@@ -14,9 +14,13 @@ export interface BridgeRequest {
     | 'ai.config'
     | 'ai.setConfig'
     | 'ai.chat'
+    | 'ai.chatStream'
+    | 'ai.cancel'
     | 'reveal'
   paths?: string[]
   scanId?: string
+  /** For `ai.cancel`: the request id of the stream to abort. */
+  runId?: number
   nodeId?: string
   depth?: number
   maxChildrenPerNode?: number
@@ -40,6 +44,8 @@ export type BridgeAnswerPayload =
       config: { baseUrl: string; model: string; hasKey: boolean; disableThinking: boolean; managed: false }
     }
   | { kind: 'ai.chat'; completion: unknown }
+  | { kind: 'ai.chatStream'; done: true }
+  | { kind: 'ai.cancel'; cancelled: boolean }
   | { kind: 'reveal'; revealed: boolean }
 
 export interface BridgeAnswer {
@@ -61,6 +67,16 @@ export interface BridgePush {
   status: ScanStatus
 }
 
-export type BridgeMessage = BridgeReply | BridgePush
+/**
+ * One raw text slice of a streamed answer, posted extension -> webview while an
+ * `ai.chatStream` request is in flight. `id` is the request id of that stream.
+ */
+export interface BridgeStreamChunk {
+  kind: 'ai.chunk'
+  id: number
+  text: string
+}
+
+export type BridgeMessage = BridgeReply | BridgePush | BridgeStreamChunk
 
 export type CleanupPlanDTO = CleanupPlan

@@ -11,7 +11,17 @@
 // thinking flag) sits in `state`; the API key sits *only* in `secrets` and is
 // never returned — callers learn `hasKey`, nothing more.
 import { resolve, sep } from 'node:path'
-import { chatEndpoint, forwardChatCompletion, redact } from '@space-lens/host/ai'
+import {
+  CHAT_TIMEOUT_MS,
+  MAX_ERROR_BODY_CHARS,
+  MAX_RESPONSE_BODY_BYTES,
+  buildChatBody,
+  chatEndpoint,
+  encodeChatBody,
+  forwardChatCompletion,
+  redact,
+  truncate,
+} from '@space-lens/host/ai'
 
 /** One key in `globalState`; holds the whole non-secret config object. */
 export const AI_CONFIG_KEY = 'spacelens.ai.config'
@@ -19,6 +29,14 @@ export const AI_CONFIG_KEY = 'spacelens.ai.config'
 export const AI_SECRET_KEY = 'spacelens.ai.apiKey'
 
 export const DEFAULT_AI_BASE_URL = 'https://api.openai.com/v1'
+
+/**
+ * The cap on one streamed response: the total bytes forwarded to `onChunk`
+ * before the upstream request is aborted. Larger than the non-streaming
+ * `MAX_RESPONSE_BODY_BYTES`, because an SSE body carries framing and every
+ * delta, not one compacted JSON document.
+ */
+export const MAX_STREAM_BODY_BYTES = 4 * 1024 * 1024
 
 /** The slice of `vscode.Memento` this module uses (`get` + `update`). */
 export interface AiStateStore {
@@ -69,10 +87,21 @@ export interface AiChatInput {
   tools?: readonly Record<string, unknown>[] | undefined
 }
 
+export interface AiChatStreamInput extends AiChatInput {
+  /** Aborts the upstream request; combined with the 120 s timeout. */
+  signal?: AbortSignal | undefined
+  /**
+   * Called once per decoded, non-empty text slice, in order. Slices are raw
+   * SSE bytes (`data: …\n\n` included) — this layer does not parse them.
+   */
+  onChunk: (text: string) => void
+}
+
 export interface AiBridge {
   getConfig(): Promise<AiConfig>
   setConfig(input: AiConfigInput): Promise<AiConfig>
   chat(input: AiChatInput): Promise<unknown>
+  chatStream(input: AiChatStreamInput): Promise<void>
   clearKey(): Promise<void>
 }
 
@@ -85,6 +114,35 @@ interface StoredConfig {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * Reads an error response body under the response cap so a proxy's HTML page is
+ * never buffered unbounded; only the first `MAX_ERROR_BODY_CHARS` of the result
+ * reach a message (via `truncate`).
+ */
+async function readErrorText(response: Response): Promise<string> {
+  const reader = response.body?.getReader()
+  if (reader === undefined) return ''
+  const decoder = new TextDecoder()
+  let text = ''
+  let bytes = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (value === undefined) continue
+      bytes += value.length
+      text += decoder.decode(value, { stream: true })
+      if (bytes > MAX_RESPONSE_BODY_BYTES) break
+    }
+    text += decoder.decode()
+  } catch {
+    // A broken error body is still an error; the status and endpoint carry it.
+  } finally {
+    await reader.cancel().catch(() => undefined)
+  }
+  return text
 }
 
 export function createAiBridge(options: AiBridgeOptions): AiBridge {
@@ -161,11 +219,92 @@ export function createAiBridge(options: AiBridgeOptions): AiBridge {
     }
   }
 
+  async function chatStream(input: AiChatStreamInput): Promise<void> {
+    const stored = readConfig()
+    const apiKey = await readKey()
+    try {
+      if (stored.model.trim() === '') throw new Error('AI model is not set')
+      const endpoint = chatEndpoint(stored.baseUrl)
+
+      // The 1 MiB request cap is enforced (and refused) before the key is
+      // attached; `stream: true` is what makes the response an SSE body.
+      const body = encodeChatBody({
+        ...buildChatBody({
+          model: stored.model,
+          messages: input.messages,
+          tools: input.tools,
+          disableThinking: stored.disableThinking,
+        }),
+        stream: true,
+      })
+
+      const headers: Record<string, string> = { 'content-type': 'application/json' }
+      if (apiKey !== null) headers.authorization = `Bearer ${apiKey}`
+
+      // The 120 s budget is a total: the caller's signal can end it sooner, and
+      // the timeout can end a stalled body early. `AbortSignal.any` is what
+      // makes cancellation abort the upstream request.
+      const timeout = AbortSignal.timeout(CHAT_TIMEOUT_MS)
+      const signal = input.signal === undefined ? timeout : AbortSignal.any([timeout, input.signal])
+
+      let response: Response
+      try {
+        response = await (fetchImpl ?? fetch)(endpoint, {
+          method: 'POST',
+          headers,
+          body,
+          redirect: 'error',
+          signal,
+        })
+      } catch (error) {
+        throw new Error(`AI request failed: ${messageOf(error)}`)
+      }
+
+      if (!response.ok) {
+        // Same shape as the non-streaming path: status, endpoint, and 300
+        // characters of the (capped) body, with the key redacted at the end.
+        const text = await readErrorText(response)
+        throw new Error(
+          `AI request failed with ${response.status} at ${endpoint}: ${truncate(text, MAX_ERROR_BODY_CHARS)}`,
+        )
+      }
+
+      const reader = response.body?.getReader()
+      if (reader === undefined) return
+      const decoder = new TextDecoder()
+      let total = 0
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          if (value === undefined) continue
+          total += value.length
+          if (total > MAX_STREAM_BODY_BYTES) {
+            throw new Error(`AI streamed response is too large (over ${MAX_STREAM_BODY_BYTES} bytes)`)
+          }
+          const text = decoder.decode(value, { stream: true })
+          if (text !== '') input.onChunk(text)
+        }
+        // Flush any bytes a multibyte character left buffered at the boundary.
+        const tail = decoder.decode()
+        if (tail !== '') input.onChunk(tail)
+      } finally {
+        // No-op after a completed read; on error/abort/cap this releases the
+        // connection instead of waiting for the rest of the body.
+        await reader.cancel().catch(() => undefined)
+      }
+    } catch (error) {
+      // Every message this function throws passes through here: the key must
+      // never reach the webview.
+      throw new Error(redact(messageOf(error), apiKey))
+    }
+  }
+
   async function clearKey(): Promise<void> {
     await secrets.delete(AI_SECRET_KEY)
   }
 
-  return { getConfig, setConfig, chat, clearKey }
+  return { getConfig, setConfig, chat, chatStream, clearKey }
 }
 
 /**

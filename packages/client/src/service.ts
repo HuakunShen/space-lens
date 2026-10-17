@@ -79,4 +79,11 @@ export interface WorkbenchService {
    */
   aiConfig?(): Promise<AiConfigView>
   aiChat?(body: AiChatRequest): Promise<unknown>
+  /**
+   * Streams one chat completion through the host. The host sends `stream: true`
+   * and forwards the upstream SSE bytes as raw text chunks; `onChunk` receives
+   * each decoded piece (chunk boundaries are not line boundaries). Throws the
+   * same `ServiceError` as the other methods on a non-2xx response.
+   */
+  aiChatStream?(body: AiChatRequest, onChunk: (text: string) => void, signal?: AbortSignal): Promise<void>
 }
