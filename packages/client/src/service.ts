@@ -6,6 +6,8 @@ import type {
   AppCleanupPlanRequest,
   AppIconRequest,
   AppIcon,
+  AiChatRequest,
+  AiConfigView,
   AppScanStartRequest,
   Capabilities,
   ChildrenPageRequest,
@@ -70,4 +72,11 @@ export interface WorkbenchService {
    * presence, decides whether the picker button exists.
    */
   pickFolder?(title?: string): Promise<string | null>
+  /**
+   * Operator-owned AI advisor over the HTTP host. Optional: the Tauri desktop
+   * adapter uses its own BYOK IPC instead (`@space-lens/ai-advisor`), and older
+   * hosts predate the routes.
+   */
+  aiConfig?(): Promise<AiConfigView>
+  aiChat?(body: AiChatRequest): Promise<unknown>
 }

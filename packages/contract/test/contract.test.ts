@@ -11,6 +11,9 @@ import {
   AppScanOriginSchema,
   AppScanStartRequestSchema,
   AuditIdSchema,
+  AiChatRequestSchema,
+  AiConfigViewSchema,
+  CapabilitiesSchema,
   RecentAppScanSchema,
   ScanSessionSchema,
   ScanStatusSchema,
@@ -26,6 +29,8 @@ import {
   LocalScanReportSchema,
   LocalScanProgressSchema,
   LocalScanMessageSchema,
+  API_MAJOR,
+  CONTRACT_VERSION,
 } from '../src/index.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -377,6 +382,54 @@ describe('problem contract', () => {
     expect(ProblemSchema.safeParse({ code: 'NotFound', message: 'missing', retryable: false }).success).toBe(true)
     expect(ProblemSchema.safeParse({ code: 'Whatever', message: 'x', retryable: false }).success).toBe(false)
     expect(ProblemSchema.safeParse({ code: 'NotFound', message: '', retryable: false }).success).toBe(false)
+  })
+})
+
+describe('ai advisor contract', () => {
+  const view = {
+    baseUrl: 'https://api.example.com/v1',
+    model: 'glm-4.6',
+    hasKey: true,
+    disableThinking: false,
+    managed: true,
+  }
+
+  it('keeps the managed config view closed and key-free', () => {
+    expect(AiConfigViewSchema.parse(view)).toEqual(view)
+    expect(AiConfigViewSchema.safeParse({ ...view, managed: false }).success).toBe(false)
+    // A key field is not part of the wire shape at all.
+    expect(AiConfigViewSchema.safeParse({ ...view, apiKey: 'sk-x' }).success).toBe(false)
+  })
+
+  it('bounds the chat request', () => {
+    expect(AiChatRequestSchema.parse({ messages: [{ role: 'user', content: 'hi' }] })).toEqual({
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+    for (const invalid of [
+      { messages: [] },
+      { messages: 'nope' },
+      { messages: [{ role: 'user' }], extra: 1 },
+      { messages: Array.from({ length: 2001 }, () => ({ role: 'user' })) },
+      { messages: [{ role: 'user' }], tools: Array.from({ length: 65 }, () => ({ type: 'function' })) },
+    ]) {
+      expect(AiChatRequestSchema.safeParse(invalid).success).toBe(false)
+    }
+    expect(AiChatRequestSchema.safeParse({ messages: Array.from({ length: 2000 }, () => ({})) }).success).toBe(true)
+    expect(AiChatRequestSchema.safeParse({ messages: [{ role: 'user' }], tools: [] }).success).toBe(true)
+  })
+
+  it('carries ai as an optional capability', () => {
+    const capabilities = {
+      apiMajor: API_MAJOR,
+      contractVersion: CONTRACT_VERSION,
+      scan: { start: true, cancel: true, maxConcurrent: 1 },
+      cleanup: { plan: false, execute: false, mode: 'none' as const },
+      host: { folderPicker: false },
+      icloud: 'unavailable' as const,
+    }
+    expect(CapabilitiesSchema.parse(capabilities).ai).toBeUndefined()
+    expect(CapabilitiesSchema.parse({ ...capabilities, ai: true }).ai).toBe(true)
+    expect(CapabilitiesSchema.safeParse({ ...capabilities, ai: 'yes' }).success).toBe(false)
   })
 })
 

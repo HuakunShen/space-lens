@@ -124,6 +124,9 @@
           "enum": [
             "unavailable"
           ]
+        },
+        "ai": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -3454,6 +3457,69 @@
         "code",
         "message",
         "retryable"
+      ],
+      "additionalProperties": false
+    },
+    "AiConfigView": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "baseUrl": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "hasKey": {
+          "type": "boolean"
+        },
+        "disableThinking": {
+          "type": "boolean"
+        },
+        "managed": {
+          "type": "boolean",
+          "const": true
+        }
+      },
+      "required": [
+        "baseUrl",
+        "model",
+        "hasKey",
+        "disableThinking",
+        "managed"
+      ],
+      "additionalProperties": false
+    },
+    "AiChatRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "messages": {
+          "minItems": 1,
+          "maxItems": 2000,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "tools": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        }
+      },
+      "required": [
+        "messages"
       ],
       "additionalProperties": false
     }

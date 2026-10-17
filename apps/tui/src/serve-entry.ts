@@ -2,12 +2,15 @@ import { spawn } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { existsSync } from 'node:fs'
 
-import type { ServeOptions } from '@space-lens/host'
+import type { ServeAiOptions, ServeOptions } from '@space-lens/host'
 import { ConfigError, PortInUseError, ProblemError, startServe } from '@space-lens/host'
 
 export class ServeUsageError extends Error {}
 
 interface ParsedServeArgs extends ServeOptions {
+  aiBaseUrl?: string
+  aiModel?: string
+  aiDisableThinking?: boolean
   help?: boolean
   openExplicit?: boolean
 }
@@ -22,6 +25,9 @@ const FLAG_ALIASES: Record<string, string> = {
   'ticket-ttl': 'ticketTtlSeconds',
   root: 'roots',
   'web-root': 'webRoot',
+  'ai-base-url': 'aiBaseUrl',
+  'ai-model': 'aiModel',
+  'ai-disable-thinking': 'aiDisableThinking',
   json: 'json',
   machine: 'machine',
   'trust-proxy': 'trustProxy',
@@ -66,6 +72,15 @@ export function parseServeArgs(argv: readonly string[]): ParsedServeArgs {
       case 'webRoot':
         parsed.webRoot = resolve(nextValue(raw))
         break
+      case 'aiBaseUrl':
+        parsed.aiBaseUrl = nextValue(raw)
+        break
+      case 'aiModel':
+        parsed.aiModel = nextValue(raw)
+        break
+      case 'aiDisableThinking':
+        parsed.aiDisableThinking = true
+        break
       case 'ticketTtlSeconds':
         parsed.ticketTtlSeconds = Number.parseInt(nextValue(raw), 10)
         if (!Number.isInteger(parsed.ticketTtlSeconds)) throw new ServeUsageError('--ticket-ttl must be an integer')
@@ -89,6 +104,23 @@ export function parseServeArgs(argv: readonly string[]): ParsedServeArgs {
   return parsed
 }
 
+/**
+ * Assembles the operator AI config from the AI flags. The base URL and model
+ * are the on/off switch and must be given together; the API key is read only
+ * from `SPACLENS_AI_API_KEY` (by the host resolver), never from a flag and
+ * never printed.
+ */
+function aiOptionsFromArgs(args: ParsedServeArgs): ServeAiOptions | undefined {
+  const wantsAi = args.aiBaseUrl !== undefined || args.aiModel !== undefined || args.aiDisableThinking === true
+  if (!wantsAi) return undefined
+  const baseUrl = args.aiBaseUrl?.trim() ?? ''
+  const model = args.aiModel?.trim() ?? ''
+  if (baseUrl === '' || model === '') {
+    throw new ServeUsageError('--ai-base-url and --ai-model are required together to enable the AI advisor')
+  }
+  return { baseUrl, model, ...(args.aiDisableThinking === true ? { disableThinking: true } : {}) }
+}
+
 const HELP = `spacelens serve — serve the Space Lens web workbench over HTTP
 
 Usage: spacelens serve [flags]
@@ -103,6 +135,12 @@ Bind and access:
 Capabilities:
   --allow-cleanup     grant paired sessions cleanup powers (trash-only, never permanent delete)
   --root <dir>        directories scans may target (repeatable; default: current directory)
+
+AI advisor (optional):
+  --ai-base-url <url> OpenAI-compatible base URL (https; http only for loopback). Enables the advisor.
+  --ai-model <name>   model to request (required together with --ai-base-url)
+  --ai-disable-thinking  send thinking:{type:"disabled"} (faster on reasoning models; off by default)
+  The API key is read only from ${'SPACLENS_AI_API_KEY'} in the environment — never a flag, never printed.
 
 Web UI:
   --ui-origin <url>   exact origins allowed to call this API cross-origin (repeatable)
@@ -144,6 +182,8 @@ export async function runServe(argv: readonly string[]): Promise<void> {
     if (process.env.SPACLENS_DEBUG === '1') process.stderr.write(`webroot debug: argv1=${String(process.argv[1])} candidate=${candidate} exists=${existsSync(`${candidate}/200.html`)}` + '\n')
     if (existsSync(`${candidate}/200.html`)) args.webRoot = candidate
   }
+  const ai = aiOptionsFromArgs(args)
+  if (ai !== undefined) args.ai = ai
   const server = await startServe(args)
   const pairingUrl = server.mintPairingUrl()
 
@@ -169,6 +209,7 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         `pairing URL (single use): ${pairingUrl}`,
         `scan roots: ${server.config.roots.join(', ')}`,
         `cleanup: ${server.config.allowCleanup ? 'enabled (trash only)' : 'disabled (read-only)'}`,
+        args.ai ? `ai advisor: ${args.ai.model} at ${args.ai.baseUrl}` : '',
         args.uiOrigins?.length ? `cross-origin UIs: ${args.uiOrigins.join(', ')}` : '',
         `press p + Enter to reprint the pairing URL, Ctrl+C to stop`,
         '',

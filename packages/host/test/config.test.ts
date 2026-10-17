@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ConfigError, resolveBindHost, resolveServeConfig, HOSTED_PASSWORD_ENV } from '../src/config.ts'
+import { ConfigError, resolveBindHost, resolveServeConfig, HOSTED_PASSWORD_ENV, AI_API_KEY_ENV } from '../src/config.ts'
 
 describe('bind host resolution', () => {
   it('defaults to loopback', () => {
@@ -55,5 +55,53 @@ describe('serve config guard rules', () => {
     expect(config).toMatchObject({ machine: true, json: true, port: 0, allowLan: false, uiOrigins: [] })
     expect(config.bind.loopback).toBe(true)
     expect(config.portExplicit).toBe(false)
+  })
+})
+
+describe('ai advisor config', () => {
+  it('is off unless an ai block is given', () => {
+    expect(resolveServeConfig({}).ai).toBeNull()
+  })
+
+  it('validates the base URL and model at startup', () => {
+    for (const ai of [
+      { baseUrl: 'http://api.example.com/v1', model: 'm' },
+      { baseUrl: '', model: 'm' },
+      { baseUrl: 'https://api.example.com/v1', model: '' },
+      { baseUrl: 'https://user@example.com/v1', model: 'm' },
+      { baseUrl: 'file:///etc/passwd', model: 'm' },
+    ]) {
+      expect(() => resolveServeConfig({ ai })).toThrow(ConfigError)
+    }
+    const resolved = resolveServeConfig({ ai: { baseUrl: 'https://api.example.com/v1/', model: ' glm-4.6 ' } })
+    expect(resolved.ai).toEqual({
+      endpoint: 'https://api.example.com/v1/chat/completions',
+      // The reported base URL keeps the operator's trailing slash (like the
+      // desktop config view); the endpoint is the normalized target.
+      baseUrl: 'https://api.example.com/v1/',
+      model: 'glm-4.6',
+      apiKey: null,
+      disableThinking: false,
+    })
+  })
+
+  it('keeps the key host-side, falling back to the environment', () => {
+    const previous = process.env[AI_API_KEY_ENV]
+    delete process.env[AI_API_KEY_ENV]
+    try {
+      expect(
+        resolveServeConfig({ ai: { baseUrl: 'https://x.example/v1', model: 'm', apiKey: 'sk-option' } }).ai?.apiKey,
+      ).toBe('sk-option')
+      expect(resolveServeConfig({ ai: { baseUrl: 'https://x.example/v1', model: 'm' } }).ai?.apiKey).toBeNull()
+      process.env[AI_API_KEY_ENV] = 'sk-env'
+      expect(resolveServeConfig({ ai: { baseUrl: 'https://x.example/v1', model: 'm' } }).ai?.apiKey).toBe('sk-env')
+      // An explicit null means "no key" even when the environment has one.
+      expect(
+        resolveServeConfig({ ai: { baseUrl: 'https://x.example/v1', model: 'm', apiKey: null } }).ai?.apiKey,
+      ).toBeNull()
+    } finally {
+      if (previous === undefined) delete process.env[AI_API_KEY_ENV]
+      else process.env[AI_API_KEY_ENV] = previous
+    }
   })
 })

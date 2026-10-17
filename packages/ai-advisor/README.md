@@ -29,8 +29,9 @@ A host supplies exactly two capabilities; the core imports no host API:
    service. `lensPortFromService` maps it onto `LensPort` for one scan; `stage`
    is supplied by the caller (the collector owns the only side effect).
 2. **`AiChatPort`** (`./ports.ts`) — one non-streaming completion plus the
-   BYOK config surface (`getConfig` / `setConfig`). The web app implements it
-   over Tauri (`invoke('ai_chat')`) and, for `#ai-dev`, over `fetch`.
+   config surface (`getConfig` / `setConfig`). The web app implements it two
+   ways: over Tauri (`invoke('ai_chat')`, BYOK and editable) and over the HTTP
+   host's managed routes (`managed: true`, config read-only).
 
 See [`docs/ai-advisor-plan.md`](../../docs/ai-advisor-plan.md) for the full design.
 

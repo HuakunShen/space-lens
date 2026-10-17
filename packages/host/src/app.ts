@@ -3,6 +3,7 @@ import { basename } from 'node:path'
 
 import type { Capabilities, DiscoveryRequest, Health, Session } from '@space-lens/contract'
 import {
+  AiChatRequestSchema,
   AppAuditReportSchema,
   AppAuditRequestSchema,
   AppIconRequestSchema,
@@ -15,7 +16,7 @@ import {
   SessionExchangeRequestSchema,
   TreeSliceRequestSchema,
 } from '@space-lens/contract'
-import type { AppAuditRequest } from '@space-lens/contract'
+import type { AppAuditRequest, AiChatRequest, AiConfigView } from '@space-lens/contract'
 import type { SessionRecord } from './auth.ts'
 import type { AuthService } from './auth.ts'
 import type { AssetHandler } from './assets.ts'
@@ -29,6 +30,7 @@ import type { ScanManager } from './scan-store.ts'
 import { mountedVolumes, volumeCapacities } from './volumes.ts'
 import { resolveLocalScanBin } from './local-process.ts'
 import { runAppAuditCli, runAppIconCli } from './app-audit.ts'
+import { forwardChatCompletion } from './ai.ts'
 
 export interface HostDeps {
   config: ResolvedServeConfig
@@ -345,7 +347,50 @@ export function buildApp(deps: HostDeps): HonoApp {
     }
   })
 
-  // 5. SSE: fetch-based clients (EventSource cannot send Authorization).
+  // 5. AI advisor: only when the operator configured one. The base URL, model
+  // and key live on the host; nothing here lets a client change them. When the
+  // feature is off the routes answer the standard Unavailable problem (and no
+  // session carries the scope in the first place).
+  const requireAi = (): NonNullable<ResolvedServeConfig['ai']> => {
+    if (config.ai === null) {
+      throw Problems.unavailable(
+        'this host has no AI advisor configured (start it with --ai-base-url and --ai-model)',
+        false,
+      )
+    }
+    return config.ai
+  }
+
+  app.get('/api/v1/ai/config', (c) => {
+    const ai = requireAi()
+    ensureScope(c.get('session'), 'ai:chat')
+    const view: AiConfigView = {
+      baseUrl: ai.baseUrl,
+      model: ai.model,
+      hasKey: ai.apiKey !== null,
+      disableThinking: ai.disableThinking,
+      managed: true,
+    }
+    return c.json(view)
+  })
+
+  app.post('/api/v1/ai/chat', async (c) => {
+    const ai = requireAi()
+    ensureScope(c.get('session'), 'ai:chat')
+    const request = await parseBody<AiChatRequest>(c, AiChatRequestSchema)
+    return c.json(
+      await forwardChatCompletion({
+        endpoint: ai.endpoint,
+        model: ai.model,
+        apiKey: ai.apiKey,
+        disableThinking: ai.disableThinking,
+        messages: request.messages,
+        tools: request.tools,
+      }),
+    )
+  })
+
+  // 6. SSE: fetch-based clients (EventSource cannot send Authorization).
   app.get('/api/v1/events', (c) => {
     ensureScope(c.get('session'), 'scan:read')
     const since = Number.parseInt(c.req.query('since') ?? '0', 10)
@@ -406,14 +451,14 @@ export function buildApp(deps: HostDeps): HonoApp {
     })
   })
 
-  // 6. Unknown API paths are a JSON problem, never the SPA.
+  // 7. Unknown API paths are a JSON problem, never the SPA.
   const unknownApi = (c: { req: { url: string } }): never => {
     throw Problems.notFound(`no such API route: ${new URL(c.req.url).pathname}`)
   }
   app.get('/api/*', unknownApi)
   app.post('/api/*', unknownApi)
 
-  // 7. Preflight for allowed cross-origin UIs, then the SPA fallback.
+  // 8. Preflight for allowed cross-origin UIs, then the SPA fallback.
   app.options('*', (c) => {
     const origin = c.req.header('origin') ?? null
     if (origin === null || !config.uiOrigins.includes(origin)) throw Problems.forbidden('origin not allowed')

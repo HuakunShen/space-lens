@@ -1,3 +1,4 @@
+import type { AiChatRequest } from '@space-lens/contract'
 import {
   readConfig,
   toChatResponse,
@@ -7,7 +8,7 @@ import {
   type ChatRequest,
   type ChatResponse,
 } from '@space-lens/ai-advisor'
-import type { TauriPorts } from '@space-lens/client'
+import type { TauriPorts, WorkbenchService } from '@space-lens/client'
 import { loadTauriPorts } from '../tauri-ports.ts'
 
 /**
@@ -51,78 +52,33 @@ export function createAiChatPort(loadPorts: () => Promise<TauriPorts> = loadTaur
 }
 
 /**
- * Browser developer mode (`#ai-dev` in the URL): lets the advisor be driven in
- * a plain browser against `spacelens serve`, where there is no Tauri shell.
- * The key lives in this origin's localStorage, so it is a debugging aid, not a
- * product surface; the shipped browser build never shows the drawer without
- * the hash.
+ * The HTTP host's advisor (`AiConfigView` + `/api/v1/ai/chat`). The operator
+ * owns the base URL, model and key, so the config here is read-only: it comes
+ * back with `managed: true` and `setConfig` refuses. The browser build and the
+ * DSH plugin talk to `spacelens serve` this way; the endpoint and key never
+ * reach the page.
  */
-const DEV_STORAGE_KEY = 'spacelens.ai.dev'
-
-export function aiDevActive(): boolean {
-  return typeof window !== 'undefined' && window.location.hash.includes('ai-dev')
-}
-
-interface DevStored {
-  baseUrl: string
-  model: string
-  apiKey: string
-  disableThinking: boolean
-}
-
-function readDev(): DevStored {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(DEV_STORAGE_KEY) ?? '{}') as Partial<DevStored>
-    return { baseUrl: parsed.baseUrl ?? '', model: parsed.model ?? '', apiKey: parsed.apiKey ?? '', disableThinking: parsed.disableThinking === true }
-  } catch {
-    return { baseUrl: '', model: '', apiKey: '', disableThinking: false }
-  }
-}
-
-export function createBrowserDevChatPort(): AiChatPort {
-  const view = (stored: DevStored): AiConfig => ({
-    baseUrl: stored.baseUrl,
-    model: stored.model,
-    hasKey: stored.apiKey !== '',
-    disableThinking: stored.disableThinking,
-  })
+export function createServiceAiChatPort(service: Pick<WorkbenchService, 'aiConfig' | 'aiChat'>): AiChatPort {
   return {
     async chat(request: ChatRequest): Promise<ChatResponse> {
-      const stored = readDev()
-      if (!stored.model) throw new Error('AI model is not set')
-      const base = stored.baseUrl.trim().replace(/\/+$/, '')
-      const endpoint = base.endsWith('/chat/completions') ? base : `${base}/chat/completions`
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(stored.apiKey ? { authorization: `Bearer ${stored.apiKey}` } : {}),
-        },
-        body: JSON.stringify({
-          model: stored.model,
-          messages: request.messages,
-          ...(request.tools?.length ? { tools: request.tools } : {}),
-          ...(stored.disableThinking ? { thinking: { type: 'disabled' } } : {}),
-        }),
-      })
-      if (!response.ok) {
-        throw new Error(`AI request failed with ${response.status} at ${endpoint}: ${(await response.text()).slice(0, 300)}`)
-      }
-      return toChatResponse(await response.json())
+      const aiChat = service.aiChat
+      if (aiChat === undefined) throw new Error('The AI advisor is not available over this host')
+      // The advisor's closed `ChatMessage` shape and the contract's open
+      // record differ only structurally; the host forwards the JSON verbatim.
+      const body = {
+        messages: request.messages,
+        ...(request.tools === undefined ? {} : { tools: request.tools }),
+      } as unknown as AiChatRequest
+      return toChatResponse(await aiChat(body))
     },
     async getConfig(): Promise<AiConfig> {
-      return view(readDev())
+      const aiConfig = service.aiConfig
+      if (aiConfig === undefined) throw new Error('The AI advisor is not available over this host')
+      const view = await aiConfig()
+      return { ...readConfig(view), managed: true }
     },
-    async setConfig(input: AiConfigInput): Promise<AiConfig> {
-      const current = readDev()
-      const next: DevStored = {
-        baseUrl: input.baseUrl,
-        model: input.model,
-        apiKey: input.apiKey === undefined ? current.apiKey : (input.apiKey ?? ''),
-        disableThinking: input.disableThinking ?? current.disableThinking,
-      }
-      window.localStorage.setItem(DEV_STORAGE_KEY, JSON.stringify(next))
-      return view(next)
+    async setConfig(): Promise<AiConfig> {
+      throw new Error('The AI model and key are configured on the host')
     },
   }
 }

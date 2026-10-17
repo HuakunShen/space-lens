@@ -1,12 +1,41 @@
 import { networkInterfaces } from 'node:os'
 import { isIP } from 'node:net'
+import { chatEndpoint } from './ai.ts'
 import { validateCidrs } from './cidr.ts'
 import type { TrashPort } from './trash.ts'
 
 export const DEFAULT_PORT = 9420
 export const HOSTED_PASSWORD_ENV = 'SPACLENS_HOSTED_PASSWORD'
+/** Host-only AI API key. Never a flag, never returned to a client, never printed. */
+export const AI_API_KEY_ENV = 'SPACLENS_AI_API_KEY'
 
 export class ConfigError extends Error {}
+
+/**
+ * Operator-owned AI advisor configuration. Its presence enables the
+ * `/api/v1/ai/*` routes and the `ai:chat` scope. There is deliberately no
+ * client-facing route that changes any field: a client-settable base URL would
+ * be an SSRF and key-theft surface.
+ */
+export interface ServeAiOptions {
+  baseUrl: string
+  model: string
+  /** Falls back to {@link AI_API_KEY_ENV} when omitted. */
+  apiKey?: string | null
+  disableThinking?: boolean
+}
+
+/** Validated, resolved AI advisor config. `null` means the feature is off. */
+export interface ResolvedAiConfig {
+  /** Validated chat-completions endpoint (`…/chat/completions`). */
+  endpoint: string
+  /** Operator-provided base URL, trimmed (what the config view reports). */
+  baseUrl: string
+  model: string
+  /** The key, or null when none is configured. Never returned to a client. */
+  apiKey: string | null
+  disableThinking: boolean
+}
 
 export interface ServeOptions {
   /**
@@ -53,6 +82,12 @@ export interface ServeOptions {
    * route passes `['self']` so its same-origin page may frame the workbench.
    */
   frameAncestors?: readonly string[]
+  /**
+   * Operator-owned AI advisor. Presence enables `/api/v1/ai/*` and grants the
+   * `ai:chat` scope to paired sessions; the API key comes from `apiKey` or
+   * {@link AI_API_KEY_ENV}, never from a client and never from a flag.
+   */
+  ai?: ServeAiOptions
 }
 
 export interface ResolvedHost {
@@ -84,6 +119,8 @@ export interface ResolvedServeConfig {
   frameAncestors: string[]
   /** Home override for `spacelens app-audit --home`; null inherits the process env. */
   appAuditHome: string | null
+  /** Operator AI advisor config, or null when the feature is off. */
+  ai: ResolvedAiConfig | null
 }
 
 export function resolveBindHost(input: string | undefined): ResolvedHost {
@@ -135,6 +172,34 @@ export function isLoopbackOrigin(origin: string): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Validates and resolves the operator AI advisor config. A malformed base URL
+ * is a startup failure (`ConfigError`), not a request-time surprise: the same
+ * guard the request path uses is applied here.
+ *
+ * The key is tri-state: `apiKey` string wins, `apiKey: null` means explicitly
+ * none, and an omitted/empty `apiKey` falls back to {@link AI_API_KEY_ENV}.
+ */
+export function resolveAiConfig(options: ServeAiOptions | undefined): ResolvedAiConfig | null {
+  if (options === undefined) return null
+  const baseUrl = options.baseUrl.trim()
+  let endpoint: string
+  try {
+    endpoint = chatEndpoint(baseUrl)
+  } catch (error) {
+    throw new ConfigError(error instanceof Error ? error.message : String(error))
+  }
+  const model = options.model.trim()
+  if (model === '') throw new ConfigError('the AI model must not be empty')
+  const envKey = process.env[AI_API_KEY_ENV]?.trim() ?? ''
+  const optionKey = options.apiKey?.trim() ?? ''
+  let apiKey: string | null
+  if (options.apiKey === null) apiKey = null
+  else if (optionKey !== '') apiKey = optionKey
+  else apiKey = envKey !== '' ? envKey : null
+  return { endpoint, baseUrl, model, apiKey, disableThinking: options.disableThinking ?? false }
 }
 
 function parsePort(port: number | undefined): number {
@@ -209,5 +274,6 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
     maxTotalScans: options.maxTotalScans ?? 8,
     frameAncestors: [...(options.frameAncestors ?? ["'none'"])],
     appAuditHome: options.appAuditHome ?? null,
+    ai: resolveAiConfig(options.ai),
   }
 }

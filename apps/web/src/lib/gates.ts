@@ -102,16 +102,18 @@ export interface AiGateInput {
   desktop: boolean
   /** Injected Tauri ports; null until `loadTauriPorts()` has resolved. */
   ports: { invoke?: unknown } | null
-  /** `#ai-dev` browser debugging mode (fetch straight to the endpoint). */
-  browserDev?: boolean
+  /** The HTTP host declares and serves the advisor (`capabilities.ai` + `aiChat`). */
+  hostAi: boolean
 }
 
 /**
- * The AI advisor is desktop-only: the browser build has no key store and no
- * HTTPS proxy, so the drawer and its settings stay hidden there. The invoke
- * half covers the window between mount and the async port load.
+ * The AI advisor is available either through the desktop shell's BYOK proxy
+ * (its own key store and `invoke`) or through an HTTP host that serves an
+ * operator-configured advisor. The invoke half covers the window between mount
+ * and the async port load; a plain browser host without the routes stays
+ * hidden.
  */
 export function aiAvailable(input: AiGateInput): boolean {
-  if (input.browserDev === true) return true
-  return input.desktop && typeof input.ports?.invoke === 'function'
+  if (input.desktop && typeof input.ports?.invoke === 'function') return true
+  return input.hostAi
 }

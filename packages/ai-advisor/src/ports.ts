@@ -7,8 +7,8 @@ import type { ChatPort } from './types.ts'
  * the write shape (an omitted `apiKey` keeps the stored key, `null` clears it,
  * a string replaces it). `AiChatPort` pairs that config surface with the one
  * non-streaming `ChatPort` the agent loop consumes. The concrete adapters (the
- * Tauri proxy and the browser `#ai-dev` port) live with their host; this module
- * is host-free.
+ * Tauri BYOK proxy and the HTTP host's managed config) live with their host;
+ * this module is host-free.
  */
 
 export interface AiConfig {
@@ -18,6 +18,12 @@ export interface AiConfig {
   hasKey: boolean
   /** Sends `thinking: { type: 'disabled' }`; much faster on reasoning models (GLM, DeepSeek). */
   disableThinking: boolean
+  /**
+   * True when the host owns the config (the HTTP `AiConfigView`): the endpoint,
+   * model and key live on the server, so the client only reads them. Absent on
+   * the BYOK desktop shape, where the user edits them.
+   */
+  managed?: boolean
 }
 
 export interface AiConfigInput {
@@ -39,12 +45,20 @@ export interface AiChatPort {
 
 /** Reads the frozen config reply leniently; a stale host backfills defaults. */
 export function readConfig(value: unknown): AiConfig {
-  if (typeof value !== 'object' || value === null) return { baseUrl: '', model: '', hasKey: false, disableThinking: false }
-  const record = value as { baseUrl?: unknown; model?: unknown; hasKey?: unknown; disableThinking?: unknown }
+  if (typeof value !== 'object' || value === null)
+    return { baseUrl: '', model: '', hasKey: false, disableThinking: false, managed: false }
+  const record = value as {
+    baseUrl?: unknown
+    model?: unknown
+    hasKey?: unknown
+    disableThinking?: unknown
+    managed?: unknown
+  }
   return {
     baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : '',
     model: typeof record.model === 'string' ? record.model : '',
     hasKey: record.hasKey === true,
     disableThinking: record.disableThinking === true,
+    managed: record.managed === true,
   }
 }

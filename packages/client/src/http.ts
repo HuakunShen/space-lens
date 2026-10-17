@@ -3,6 +3,8 @@ import type {
   AppAuditRequest,
   AppIcon,
   AppIconRequest,
+  AiChatRequest,
+  AiConfigView,
   Capabilities,
   ChildrenPage,
   ChildrenPageRequest,
@@ -118,6 +120,11 @@ export function createHttpService(options: HttpServiceOptions) {
       request<CleanupPlan>('/api/v1/cleanup/plan', { method: 'POST', body: JSON.stringify(body) }),
     execute: (body: CleanupExecuteRequest) =>
       request<CleanupOutcome>('/api/v1/cleanup/execute', { method: 'POST', body: JSON.stringify(body) }),
+    /** Operator-owned AI advisor config. Only the host can change it. */
+    aiConfig: () => request<AiConfigView>('/api/v1/ai/config'),
+    /** Forwards one non-streaming chat completion through the host. */
+    aiChat: (body: AiChatRequest) =>
+      request<unknown>('/api/v1/ai/chat', { method: 'POST', body: JSON.stringify(body) }),
   }
 }
 

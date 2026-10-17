@@ -66,7 +66,8 @@
     appScanAvailable as appScanGate,
   } from '../lib/gates'
   import AiPanel from '../lib/ai/panel.svelte'
-  import { aiDevActive } from '../lib/ai/chat-port'
+  import { createAiChatPort, createServiceAiChatPort } from '../lib/ai/chat-port.ts'
+  import type { AiChatPort } from '@space-lens/ai-advisor'
   import { shouldApplyAuditReport } from '../lib/app-storage'
   import {
     forgetRecentAppScan,
@@ -83,8 +84,8 @@
   let explicitUrlInput = $state('')
   let collectorOpen = $state(false)
   let aiOpen = $state(false)
-  // Loaded with the desktop service; the AI drawer is gated on it (or on the
-  // `#ai-dev` browser debugging mode) so the shipped browser build never shows it.
+  // Loaded with the desktop service; the AI drawer is gated on it when no
+  // HTTP host serves an operator-configured advisor.
   let aiPorts = $state<TauriPorts | null>(null)
   let settingsOpen = $state(false)
   let sidebarVisible = $state(true)
@@ -340,7 +341,20 @@
       coverage: workbench.status?.coverage,
     }),
   )
-  const aiAvailable = $derived(aiGate({ desktop: __SPACLENS_DESKTOP__, ports: aiPorts, browserDev: aiDevActive() }))
+  const hostAi = $derived(Boolean(workbench.capabilities?.ai && workbench.service?.aiChat))
+  const aiAvailable = $derived(aiGate({ desktop: __SPACLENS_DESKTOP__, ports: aiPorts, hostAi }))
+  /**
+   * The port the drawer drives. The desktop shell keeps its BYOK proxy (the
+   * key lives in Rust); the HTTP host serves a managed, read-only config and
+   * forwards chat. Created only once the matching host is up.
+   */
+  const aiPort = $derived.by<AiChatPort | null>(() => {
+    if (__SPACLENS_DESKTOP__) {
+      const loaded = aiPorts
+      return loaded === null ? createAiChatPort() : createAiChatPort(async () => loaded)
+    }
+    return workbench.service === null ? null : createServiceAiChatPort(workbench.service)
+  })
   const selectedItems = $derived(
     workbench.items.filter((item) => item.name.toLowerCase().includes(browseSearch.toLowerCase())),
   )
@@ -1772,6 +1786,7 @@
     <AiPanel
       open={aiOpen}
       available={aiAvailable}
+      port={aiPort}
       onClose={() => (aiOpen = false)}
       onOpenCollector={() => {
         aiOpen = false

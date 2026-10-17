@@ -120,6 +120,23 @@ npx spacelens serve --host 0.0.0.0 --allow-cidr 192.168.1.0/24
 npx spacelens serve --allow-cleanup    # grant trash-based cleanup
 ```
 
+Served pages cannot reach a model endpoint themselves (their CSP is
+`connect-src 'self'`), so the AI advisor is proxied by the host. It is
+operator-configured, never client-configured, and the API key stays on the
+host:
+
+```bash
+SPACLENS_AI_API_KEY=sk-… npx spacelens serve \
+  --ai-base-url https://api.openai.com/v1 --ai-model gpt-4o-mini
+```
+
+`--ai-base-url` and `--ai-model` are required together and enable the feature
+(`https` requires; plaintext `http` is accepted only for `localhost` /
+`127.0.0.1` / `[::1]`). `--ai-disable-thinking` sends `thinking:{type:"disabled"}`
+for reasoning models. The key comes only from `SPACLENS_AI_API_KEY` — there is
+no key flag, it is never printed, and no API route lets a client change the
+base URL, model or key.
+
 ## API Usage
 
 ```ts

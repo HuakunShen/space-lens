@@ -11,29 +11,32 @@
     runAgent,
     type AgentEvent,
     type AgentStats,
+    type AiChatPort,
     type AiConfig,
     type CleanupRisk,
     type StageMeta,
     type Stager,
   } from '@space-lens/ai-advisor'
-  import { aiDevActive, createAiChatPort, createBrowserDevChatPort } from './chat-port.ts'
 
   /**
-   * Slice C — the AI advisor drawer. Desktop-only (the page gates it on
-   * `aiAvailable`); opening it never scans. A preset or question runs the
-   * slice-A loop over the active scan and stages candidates into the existing
-   * collector through `createStager`. There is no delete path here: the user
-   * reviews the collector and presses the existing Clean button.
+   * Slice C — the AI advisor drawer. The page owns availability (see
+   * `aiAvailable`) and supplies the host port; opening it never scans. A preset
+   * or question runs the slice-A loop over the active scan and stages
+   * candidates into the existing collector through `createStager`. There is no
+   * delete path here: the user reviews the collector and presses the existing
+   * Clean button.
    */
   interface Props {
     open: boolean
     /** False in the browser flavor; the drawer renders nothing. */
     available: boolean
+    /** The host's config + chat port; null until the page has resolved one. */
+    port: AiChatPort | null
     onClose: () => void
     /** Opens the existing CollectorPanel, which owns the trash flow. */
     onOpenCollector: () => void
   }
-  let { open, available, onClose, onOpenCollector }: Props = $props()
+  let { open, available, port, onClose, onOpenCollector }: Props = $props()
 
   interface StagedItem {
     entry: CollectorEntry
@@ -46,8 +49,6 @@
     | { kind: 'assistant'; round: number; text: string | null; tools: string[] }
     | { kind: 'tool'; round: number; name: string; content: string }
     | { kind: 'notice'; text: string }
-
-  const port = aiDevActive() ? createBrowserDevChatPort() : createAiChatPort()
 
   let config = $state<AiConfig | null>(null)
   let baseUrl = $state('')
@@ -66,20 +67,23 @@
   let stats = $state<AgentStats | null>(null)
   let controller: AbortController | null = null
 
-  // Plain (non-reactive) guard: the effect re-runs on `open`/`available`, and
-  // setting this must not schedule another pass.
+  // Plain (non-reactive) guard: the effect re-runs on `open`/`available`/`port`,
+  // and setting this must not schedule another pass.
   let configRequested = false
   $effect(() => {
-    if (!available || !open || configRequested) return
+    if (!available || !open || port === null || configRequested) return
     configRequested = true
     void loadConfig()
   })
 
   const scanReady = $derived(workbench.service !== null && workbench.activeScanId !== null)
   const hasKey = $derived(config?.hasKey === true)
+  /** The HTTP host owns the config; the settings section is then read-only. */
+  const managed = $derived(config?.managed === true)
   const stagedTotal = $derived(staged.reduce((sum, item) => sum + item.entry.size, 0))
 
   async function loadConfig(): Promise<void> {
+    if (port === null) return
     settingsBusy = true
     settingsError = null
     try {
@@ -96,6 +100,7 @@
   }
 
   async function saveSettings(): Promise<void> {
+    if (port === null) return
     settingsBusy = true
     settingsError = null
     try {
@@ -148,7 +153,7 @@
   async function run(prompt: string): Promise<void> {
     const service = workbench.service
     const scanId = workbench.activeScanId
-    if (service === null || scanId === null || running) return
+    if (service === null || scanId === null || running || port === null) return
     running = true
     error = null
     stats = null
@@ -165,9 +170,10 @@
       newId: () => `col_${crypto.randomUUID().slice(0, 8)}`,
     })
     const lens = lensPortFromService(service, scanId, stager.stage)
+    const chat = port.chat
     try {
       const result = await runAgent({
-        chat: port.chat,
+        chat,
         lens,
         userMessage: prompt,
         // The user's open folder, so the model starts where they are looking.
@@ -234,36 +240,62 @@
           </button>
           {#if settingsOpen}
             <div class="flex flex-col gap-2 border-t px-3 py-3">
-              <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-                Base URL
-                <Input.Root bind:value={baseUrl} placeholder="https://api.example.com/v1" disabled={settingsBusy} />
-              </label>
-              <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-                Model
-                <Input.Root bind:value={model} placeholder="model-name" disabled={settingsBusy} />
-              </label>
-              <label class="flex flex-col gap-1 text-xs text-muted-foreground">
-                API key
-                <Input.Root
-                  type="password"
-                  bind:value={apiKey}
-                  placeholder={hasKey ? 'key saved — leave empty to keep' : 'sk-…'}
-                  disabled={settingsBusy}
-                  autocomplete="off"
-                />
-              </label>
-              <label class="flex items-start gap-2 text-xs text-muted-foreground">
-                <input type="checkbox" class="mt-0.5" bind:checked={disableThinking} disabled={settingsBusy} />
-                <span>Disable model thinking — much faster on reasoning models (GLM, DeepSeek). Leave off for endpoints that reject unknown fields.</span>
-              </label>
-              <div class="flex items-center justify-between gap-2">
-                <span class="text-xs text-muted-foreground">
-                  {#if hasKey}<span class="text-emerald-600 dark:text-emerald-400">key saved</span>{:else}No key stored{/if}
-                </span>
-                <Button.Root size="sm" variant="outline" disabled={settingsBusy} onclick={() => void saveSettings()}
-                  >{settingsBusy ? 'Saving…' : 'Save'}</Button.Root
-                >
-              </div>
+              {#if managed}
+                <p class="text-xs text-muted-foreground">
+                  The AI endpoint and key are configured on the host. They cannot be changed from here.
+                </p>
+                <dl class="flex flex-col gap-1 text-xs">
+                  <div class="flex items-baseline justify-between gap-2">
+                    <dt class="text-muted-foreground">Base URL</dt>
+                    <dd class="truncate font-medium" title={baseUrl || 'not set'}>{baseUrl || 'not set'}</dd>
+                  </div>
+                  <div class="flex items-baseline justify-between gap-2">
+                    <dt class="text-muted-foreground">Model</dt>
+                    <dd class="truncate font-medium">{model || 'not set'}</dd>
+                  </div>
+                  <div class="flex items-baseline justify-between gap-2">
+                    <dt class="text-muted-foreground">API key</dt>
+                    <dd class={hasKey ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}>
+                      {hasKey ? 'configured on the host' : 'no key on the host'}
+                    </dd>
+                  </div>
+                  <div class="flex items-baseline justify-between gap-2">
+                    <dt class="text-muted-foreground">Model thinking</dt>
+                    <dd class="font-medium">{disableThinking ? 'disabled' : 'enabled'}</dd>
+                  </div>
+                </dl>
+              {:else}
+                <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Base URL
+                  <Input.Root bind:value={baseUrl} placeholder="https://api.example.com/v1" disabled={settingsBusy} />
+                </label>
+                <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+                  Model
+                  <Input.Root bind:value={model} placeholder="model-name" disabled={settingsBusy} />
+                </label>
+                <label class="flex flex-col gap-1 text-xs text-muted-foreground">
+                  API key
+                  <Input.Root
+                    type="password"
+                    bind:value={apiKey}
+                    placeholder={hasKey ? 'key saved — leave empty to keep' : 'sk-…'}
+                    disabled={settingsBusy}
+                    autocomplete="off"
+                  />
+                </label>
+                <label class="flex items-start gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" class="mt-0.5" bind:checked={disableThinking} disabled={settingsBusy} />
+                  <span>Disable model thinking — much faster on reasoning models (GLM, DeepSeek). Leave off for endpoints that reject unknown fields.</span>
+                </label>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-xs text-muted-foreground">
+                    {#if hasKey}<span class="text-emerald-600 dark:text-emerald-400">key saved</span>{:else}No key stored{/if}
+                  </span>
+                  <Button.Root size="sm" variant="outline" disabled={settingsBusy} onclick={() => void saveSettings()}
+                    >{settingsBusy ? 'Saving…' : 'Save'}</Button.Root
+                  >
+                </div>
+              {/if}
               {#if settingsError}<p class="text-xs text-destructive" role="alert">{settingsError}</p>{/if}
             </div>
           {/if}
