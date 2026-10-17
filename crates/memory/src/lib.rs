@@ -9,14 +9,18 @@
 #![deny(unsafe_code)]
 
 pub mod error;
+pub mod fake;
 pub mod group;
 pub mod ids;
 pub mod model;
 pub mod raw;
+pub mod safety;
 pub mod sampler;
 
 pub use error::MemoryError;
+pub use fake::{FakeClock, FakeSignaller, FakeSleeper, Identity};
 pub use group::{build_groups, bundle_root, classify_kind, group_id_for, is_main_executable};
 pub use ids::{AuditId, GroupId, PlanId, ProcessKey};
 pub use model::*;
 pub use raw::{AppInfo, QuitAck, RawProcess, RawSample, RawSystem, Signal, VmPages};
+pub use safety::{apply, classify, context, SafetyContext};
