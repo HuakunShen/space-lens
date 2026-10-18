@@ -117,3 +117,34 @@ export function aiAvailable(input: AiGateInput): boolean {
   if (input.desktop && typeof input.ports?.invoke === 'function') return true
   return input.hostAi
 }
+
+export interface MemoryGateInput {
+  capabilities: Capabilities | null
+  /** `Pick` of the workbench service; the optional memory methods matter. */
+  service: {
+    memorySnapshot?: unknown
+    memoryTerminatePlan?: unknown
+    memoryTerminateExecute?: unknown
+  } | null
+}
+
+/**
+ * The Memory view needs the host to declare `memory.sample` *and* to serve the
+ * snapshot read; older hosts and machine-mode hosts never do (§4.4, §6.1).
+ */
+export function memoryAvailable(input: MemoryGateInput): boolean {
+  return Boolean(input.capabilities?.memory?.sample && input.service?.memorySnapshot)
+}
+
+/**
+ * Quit / force quit need the `memory.terminate` flag plus both submit arms
+ * (§4.4). Without it the table is read-only and the Quit actions are hidden.
+ */
+export function memoryTerminateAvailable(input: MemoryGateInput): boolean {
+  return Boolean(
+    input.capabilities?.memory?.terminate &&
+      input.service?.memoryTerminatePlan &&
+      input.service?.memoryTerminateExecute &&
+      memoryAvailable(input),
+  )
+}

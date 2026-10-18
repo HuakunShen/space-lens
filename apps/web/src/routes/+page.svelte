@@ -64,7 +64,9 @@
     gitignoredAvailable as gitignoredGate,
     appAuditAvailable as appAuditGate,
     appScanAvailable as appScanGate,
+    memoryAvailable as memoryGate,
   } from '../lib/gates'
+  import MemoryPage from '../lib/memory/MemoryPage.svelte'
   import AiPanel from '../lib/ai/panel.svelte'
   import { createAiChatPort, createServiceAiChatPort } from '../lib/ai/chat-port.ts'
   import type { AiChatPort } from '@space-lens/ai-advisor'
@@ -84,6 +86,8 @@
   let explicitUrlInput = $state('')
   let collectorOpen = $state(false)
   let aiOpen = $state(false)
+  /** Top-level Storage | Memory switch state (§6.1); the page owns it. */
+  let memoryView = $state(false)
   // Loaded with the desktop service; the AI drawer is gated on it when no
   // HTTP host serves an operator-configured advisor.
   let aiPorts = $state<TauriPorts | null>(null)
@@ -343,6 +347,9 @@
   )
   const hostAi = $derived(Boolean(workbench.capabilities?.ai && workbench.service?.aiChat))
   const aiAvailable = $derived(aiGate({ desktop: __SPACLENS_DESKTOP__, ports: aiPorts, hostAi }))
+  const memoryAvailable = $derived(
+    memoryGate({ capabilities: workbench.capabilities, service: workbench.service }),
+  )
   /**
    * The port the drawer drives. The desktop shell keeps its BYOK proxy (the
    * key lives in Rust); the HTTP host serves a managed, read-only config and
@@ -1431,6 +1438,18 @@
     </div>
   {/if}
 {:else}
+  {#if memoryAvailable}
+    <!-- Top-level Storage | Memory switch (§6.1), sitting in the toolbar area. -->
+    <div class="fixed top-1.5 left-1/2 z-50 -translate-x-1/2" role="group" aria-label="Storage or memory view">
+      <div class="flex items-center gap-0.5 rounded-full border bg-background/90 p-0.5 shadow-sm backdrop-blur">
+        <button type="button" class="rounded-full px-3 py-1 text-xs font-medium" aria-pressed={!memoryView} onclick={() => (memoryView = false)}>Storage</button>
+        <button type="button" class="rounded-full px-3 py-1 text-xs font-medium" aria-pressed={memoryView} onclick={() => (memoryView = true)}>Memory</button>
+      </div>
+    </div>
+  {/if}
+  {#if memoryView && memoryAvailable}
+    <MemoryPage service={workbench.service} capabilities={workbench.capabilities} />
+  {:else}
   <div class="workbench-shell compact-workbench windows:bg-sidebar">
     <LensToolbar
       title={displayFocus?.name ?? workbench.status.label ?? 'Storage'}
@@ -1794,6 +1813,7 @@
       }}
     />
   </div>
+  {/if}
 {/if}
 <AppearancePanel
   open={settingsOpen}
