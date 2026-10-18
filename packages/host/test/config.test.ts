@@ -105,3 +105,46 @@ describe('ai advisor config', () => {
     }
   })
 })
+
+describe('memory and process-control config', () => {
+  it('refuses process control without the read-only memory view', () => {
+    expect(() => resolveServeConfig({ allowProcessControl: true })).toThrow(ConfigError)
+    expect(() => resolveServeConfig({ allowMemory: true })).not.toThrow()
+    expect(() => resolveServeConfig({ allowProcessControl: true, allowMemory: true })).not.toThrow()
+  })
+
+  it('requires a loopback bind for process control', () => {
+    expect(() =>
+      resolveServeConfig({ host: '0.0.0.0', allowLan: true, allowMemory: true, allowProcessControl: true }),
+    ).toThrow(ConfigError)
+  })
+
+  it('requires loopback-only UI origins for process control', () => {
+    const previous = process.env[HOSTED_PASSWORD_ENV]
+    process.env[HOSTED_PASSWORD_ENV] = 'a-long-enough-password'
+    try {
+      expect(() =>
+        resolveServeConfig({
+          allowMemory: true,
+          allowProcessControl: true,
+          uiOrigins: ['https://spacelens.example.workers.dev'],
+        }),
+      ).toThrow(ConfigError)
+      expect(() =>
+        resolveServeConfig({ allowMemory: true, allowProcessControl: true, uiOrigins: ['http://127.0.0.1:5173'] }),
+      ).not.toThrow()
+    } finally {
+      if (previous === undefined) delete process.env[HOSTED_PASSWORD_ENV]
+      else process.env[HOSTED_PASSWORD_ENV] = previous
+    }
+  })
+
+  it('resolves the flags, defaulting both off', () => {
+    expect(resolveServeConfig({})).toMatchObject({ allowMemory: false, allowProcessControl: false })
+    expect(resolveServeConfig({ allowMemory: true })).toMatchObject({ allowMemory: true, allowProcessControl: false })
+    expect(resolveServeConfig({ allowMemory: true, allowProcessControl: true })).toMatchObject({
+      allowMemory: true,
+      allowProcessControl: true,
+    })
+  })
+})

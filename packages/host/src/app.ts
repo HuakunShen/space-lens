@@ -7,16 +7,34 @@ import {
   AppAuditReportSchema,
   AppAuditRequestSchema,
   AppIconRequestSchema,
+  AuditLogSchema,
+  CandidatesRequestSchema,
   ChildrenPageRequestSchema,
   CleanupExecuteRequestSchema,
   CleanupPlanRequestSchema,
   DiscoveryRequestSchema,
+  FreeUpCandidatesSchema,
+  HistoryRequestSchema,
+  MemoryHistorySchema,
+  MemorySnapshotSchema,
   ScanIdSchema,
   ScanStartRequestSchema,
   SessionExchangeRequestSchema,
+  TerminateExecuteRequestSchema,
+  TerminateOutcomeSchema,
+  TerminatePlanRequestSchema,
+  TerminatePlanSchema,
   TreeSliceRequestSchema,
 } from '@space-lens/contract'
-import type { AppAuditRequest, AiChatRequest, AiConfigView } from '@space-lens/contract'
+import type {
+  AppAuditRequest,
+  AiChatRequest,
+  AiConfigView,
+  CandidatesRequest,
+  HistoryRequest,
+  TerminateExecuteRequest,
+  TerminatePlanRequest,
+} from '@space-lens/contract'
 import type { SessionRecord } from './auth.ts'
 import type { AuthService } from './auth.ts'
 import type { AssetHandler } from './assets.ts'
@@ -31,6 +49,7 @@ import { mountedVolumes, volumeCapacities } from './volumes.ts'
 import { resolveLocalScanBin } from './local-process.ts'
 import { runAppAuditCli, runAppIconCli } from './app-audit.ts'
 import { forwardChatCompletion, forwardChatStream } from './ai.ts'
+import type { MemoryBridge, MemoryCall } from './memory.ts'
 
 export interface HostDeps {
   config: ResolvedServeConfig
@@ -43,6 +62,12 @@ export interface HostDeps {
   allowlist: ClientAllowlist
   /** Absolute protected release CLI path; otherwise env/repository discovery is used. */
   localScanBin?: string
+  /**
+   * Bridge to `spacelens memory stdio`. Present only when the host was started
+   * with `--allow-memory` and the release CLI resolved; its absence turns every
+   * `/api/v1/memory/*` route into the standard `Unavailable` problem.
+   */
+  memory?: MemoryBridge
 }
 
 type AppEnv = { Variables: { session: SessionRecord } }
@@ -65,7 +90,7 @@ function jsonResponse(payload: unknown, status: number, extraHeaders?: Record<st
 
 export function buildApp(deps: HostDeps): HonoApp {
   const app = new Hono<AppEnv>() as HonoApp
-  const { config, auth, scans, events, assets, health, capabilities, allowlist, localScanBin } = deps
+  const { config, auth, scans, events, assets, health, capabilities, allowlist, localScanBin, memory } = deps
 
   // App-storage audit spawns share one per-process guard: at most two
   // concurrent CLI audits; the third caller gets a 429 LimitExceeded.
@@ -402,6 +427,86 @@ export function buildApp(deps: HostDeps): HonoApp {
       })
     }
     return c.json(await forwardChatCompletion(forwarded))
+  })
+
+  // 5b. Memory view and process control: the host never re-implements a rule,
+  // so every route forwards exactly one call to the `spacelens memory stdio`
+  // child and re-validates its reply against the same contract schema the
+  // client uses (a malformed reply is InternalError, never forwarded). The
+  // bridge's presence is the feature switch: no bridge (started without
+  // `--allow-memory`, or the release CLI could not be resolved) answers the
+  // standard Unavailable problem, exactly like the AI routes without a config.
+  const requireMemory = (): MemoryBridge => {
+    if (memory === undefined) {
+      throw Problems.unavailable(
+        'this host does not have the memory view enabled (start it with --allow-memory)',
+        false,
+      )
+    }
+    return memory
+  }
+
+  /** Feature gate first, then scope, so a disabled feature never leaks scope state. */
+  const memoryGate = (session: SessionRecord, scope: 'memory:read' | 'memory:terminate'): MemoryBridge => {
+    const bridge = requireMemory()
+    ensureScope(session, scope)
+    return bridge
+  }
+
+  /** Re-validate one child reply; anything off-contract becomes InternalError. */
+  const parseMemoryReply = <T>(
+    raw: unknown,
+    schema: { safeParse(input: unknown): { success: boolean; data?: T } },
+  ): T => {
+    const parsed = schema.safeParse(raw)
+    if (!parsed.success || parsed.data === undefined) {
+      throw Problems.internal('the memory process returned a reply that does not satisfy the contract')
+    }
+    return parsed.data
+  }
+
+  app.get('/api/v1/memory/snapshot', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:read')
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, { method: 'snapshot' }), MemorySnapshotSchema))
+  })
+
+  app.post('/api/v1/memory/history', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:read')
+    const request = await parseBody<HistoryRequest>(c, HistoryRequestSchema)
+    const call: MemoryCall = { method: 'history', request }
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, call), MemoryHistorySchema))
+  })
+
+  app.post('/api/v1/memory/candidates', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:read')
+    const request = await parseBody<CandidatesRequest>(c, CandidatesRequestSchema)
+    const call: MemoryCall = { method: 'candidates', request }
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, call), FreeUpCandidatesSchema))
+  })
+
+  app.get('/api/v1/memory/audit', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:read')
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, { method: 'audit' }), AuditLogSchema))
+  })
+
+  app.post('/api/v1/memory/terminate/plan', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:terminate')
+    const request = await parseBody<TerminatePlanRequest>(c, TerminatePlanRequestSchema)
+    const call: MemoryCall = { method: 'plan', request }
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, call), TerminatePlanSchema))
+  })
+
+  app.post('/api/v1/memory/terminate/execute', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:terminate')
+    const request = await parseBody<TerminateExecuteRequest>(c, TerminateExecuteRequestSchema)
+    const call: MemoryCall = { method: 'execute', request }
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, call), TerminateOutcomeSchema))
   })
 
   // 6. SSE: fetch-based clients (EventSource cannot send Authorization).

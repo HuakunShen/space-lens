@@ -50,6 +50,17 @@ export interface ServeOptions {
   allowLan?: boolean
   /** Grant cleanup scopes to paired sessions. Without it the server is read-only. */
   allowCleanup?: boolean
+  /**
+   * Enable the read-only memory view: the `/api/v1/memory/*` read routes and
+   * the `memory:read` scope. Off unless explicitly requested.
+   */
+  allowMemory?: boolean
+  /**
+   * Allow process control (terminate plan/execute) from paired sessions. It
+   * requires `allowMemory`, a loopback bind and loopback-only UI origins;
+   * `resolveServeConfig` refuses anything else with a {@link ConfigError}.
+   */
+  allowProcessControl?: boolean
   /** Exact origins allowed to talk to this API cross-origin (Cloudflare PWA). */
   uiOrigins?: readonly string[]
   ticketTtlSeconds?: number
@@ -104,6 +115,10 @@ export interface ResolvedServeConfig {
   allowCidr: string[]
   allowLan: boolean
   allowCleanup: boolean
+  /** Read-only memory view (`memory:read`, `/api/v1/memory/*`). */
+  allowMemory: boolean
+  /** Process control (`memory:terminate`); only ever true with a loopback bind. */
+  allowProcessControl: boolean
   uiOrigins: string[]
   ticketTtlMs: number
   sessionTtlMs: number
@@ -249,6 +264,22 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
     )
   }
 
+  // Process control is the only remote-kill surface in the product, so it is
+  // refused unless the whole host is local: a read-only memory view must be on
+  // (otherwise there is nothing to stage a plan against), the listener must be
+  // loopback, and every cross-origin UI must itself be loopback.
+  const allowMemory = options.allowMemory ?? false
+  const allowProcessControl = options.allowProcessControl ?? false
+  if (allowProcessControl && !allowMemory) {
+    throw new ConfigError('--allow-process-control requires --allow-memory (there is no view to act from otherwise)')
+  }
+  if (allowProcessControl && (!bind.loopback || uiOrigins.some((origin) => !isLoopbackOrigin(origin)))) {
+    throw new ConfigError(
+      '--allow-process-control requires a loopback bind and loopback-only --ui-origin values; ' +
+        'quitting processes is never exposed to other machines',
+    )
+  }
+
   const roots = [...(options.roots ?? [process.cwd()])].map((root) =>
     root.startsWith('/') ? root : `${process.cwd()}/${root}`,
   )
@@ -260,6 +291,8 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
     allowCidr,
     allowLan,
     allowCleanup: options.allowCleanup ?? false,
+    allowMemory,
+    allowProcessControl,
     uiOrigins,
     ticketTtlMs: (options.ticketTtlSeconds ?? 60) * 1000,
     sessionTtlMs: (options.sessionTtlSeconds ?? 8 * 60 * 60) * 1000,
