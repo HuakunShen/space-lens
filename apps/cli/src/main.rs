@@ -1,6 +1,7 @@
 use anyhow::Result;
 use base64::Engine as _;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use memory_cmd::MemoryCommand;
 use space_lens::cloud::{
   build_eviction_plan, execute_eviction_plan, inspect_item, EvictionOutcome, EvictionPlan,
   NativeICloudBackend, ScanOptions as CloudScanOptions,
@@ -17,6 +18,8 @@ use std::path::PathBuf;
 
 #[cfg(feature = "mcp")]
 mod mcp;
+
+mod memory_cmd;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -42,6 +45,8 @@ enum Command {
   AppAudit(AppAuditArgs),
   #[command(name = "app-icon")]
   AppIcon(AppIconArgs),
+  #[command(subcommand)]
+  Memory(MemoryCommand),
   #[cfg(feature = "mcp")]
   Mcp,
 }
@@ -208,6 +213,7 @@ fn main() -> Result<()> {
     Command::ICloud(args) => run_icloud(args),
     Command::AppAudit(args) => run_app_audit(args),
     Command::AppIcon(args) => run_app_icon(args),
+    Command::Memory(command) => memory_cmd::run(command),
     #[cfg(feature = "mcp")]
     Command::Mcp => mcp::run(),
   }
