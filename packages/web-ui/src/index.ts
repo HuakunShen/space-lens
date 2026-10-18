@@ -34,6 +34,16 @@ export { default as AppearancePanel } from './components/lens/AppearancePanel.sv
 export { default as ConnectionPanel } from './components/app/ConnectionPanel.svelte'
 export { default as StateBanner } from './components/app/StateBanner.svelte'
 
+// Memory view components (§6.2). Props only: they never call the transport.
+export { default as Sparkline } from './components/memory/Sparkline.svelte'
+export { default as MemoryPressureCard } from './components/memory/MemoryPressureCard.svelte'
+export { default as MemoryBreakdownBar } from './components/memory/MemoryBreakdownBar.svelte'
+export { default as ProcessSegmentBar } from './components/memory/ProcessSegmentBar.svelte'
+export { default as ProcessTable } from './components/memory/ProcessTable.svelte'
+export { default as ProcessDrawer } from './components/memory/ProcessDrawer.svelte'
+export type { TableRow, StageTarget } from './components/memory/ProcessTable.svelte'
+export type { MemoryFilter, MemorySortKey, TableQuery } from './lib/memory/table.js'
+
 // Primitives, namespaced: several export the same member names (Header,
 // Footer, …), so a blanket `export *` would be an ambiguity, not a convenience.
 import * as Badge from './components/ui/badge/index.js'
