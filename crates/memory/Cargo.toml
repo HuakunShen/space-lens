@@ -12,7 +12,7 @@ default = []
 appkit  = ["dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation"]
 
 [dependencies]
-serde      = { version = "1", features = ["derive"] }
+serde      = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 thiserror  = "2"
 # Pinned to match the engine; "user" is added only if Process::user_id needs it.
