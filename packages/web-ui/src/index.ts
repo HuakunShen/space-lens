@@ -41,6 +41,13 @@ export { default as MemoryBreakdownBar } from './components/memory/MemoryBreakdo
 export { default as ProcessSegmentBar } from './components/memory/ProcessSegmentBar.svelte'
 export { default as ProcessTable } from './components/memory/ProcessTable.svelte'
 export { default as ProcessDrawer } from './components/memory/ProcessDrawer.svelte'
+// Memory view action components (§6.2 items 6–7, §6.3, §7). Props only: the page
+// owns the transport, the Quit list and the plan/execute calls.
+export { default as QuitListPanel } from './components/memory/QuitListPanel.svelte'
+export { default as TerminateDialog } from './components/memory/TerminateDialog.svelte'
+export { default as FreeUpDialog } from './components/memory/FreeUpDialog.svelte'
+export { default as AuditLogPanel } from './components/memory/AuditLogPanel.svelte'
+export type { QuitListEntry } from './components/memory/QuitListPanel.svelte'
 export type { TableRow, StageTarget } from './components/memory/ProcessTable.svelte'
 export type { MemoryFilter, MemorySortKey, TableQuery } from './lib/memory/table.js'
 

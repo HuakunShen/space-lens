@@ -1,13 +1,37 @@
-// Unit tests for the memory view's reason and pressure wording (T17), including the
-// banned-words guard from §7 of the memory-cleaner plan.
+// Unit tests for the memory view's reason and pressure wording (T17) and for the
+// banned-words guard from §7 of the memory-cleaner plan, extended by T19 to cover
+// every `components/memory/*.svelte` action component.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import type { CandidateReason } from '@space-lens/contract'
 import { BANNED_WORDS, pressureHeadline, reasonText } from '../src/lib/memory/reasons.ts'
 
 const MB = 1024 * 1024
 const GB = 1024 * MB
+
+/** The components/memory directory URL, with a trailing slash so `new URL(name, dir)` resolves. */
+const MEMORY_COMPONENTS_DIR = new URL('../src/components/memory/', import.meta.url)
+
+/** The four action components this task ships (T19). */
+const ACTION_COMPONENTS = [
+  'QuitListPanel.svelte',
+  'TerminateDialog.svelte',
+  'FreeUpDialog.svelte',
+  'AuditLogPanel.svelte',
+] as const
+
+/**
+ * §7 bans "clean", "boost", "optimize", "purge" (as an action) and "speed up"
+ * from the memory UI. The always-on footer is the single sanctioned exception:
+ * it names the "memory purge" trick only to say Space Lens does not run it.
+ * Removing that phrase keeps the guard strict for every other use.
+ */
+const SANCTIONED_FOOTER_PHRASE = "It does not run 'memory purge' tricks"
+
+function memoryComponents(): string[] {
+  return readdirSync(MEMORY_COMPONENTS_DIR).filter((name) => name.endsWith('.svelte'))
+}
 
 function reason(overrides: Partial<CandidateReason> & { code: CandidateReason['code'] }): CandidateReason {
   return { bytes: null, minutes: null, cpuPercent: null, count: null, fromBytes: null, ...overrides }
@@ -61,4 +85,57 @@ test('reasons.ts never uses a banned word outside the BANNED_WORDS list (§7)', 
     )
   }
   assert.deepEqual([...BANNED_WORDS], ['clean', 'boost', 'optimiz', 'purge', 'speed up'])
+})
+
+test('the memory action components ship (§6.2/§6.3)', () => {
+  const present = memoryComponents()
+  for (const component of ACTION_COMPONENTS) {
+    assert.ok(present.includes(component), `components/memory/${component} is missing`)
+  }
+})
+
+test('no memory component uses a banned word outside the sanctioned footer (§7)', () => {
+  const names = memoryComponents()
+  assert.ok(names.length > 0)
+  for (const name of names) {
+    const source = readFileSync(new URL(name, MEMORY_COMPONENTS_DIR), 'utf8')
+    const scrubbed = source.split(SANCTIONED_FOOTER_PHRASE).join('')
+    for (const word of BANNED_WORDS) {
+      assert.equal(
+        scrubbed.toLowerCase().includes(word),
+        false,
+        `components/memory/${name} uses the banned word "${word}"`,
+      )
+    }
+  }
+})
+
+/**
+ * Sentences §6.3/§7 pins verbatim. The dialog builds them from interpolated
+ * values, so the test checks the fixed fragments that must survive unchanged.
+ */
+const REQUIRED_WORDING: ReadonlyArray<{ file: string; phrases: readonly string[] }> = [
+  {
+    file: 'TerminateDialog.svelte',
+    phrases: [
+      'I understand unsaved work in these apps will be lost',
+      'Still open — it may be asking you to save changes. Check its window, or force quit.',
+      'Released about',
+      'Used memory went from',
+      'over the next',
+    ],
+  },
+  {
+    file: 'FreeUpDialog.svelte',
+    phrases: ['No idle large apps found', "It does not run 'memory purge' tricks"],
+  },
+]
+
+test('the action components carry the required §6.3/§7 wording verbatim', () => {
+  for (const { file, phrases } of REQUIRED_WORDING) {
+    const source = readFileSync(new URL(file, MEMORY_COMPONENTS_DIR), 'utf8')
+    for (const phrase of phrases) {
+      assert.ok(source.includes(phrase), `components/memory/${file} is missing "${phrase}"`)
+    }
+  }
 })
