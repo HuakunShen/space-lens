@@ -182,6 +182,36 @@ fn s4_system_component_is_protected() {
 }
 
 #[test]
+fn s4_regular_apple_apps_under_system_applications_are_not_protected() {
+  let ctx = ctx_for(9000, &[], &[]);
+  let g = group("x");
+
+  // Ordinary Apple apps live under /System but the user may quit them.
+  for exe in [
+    "/System/Applications/TextEdit.app/Contents/MacOS/TextEdit",
+    "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+    "/System/Cryptexes/App/System/Applications/Safari.app/Contents/MacOS/Safari",
+  ] {
+    let p = process(400, Some(1), Some(501), "App", Some(exe), false);
+    assert_eq!(classify(&p, &ctx, &g), None, "{exe} should be quittable");
+  }
+
+  // The system components elsewhere in /System stay protected.
+  for exe in [
+    "/System/Library/CoreServices/Dock.app/Contents/MacOS/Dock",
+    "/System/Library/CoreServices/ControlCenter.app/Contents/MacOS/ControlCenter",
+    "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder",
+  ] {
+    let p = process(401, Some(1), Some(501), "Sys", Some(exe), false);
+    assert_eq!(
+      classify(&p, &ctx, &g),
+      Some(Protection::SystemComponent),
+      "{exe} should stay protected"
+    );
+  }
+}
+
+#[test]
 fn s5_self_or_ancestor_is_protected() {
   // own pid 1001 is a helper inside Dia.app, so the whole Dia group is the
   // own group; the main process is its ancestor, and a sibling is neither an

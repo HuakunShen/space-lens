@@ -26,6 +26,15 @@ const SYSTEM_PREFIXES: &[&str] = &[
   "/Library/Apple",
 ];
 
+/// Regular Apple apps (Notes, TextEdit, Calendar, Safari, ...) live under
+/// `/System/`, but they are ordinary apps the user may quit; only the system
+/// components elsewhere in `/System` (Dock, Finder, Control Center, ...) stay
+/// protected.
+const USER_APP_PREFIXES: &[&str] = &[
+  "/System/Applications",
+  "/System/Cryptexes/App/System/Applications",
+];
+
 /// The longest wire `name` (`String /* ≤ 256 bytes */` in §4.1).
 const MAX_NAME_BYTES: usize = 256;
 
@@ -309,6 +318,12 @@ fn is_other_user(process: &RawProcess, current_uid: Option<u32>) -> bool {
 
 /// Whether `exe` sits under an executable prefix listed in §5, S4.
 fn is_system_executable(exe: &Path) -> bool {
+  if USER_APP_PREFIXES
+    .iter()
+    .any(|prefix| exe.starts_with(*prefix))
+  {
+    return false;
+  }
   SYSTEM_PREFIXES
     .iter()
     .any(|prefix| exe.starts_with(*prefix))

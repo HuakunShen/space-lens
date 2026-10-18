@@ -52,6 +52,15 @@ const SYSTEM_PREFIXES: &[&str] = &[
   "/Library/Apple",
 ];
 
+/// Regular Apple apps (Notes, TextEdit, Calendar, Safari, ...) live under
+/// `/System/`, but they are ordinary apps the user may quit; only the system
+/// components elsewhere in `/System` (Dock, Finder, Control Center, ...) stay
+/// protected.
+const USER_APP_PREFIXES: &[&str] = &[
+  "/System/Applications",
+  "/System/Cryptexes/App/System/Applications",
+];
+
 /// The facts a single sample establishes about the running service (§5,
 /// S5–S7): its own pid and uid, its ancestors and descendants, and the group it
 /// belongs to.
@@ -214,6 +223,12 @@ fn owns_process(uid: Option<u32>, current_uid: Option<u32>) -> bool {
 
 /// Whether `exe` sits under a system-component prefix listed in §5, S4.
 fn is_system_executable(exe: &Path) -> bool {
+  if USER_APP_PREFIXES
+    .iter()
+    .any(|prefix| exe.starts_with(*prefix))
+  {
+    return false;
+  }
   SYSTEM_PREFIXES
     .iter()
     .any(|prefix| exe.starts_with(*prefix))
