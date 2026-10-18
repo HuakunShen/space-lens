@@ -46,6 +46,10 @@ space-lens = { package = "kuntu-scan", path = "../../../vendors/kuntu/crates/kun
 # consumes the same crate, so the catalogs cannot drift apart.
 spacelens-discovery = { path = "../../../crates/discovery" }
 spacelens-app-audit = { path = "../../../crates/app-audit" }
+# The process/memory engine, in-process for the desktop (§3 of
+# docs/memory-cleaner-plan.md). The `appkit` feature enables the macOS
+# NSRunningApplication quit and the frontmost-app reading.
+spacelens-memory = { path = "../../../crates/memory", features = ["appkit"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

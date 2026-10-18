@@ -22,6 +22,8 @@ use crate::engine::{
   ScanStartRequest, TreeSliceRequest,
 };
 use crate::events::{EventSink, ScopedEventFrame, SubscriptionAck};
+use crate::memory::MemoryState;
+use spacelens_memory::{TerminateExecuteRequest, TerminatePlanRequest};
 
 pub const EVENT_NAME: &str = "spacelens://event";
 pub const API_MAJOR: u32 = 1;
@@ -131,7 +133,9 @@ fn session_metadata(session_id: &str) -> Value {
 /// active or leased; the slot semantics are locked by
 /// `tests/local_scan.rs::protected_prepare_is_nonblocking_and_cancellation_is_terminal`.
 /// `scan.appScan` advertises virtual-root app sessions (`appScanStart`).
-fn capabilities_json() -> Value {
+/// `memory` is supplied by [`crate::memory::capability`], which mirrors the
+/// running service's own greeting rather than a compile-time guess.
+fn capabilities_json(memory: Value) -> Value {
   json!({
       "apiMajor": API_MAJOR,
       "contractVersion": CONTRACT_VERSION,
@@ -139,6 +143,7 @@ fn capabilities_json() -> Value {
       "cleanup": { "plan": true, "execute": true, "mode": "trash", "appPlan": true, "appExecute": true },
       "host": { "folderPicker": true, "appLocationReveal": true },
       "icloud": "unavailable",
+      "memory": memory,
   })
 }
 
@@ -287,6 +292,14 @@ pub enum ReadRequest {
   AppIcon {
     app_path: String,
   },
+  MemorySnapshot,
+  MemoryHistory {
+    group_ids: Vec<String>,
+  },
+  MemoryCandidates {
+    exclude: Vec<String>,
+  },
+  MemoryAudit,
 }
 
 #[derive(Deserialize)]
@@ -321,6 +334,14 @@ pub enum SubmitRequest {
     #[serde(flatten)]
     request: AppScanStartRequest,
   },
+  MemoryTerminatePlan {
+    #[serde(flatten)]
+    request: TerminatePlanRequest,
+  },
+  MemoryTerminateExecute {
+    #[serde(flatten)]
+    request: TerminateExecuteRequest,
+  },
 }
 
 #[derive(Deserialize)]
@@ -333,6 +354,7 @@ pub enum SubmitRequest {
 pub enum HostRequest {
   PickDirectory { title: Option<String> },
   RevealPath { app_id: String, path: String },
+  ReopenApp { audit_id: String },
 }
 
 // -------------------------------------------------------------------- reads
@@ -388,6 +410,24 @@ pub async fn sl_read(
       if let ReadRequest::AppIcon { app_path } = &request {
         return read_app_icon(&bundle, app_path);
       }
+      // Memory reads run against the in-process service, never the engine, so
+      // they take no engine lock (mirroring appAudit/appIcon above).
+      if let ReadRequest::MemorySnapshot = &request {
+        let memory = app.state::<MemoryState>();
+        return crate::memory::read_snapshot(&memory);
+      }
+      if let ReadRequest::MemoryHistory { group_ids } = &request {
+        let memory = app.state::<MemoryState>();
+        return crate::memory::read_history(&memory, group_ids);
+      }
+      if let ReadRequest::MemoryCandidates { exclude } = &request {
+        let memory = app.state::<MemoryState>();
+        return crate::memory::read_candidates(&memory, exclude);
+      }
+      if let ReadRequest::MemoryAudit = &request {
+        let memory = app.state::<MemoryState>();
+        return crate::memory::read_audit(&memory);
+      }
       let mut engine = bundle.engine.lock().unwrap();
       let result: Result<Value, Value> = match request {
         ReadRequest::Health => Ok(json!({
@@ -396,7 +436,9 @@ pub async fn sl_read(
             "apiMajor": API_MAJOR,
             "contractVersion": CONTRACT_VERSION,
         })),
-        ReadRequest::Capabilities => Ok(capabilities_json()),
+        ReadRequest::Capabilities => Ok(capabilities_json(crate::memory::capability(
+          &app.state::<MemoryState>(),
+        ))),
         ReadRequest::Roots => {
           // wrapped to match the HTTP host shape: { roots: ScanTarget[] }
           serde_json::to_value(json!({ "roots": engine.roots() }))
@@ -465,6 +507,12 @@ pub async fn sl_read(
         }
         ReadRequest::AppIcon { .. } => {
           unreachable!("appIcon handled before locking the engine")
+        }
+        ReadRequest::MemorySnapshot
+        | ReadRequest::MemoryHistory { .. }
+        | ReadRequest::MemoryCandidates { .. }
+        | ReadRequest::MemoryAudit => {
+          unreachable!("memory reads handled before locking the engine")
         }
       };
       drop(engine);
@@ -719,6 +767,29 @@ pub async fn sl_submit(
       }
       SubmitRequest::AppScanStart { request } => {
         submit_app_scan_reply(bundle, request, &reply);
+        Ok(())
+      }
+      SubmitRequest::MemoryTerminatePlan { request } => {
+        // Plans bind to this window's desktop session; the service holds the
+        // immutable plan and re-checks identities again at execute time.
+        let memory = app.state::<MemoryState>();
+        let value = crate::memory::submit_plan(&memory, &session_id, &request);
+        let _ = reply.send(match value {
+          Ok(value) => json!({ "ok": true, "result": value }),
+          Err(problem) => json!({ "ok": false, "problem": problem }),
+        });
+        Ok(())
+      }
+      SubmitRequest::MemoryTerminateExecute { request } => {
+        // Execute waits out the graceful/force window. This whole task already
+        // runs on `tauri::async_runtime::spawn_blocking`, so it never touches
+        // the main thread.
+        let memory = app.state::<MemoryState>();
+        let value = crate::memory::submit_execute(&memory, &session_id, &request);
+        let _ = reply.send(match value {
+          Ok(value) => json!({ "ok": true, "result": value }),
+          Err(problem) => json!({ "ok": false, "problem": problem }),
+        });
         Ok(())
       }
       request => {
@@ -1008,6 +1079,12 @@ fn submit_engine_reply(
       "InternalError",
       "app scans are dispatched before the engine lock",
     )),
+    SubmitRequest::MemoryTerminatePlan { .. } | SubmitRequest::MemoryTerminateExecute { .. } => {
+      Err(problem_value(
+        "InternalError",
+        "memory submits are dispatched before the engine lock",
+      ))
+    }
   })();
   reply
     .send(match value {
@@ -1057,6 +1134,12 @@ pub async fn sl_host_request(
         // else is Forbidden, never a raw filesystem reveal.
         let snapshot = bundle.app_audit.lock().unwrap().audit.clone();
         crate::app_cleanup::reveal_app_location(snapshot.as_ref(), &app_id, &path)
+      }
+      HostRequest::ReopenApp { audit_id } => {
+        // The bundle id comes from the memory audit record alone (§4.7); the
+        // arm opens an allow-listed identifier, never a caller-supplied path.
+        let memory = app.state::<MemoryState>();
+        crate::memory::reopen_app(&memory, &audit_id)
       }
     };
     let _ = reply.send(match value {
@@ -1404,7 +1487,13 @@ mod tests {
 
   #[test]
   fn capabilities_declare_only_reachable_operations() {
-    let capabilities = super::capabilities_json();
+    let capabilities = super::capabilities_json(serde_json::json!({
+      "sample": true,
+      "terminate": true,
+      "gracefulAppQuit": true,
+      "reopen": true,
+      "platform": "macos",
+    }));
     assert_eq!(capabilities["scan"]["start"], true);
     assert_eq!(capabilities["scan"]["cancel"], true);
     assert_eq!(capabilities["scan"]["discovery"], true);
@@ -1418,6 +1507,12 @@ mod tests {
     assert_eq!(capabilities["cleanup"]["mode"], "trash");
     assert_eq!(capabilities["host"]["folderPicker"], true);
     assert_eq!(capabilities["host"]["appLocationReveal"], true);
+    // The memory capability is carried through untouched.
+    assert_eq!(capabilities["memory"]["sample"], true);
+    assert_eq!(capabilities["memory"]["terminate"], true);
+    assert_eq!(capabilities["memory"]["gracefulAppQuit"], true);
+    assert_eq!(capabilities["memory"]["reopen"], true);
+    assert_eq!(capabilities["memory"]["platform"], "macos");
   }
 
   #[test]
@@ -2465,5 +2560,78 @@ mod tests {
     assert_eq!(problem["problem"]["code"], "NotFound");
     assert!(crate::app_cleanup::revealed_for_test().is_empty());
     std::fs::remove_dir_all(&root).unwrap();
+  }
+
+  #[test]
+  fn memory_ipc_arms_match_the_closed_union() {
+    // Read arms (§4.7): tagged by `method`, camelCase fields.
+    for value in [
+      serde_json::json!({ "method": "memorySnapshot" }),
+      serde_json::json!({ "method": "memoryHistory", "groupIds": ["grp_0123456789abcdef"] }),
+      serde_json::json!({ "method": "memoryCandidates", "exclude": ["grp_0123456789abcdef"] }),
+      serde_json::json!({ "method": "memoryAudit" }),
+    ] {
+      assert!(
+        serde_json::from_value::<ReadRequest>(value.clone()).is_ok(),
+        "read arm should deserialize: {value}"
+      );
+    }
+
+    // Submit arms: each flattens one frozen request struct.
+    for value in [
+      serde_json::json!({
+        "kind": "memoryTerminatePlan",
+        "targets": [{ "kind": "group", "groupId": "grp_0123456789abcdef" }],
+        "mode": "graceful",
+        "origin": "freeUp",
+      }),
+      serde_json::json!({
+        "kind": "memoryTerminateExecute",
+        "planId": "tplan_0123456789ABCDEF",
+        "confirm": true,
+      }),
+    ] {
+      assert!(
+        serde_json::from_value::<SubmitRequest>(value.clone()).is_ok(),
+        "submit arm should deserialize: {value}"
+      );
+    }
+
+    // Host arm: reopen resolved from an audit id alone.
+    assert!(
+      serde_json::from_value::<super::HostRequest>(serde_json::json!({
+        "kind": "reopenApp", "auditId": "aud_0123456789abcdef",
+      }))
+      .is_ok()
+    );
+
+    // Unknown fields never pass the field-bearing arms, flatten or not. The
+    // unit arms (`memorySnapshot`, `memoryAudit`) ignore extra keys exactly as
+    // the existing unit methods (`health`, `roots`, …) do.
+    assert!(serde_json::from_value::<ReadRequest>(serde_json::json!({
+      "method": "memoryHistory", "groupIds": [], "extra": 1,
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<ReadRequest>(serde_json::json!({
+      "method": "memoryCandidates", "exclude": [], "extra": 1,
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<SubmitRequest>(serde_json::json!({
+      "kind": "memoryTerminatePlan",
+      "targets": [{ "kind": "group", "groupId": "grp_0123456789abcdef" }],
+      "mode": "graceful", "origin": "manual", "extra": 1,
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<SubmitRequest>(serde_json::json!({
+      "kind": "memoryTerminateExecute",
+      "planId": "tplan_0123456789ABCDEF", "confirm": true, "extra": 1,
+    }))
+    .is_err());
+    assert!(
+      serde_json::from_value::<super::HostRequest>(serde_json::json!({
+        "kind": "reopenApp", "auditId": "aud_0123456789abcdef", "extra": 1,
+      }))
+      .is_err()
+    );
   }
 }

@@ -4,6 +4,7 @@ pub mod app_cleanup_policy;
 pub mod commands;
 pub mod engine;
 pub mod events;
+pub mod memory;
 mod native_material;
 
 use std::path::PathBuf;
@@ -19,6 +20,9 @@ pub fn run() {
     .manage(commands::AppState::new(roots))
     .setup(|app| {
       native_material::create_main_window(app)?;
+      // `app` is already `&mut App`, so `new` takes the reborrow directly;
+      // clippy rejects the redundant `&app`.
+      app.manage(memory::MemoryState::new(app));
       Ok(())
     })
     .on_window_event(|window, event| {
