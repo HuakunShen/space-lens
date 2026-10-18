@@ -257,6 +257,7 @@
   }
 
   function toggleSelect(key: string): void {
+    skippedProtected = 0
     const next = new Set(selection)
     if (next.has(key)) next.delete(key)
     else next.add(key)
@@ -278,6 +279,49 @@
       stagedAt: new Date().toISOString(),
     }
     quitList = addToQuitList(quitList, entry)
+  }
+
+  /** Protected selected rows skipped by the last "Add to Quit list" (shown next to the bar). */
+  let skippedProtected = $state(0)
+
+  /**
+   * Moves every selected row into the Quit list. A selected key is `group:<id>`
+   * or `proc:<pid>:<startUs>`; protected targets are skipped here (the host would
+   * refuse them anyway) and counted so the user is told, not left guessing.
+   */
+  function stageSelection(): void {
+    if (snapshot === null) return
+    let skipped = 0
+    for (const key of selection) {
+      if (key.startsWith('group:')) {
+        const group = snapshot.groups.find((candidate) => `group:${candidate.groupId}` === key)
+        if (group === undefined) continue
+        if (group.protection !== null) {
+          skipped += 1
+          continue
+        }
+        stage(key, { kind: 'group', groupId: group.groupId, name: group.name, footprintBytes: group.footprintBytes })
+      } else if (key.startsWith('proc:')) {
+        const process = snapshot.processes.find(
+          (candidate) => `proc:${candidate.pid}:${candidate.startTimeUs}` === key,
+        )
+        if (process === undefined) continue
+        if (process.protection !== null) {
+          skipped += 1
+          continue
+        }
+        stage(key, {
+          kind: 'process',
+          pid: process.pid,
+          startTimeUs: process.startTimeUs,
+          name: process.name,
+          groupId: process.groupId,
+          footprintBytes: process.footprintBytes,
+        })
+      }
+    }
+    skippedProtected = skipped
+    selection = new Set()
   }
 
   function removeFromQuitList(key: string): void {
@@ -451,6 +495,25 @@
       {selection}
       onSelect={toggleSelect}
     />
+
+    {#if terminateAvailable && (selection.size > 0 || skippedProtected > 0)}
+      <div
+        class="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm"
+        role="status"
+        aria-live="polite"
+      >
+        {#if selection.size > 0}
+          <span>{selection.size} selected</span>
+          <Button.Root size="sm" onclick={stageSelection}>Add to Quit list</Button.Root>
+          <Button.Root size="sm" variant="ghost" onclick={() => (selection = new Set())}>Clear selection</Button.Root>
+        {/if}
+        {#if skippedProtected > 0}
+          <span class="text-xs text-muted-foreground"
+            >{skippedProtected} protected {skippedProtected === 1 ? 'item was' : 'items were'} not added.</span
+          >
+        {/if}
+      </div>
+    {/if}
 
     <ProcessTable
       {snapshot}
