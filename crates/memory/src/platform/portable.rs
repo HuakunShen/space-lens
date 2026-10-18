@@ -91,7 +91,7 @@ impl ProcessSampler for PortableSampler {
         pid: process.pid().as_u32(),
         ppid: process.parent().map(|parent| parent.as_u32()),
         start_time_us: process.start_time() * 1_000_000,
-        uid: process.user_id().map(|uid| **uid),
+        uid: process_uid(process),
         name: process.name().to_string_lossy().into_owned(),
         exe: process.exe().map(Path::to_path_buf),
         cpu_percent: if warmed_up {
@@ -213,4 +213,17 @@ mod tests {
     assert_eq!(platform(), expected);
     assert_eq!(PortableSampler::new().platform(), expected);
   }
+}
+
+/// The numeric owner of `process`. On Windows `sysinfo` reports a SID, not a
+/// `u32`; the owner is then unknown, which the safety rules treat as another
+/// user (S7), so nothing is ever quit there by mistake.
+#[cfg(unix)]
+fn process_uid(process: &sysinfo::Process) -> Option<u32> {
+  process.user_id().map(|uid| **uid)
+}
+
+#[cfg(not(unix))]
+fn process_uid(_process: &sysinfo::Process) -> Option<u32> {
+  None
 }
