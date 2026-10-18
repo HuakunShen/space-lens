@@ -7,6 +7,8 @@ import type {
   AppIcon,
   AppIconRequest,
   AppScanStartRequest,
+  AuditLog,
+  CandidatesRequest,
   Capabilities,
   ChildrenPage,
   ChildrenPageRequest,
@@ -15,18 +17,34 @@ import type {
   CleanupPlan,
   DiscoveryPage,
   DiscoveryRequest,
+  FreeUpCandidates,
   Health,
+  HistoryRequest,
+  MemoryHistory,
+  MemorySnapshot,
   Problem,
   RootsResponse,
   VolumesResponse,
   ScanSession,
   ScanStartRequest,
   ScanStatus,
+  TerminateExecuteRequest,
+  TerminateOutcome,
+  TerminatePlan,
+  TerminatePlanRequest,
   TreeSlice,
   TreeSliceRequest,
 } from '@space-lens/contract'
 import type { WorkbenchService } from './service.ts'
-import { ScanListResponseSchema } from '@space-lens/contract'
+import {
+  AuditLogSchema,
+  FreeUpCandidatesSchema,
+  MemoryHistorySchema,
+  MemorySnapshotSchema,
+  ScanListResponseSchema,
+  TerminateOutcomeSchema,
+  TerminatePlanSchema,
+} from '@space-lens/contract'
 
 /**
  * Ports injected by the host app (which owns the @tauri-apps/api import —
@@ -224,6 +242,53 @@ export function createTauriService(ports: TauriPorts): WorkbenchService {
         request: { kind: 'pickDirectory', title: title ?? null },
       })
       return result.picked
+    },
+    // Memory view and process control (§4.7/§4.8): closed read/submit/host arms
+    // exactly as `apps/desktop/src-tauri/src/commands.rs` deserializes them.
+    // Every reply is re-validated against the contract schema, so a drifted
+    // native reply fails here instead of in the page. Execute runs real signals,
+    // so it keeps the default 60 s reply timeout rather than a shorter one.
+    async memorySnapshot() {
+      return MemorySnapshotSchema.parse(
+        await invokeReply<unknown>('sl_read', { request: { method: 'memorySnapshot' } }),
+      )
+    },
+    async memoryHistory(body: HistoryRequest) {
+      return MemoryHistorySchema.parse(
+        await invokeReply<unknown>('sl_read', {
+          request: { method: 'memoryHistory', groupIds: body.groupIds },
+        }),
+      )
+    },
+    async memoryCandidates(body: CandidatesRequest) {
+      return FreeUpCandidatesSchema.parse(
+        await invokeReply<unknown>('sl_read', {
+          request: { method: 'memoryCandidates', exclude: body.exclude },
+        }),
+      )
+    },
+    async memoryAudit() {
+      return AuditLogSchema.parse(await invokeReply<unknown>('sl_read', { request: { method: 'memoryAudit' } }))
+    },
+    async memoryTerminatePlan(body: TerminatePlanRequest) {
+      const { targets, mode, origin } = body
+      return TerminatePlanSchema.parse(
+        await invokeReply<unknown>('sl_submit', {
+          request: { kind: 'memoryTerminatePlan', targets, mode, origin },
+        }),
+      )
+    },
+    async memoryTerminateExecute(body: TerminateExecuteRequest) {
+      return TerminateOutcomeSchema.parse(
+        await invokeReply<unknown>('sl_submit', {
+          request: { kind: 'memoryTerminateExecute', planId: body.planId, confirm: body.confirm },
+        }),
+      )
+    },
+    async reopenApp(body: { auditId: string }) {
+      return invokeReply<{ reopened: boolean }>('sl_host_request', {
+        request: { kind: 'reopenApp', auditId: body.auditId },
+      })
     },
   }
 }

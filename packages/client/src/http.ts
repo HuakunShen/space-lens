@@ -5,6 +5,8 @@ import type {
   AppIconRequest,
   AiChatRequest,
   AiConfigView,
+  AuditLog,
+  CandidatesRequest,
   Capabilities,
   ChildrenPage,
   ChildrenPageRequest,
@@ -14,7 +16,11 @@ import type {
   CleanupPlanRequest,
   DiscoveryRequest,
   DiscoveryPage,
+  FreeUpCandidates,
   Health,
+  HistoryRequest,
+  MemoryHistory,
+  MemorySnapshot,
   Problem,
   RootsResponse,
   VolumesResponse,
@@ -23,10 +29,22 @@ import type {
   ScanStartRequest,
   ScanStatus,
   Session,
+  TerminateExecuteRequest,
+  TerminateOutcome,
+  TerminatePlan,
+  TerminatePlanRequest,
   TreeSlice,
   TreeSliceRequest,
 } from '@space-lens/contract'
-import { ScanListResponseSchema } from '@space-lens/contract'
+import {
+  AuditLogSchema,
+  FreeUpCandidatesSchema,
+  MemoryHistorySchema,
+  MemorySnapshotSchema,
+  ScanListResponseSchema,
+  TerminateOutcomeSchema,
+  TerminatePlanSchema,
+} from '@space-lens/contract'
 
 /** One client-side failure kind, shaped like the wire Problem. */
 export class ServiceError extends Error {
@@ -161,6 +179,28 @@ export function createHttpService(options: HttpServiceOptions) {
       const tail = decoder.decode()
       if (tail !== '') onChunk(tail)
     },
+    // Memory view and process control (§4.5/§4.8): one frozen route per method,
+    // and every reply is re-validated against the same contract schema the host
+    // used, so a drifted child reply fails here instead of in the UI.
+    memorySnapshot: async () =>
+      MemorySnapshotSchema.parse(await request<unknown>('/api/v1/memory/snapshot')),
+    memoryHistory: async (body: HistoryRequest) =>
+      MemoryHistorySchema.parse(
+        await request<unknown>('/api/v1/memory/history', { method: 'POST', body: JSON.stringify(body) }),
+      ),
+    memoryCandidates: async (body: CandidatesRequest) =>
+      FreeUpCandidatesSchema.parse(
+        await request<unknown>('/api/v1/memory/candidates', { method: 'POST', body: JSON.stringify(body) }),
+      ),
+    memoryAudit: async () => AuditLogSchema.parse(await request<unknown>('/api/v1/memory/audit')),
+    memoryTerminatePlan: async (body: TerminatePlanRequest) =>
+      TerminatePlanSchema.parse(
+        await request<unknown>('/api/v1/memory/terminate/plan', { method: 'POST', body: JSON.stringify(body) }),
+      ),
+    memoryTerminateExecute: async (body: TerminateExecuteRequest) =>
+      TerminateOutcomeSchema.parse(
+        await request<unknown>('/api/v1/memory/terminate/execute', { method: 'POST', body: JSON.stringify(body) }),
+      ),
   }
 }
 
