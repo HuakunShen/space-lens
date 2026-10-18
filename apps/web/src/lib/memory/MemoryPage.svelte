@@ -37,7 +37,11 @@
   import type { StageTarget, TableQuery } from '@space-lens/web-ui'
   import { memoryTerminateAvailable } from '../gates.ts'
   import { describeError } from '../workbench.svelte.ts'
+  import { MEMORY_PRESETS, type AiChatPort, type MemoryPort } from '@space-lens/ai-advisor'
+  import AiPanel from '../ai/panel.svelte'
+  import { createAiChatPort, createServiceAiChatPort } from '../ai/chat-port.ts'
   import { addToQuitList, type QuitListEntry, type TerminateOrigin } from './quit-list.ts'
+  import { memoryPortFromService } from './memory-port.ts'
   import { createPoller } from './poller.ts'
 
   /** The contract ships the enum as a literal array, so derive the union. */
@@ -120,6 +124,7 @@
   let openGroup = $state<ProcessGroup | null>(null)
   let quitList = $state<QuitListEntry[]>([])
   let quitListOpen = $state(false)
+  let aiOpen = $state(false)
   let freeUpOpen = $state(false)
   let candidates = $state<FreeUpCandidates | null>(null)
   let candidatesLoading = $state(false)
@@ -146,6 +151,28 @@
     memoryTerminateAvailable({ capabilities, service }),
   )
   const reopenAvailable = $derived(Boolean(capabilities?.memory?.reopen))
+
+  /**
+   * The advisor drawer (T22) reads this page's snapshot through
+   * `memoryPortFromService`; it needs a chat port, which the desktop shell
+   * resolves through its BYOK proxy and an HTTP host serves as managed config.
+   */
+  const aiChatPort = $derived.by<AiChatPort | null>(() => {
+    if (__SPACLENS_DESKTOP__) return createAiChatPort()
+    return service === null ? null : createServiceAiChatPort(service)
+  })
+  const memoryPort = $derived.by<MemoryPort | null>(() => {
+    if (service === null || service.memoryCandidates === undefined) return null
+    return memoryPortFromService(service, () => snapshot, {
+      entries: () => quitList,
+      replace: (next) => {
+        quitList = next
+      },
+    })
+  })
+  const aiAvailable = $derived(
+    memoryPort !== null && (__SPACLENS_DESKTOP__ || Boolean(capabilities?.ai && service?.aiChat)),
+  )
 
   async function refreshHistory(force = false): Promise<void> {
     const memoryHistory = service?.memoryHistory?.bind(service)
@@ -402,6 +429,9 @@
           {:else}
             <p class="text-sm text-muted-foreground">This host does not allow process control.</p>
           {/if}
+          {#if aiAvailable}
+            <Button.Root variant="outline" onclick={() => (aiOpen = true)}>AI advisor</Button.Root>
+          {/if}
           {#if paused}<span class="text-xs text-muted-foreground">Paused</span>{/if}
         </div>
       </div>
@@ -471,6 +501,15 @@
     onClear={() => (quitList = [])}
     planning={building}
     {terminateAvailable}
+  />
+
+  <AiPanel
+    open={aiOpen}
+    available={aiAvailable}
+    port={aiChatPort}
+    memory={memoryPort ?? undefined}
+    presets={MEMORY_PRESETS}
+    onClose={() => (aiOpen = false)}
   />
 
   <FreeUpDialog

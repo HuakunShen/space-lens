@@ -14,6 +14,8 @@
     type AiChatPort,
     type AiConfig,
     type CleanupRisk,
+    type MemoryPort,
+    type Preset,
     type StageMeta,
     type Stager,
   } from '@space-lens/ai-advisor'
@@ -32,11 +34,19 @@
     available: boolean
     /** The host's config + chat port; null until the page has resolved one. */
     port: AiChatPort | null
+    /**
+     * When set, the drawer runs the memory half of the advisor (T22): memory
+     * tools replace the scan tools, no scan is needed, and presets come from
+     * the caller. Staged quits land in the page's Quit list, not the Collector.
+     */
+    memory?: MemoryPort
+    /** Preset buttons; defaults to the disk presets. */
+    presets?: readonly Preset[]
     onClose: () => void
-    /** Opens the existing CollectorPanel, which owns the trash flow. */
-    onOpenCollector: () => void
+    /** Opens the existing CollectorPanel; absent on the Memory view. */
+    onOpenCollector?: () => void
   }
-  let { open, available, port, onClose, onOpenCollector }: Props = $props()
+  let { open, available, port, memory, presets = PRESETS, onClose, onOpenCollector }: Props = $props()
 
   interface StagedItem {
     entry: CollectorEntry
@@ -78,7 +88,7 @@
     void loadConfig()
   })
 
-  const scanReady = $derived(workbench.service !== null && workbench.activeScanId !== null)
+  const runReady = $derived(memory !== undefined || (workbench.service !== null && workbench.activeScanId !== null))
   const hasKey = $derived(config?.hasKey === true)
   /** The HTTP host owns the config; the settings section is then read-only. */
   const managed = $derived(config?.managed === true)
@@ -142,7 +152,7 @@
     })
   }
 
-  function appendEvent(event: AgentEvent, stager: Stager): void {
+  function appendEvent(event: AgentEvent, stager: Stager | null): void {
     if (event.type === 'text-delta') {
       liveText += event.text
     } else if (event.type === 'assistant') {
@@ -150,46 +160,62 @@
       transcript = [...transcript, { kind: 'assistant', round: event.round, text: event.text, tools: event.toolCalls }]
     } else if (event.type === 'tool') {
       transcript = [...transcript, { kind: 'tool', round: event.round, name: event.name, content: event.content }]
-    } else if (event.type === 'staged') {
+    } else if (event.type === 'staged' && stager !== null) {
       staged = toStaged(event.entries, stager.meta)
     }
   }
 
+  function handleResult(result: Awaited<ReturnType<typeof runAgent>>, stager: Stager | null): void {
+    stats = result.stats
+    if (result.staged.length > 0 && stager !== null) staged = toStaged(result.staged, stager.meta)
+    if (result.endReason !== 'final' && result.text !== '') {
+      transcript = [...transcript, { kind: 'notice', text: result.text }]
+    }
+  }
+
   async function run(prompt: string): Promise<void> {
-    const service = workbench.service
-    const scanId = workbench.activeScanId
-    if (service === null || scanId === null || running || port === null) return
+    if (running || port === null) return
     running = true
     error = null
     stats = null
     staged = []
     controller = new AbortController()
     transcript = [...transcript, { kind: 'user', text: prompt }]
-    const stager = createStager({
-      scanId,
-      resolve: (nodeId) => resolveNode(service, scanId, nodeId),
-      collector: () => workbench.collector,
-      setCollector: (entries) => {
-        workbench.collector = entries
-      },
-      newId: () => `col_${crypto.randomUUID().slice(0, 8)}`,
-    })
-    const lens = lensPortFromService(service, scanId, stager.stage)
     const chat = port.chat
+    const signal = controller.signal
     try {
-      const result = await runAgent({
-        chat,
-        lens,
-        userMessage: prompt,
-        // The user's open folder, so the model starts where they are looking.
-        focusNodeId: workbench.slice?.focusNode.id,
-        signal: controller.signal,
-        onEvent: (event) => appendEvent(event, stager),
-      })
-      stats = result.stats
-      if (result.staged.length > 0) staged = toStaged(result.staged, stager.meta)
-      if (result.endReason !== 'final' && result.text !== '') {
-        transcript = [...transcript, { kind: 'notice', text: result.text }]
+      if (memory !== undefined) {
+        const result = await runAgent({
+          chat,
+          memory,
+          userMessage: prompt,
+          signal,
+          onEvent: (event) => appendEvent(event, null),
+        })
+        handleResult(result, null)
+      } else {
+        const service = workbench.service
+        const scanId = workbench.activeScanId
+        if (service === null || scanId === null) return
+        const stager = createStager({
+          scanId,
+          resolve: (nodeId) => resolveNode(service, scanId, nodeId),
+          collector: () => workbench.collector,
+          setCollector: (entries) => {
+            workbench.collector = entries
+          },
+          newId: () => `col_${crypto.randomUUID().slice(0, 8)}`,
+        })
+        const result = await runAgent({
+          chat,
+          lens: lensPortFromService(service, scanId, stager.stage),
+          userMessage: prompt,
+          // The user's open folder, so the model starts where they are looking.
+          focusNodeId: workbench.slice?.focusNode.id,
+          signal,
+          onEvent: (event) => appendEvent(event, stager),
+        })
+        handleResult(result, stager)
       }
     } catch (failed) {
       error = describeError(failed)
@@ -228,8 +254,8 @@
       <Sheet.Header class="border-b pb-4">
         <Sheet.Title>AI advisor</Sheet.Title>
         <Sheet.Description>
-          Presets and questions read the active scan through bounded tools. Candidates are staged
-          for review in the Collector — nothing is deleted without the existing Clean button.
+          Presets and questions read this view through bounded tools. Anything proposed is staged for
+          your review — nothing is deleted or quit until you confirm.
         </Sheet.Description>
       </Sheet.Header>
 
@@ -307,17 +333,17 @@
           {/if}
         </section>
 
-        {#if !scanReady}
+        {#if memory === undefined && !runReady}
           <p class="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">Run a scan first</p>
         {/if}
 
         <section class="flex flex-col gap-2">
-          {#each PRESETS as preset (preset.id)}
+          {#each presets as preset (preset.id)}
             <Button.Root
               variant="outline"
               size="sm"
               class="justify-start"
-              disabled={!scanReady || running}
+              disabled={!runReady || running}
               onclick={() => void run(preset.prompt)}>{preset.title}</Button.Root
             >
           {/each}
@@ -332,14 +358,14 @@
         >
           <Input.Root
             bind:value={question}
-            placeholder="Ask about this scan…"
-            disabled={!scanReady || running}
-            aria-label="Ask the AI about this scan"
+            placeholder={memory === undefined ? 'Ask about this scan…' : 'Ask about memory…'}
+            disabled={!runReady || running}
+            aria-label={memory === undefined ? 'Ask the AI about this scan' : 'Ask the AI about memory'}
           />
           {#if running}
             <Button.Root type="button" variant="ghost" size="sm" onclick={cancel}>Stop</Button.Root>
           {:else}
-            <Button.Root type="submit" size="sm" disabled={!scanReady || question.trim() === ''}>Ask</Button.Root>
+            <Button.Root type="submit" size="sm" disabled={!runReady || question.trim() === ''}>Ask</Button.Root>
           {/if}
         </form>
 
@@ -363,7 +389,9 @@
                 <span class="shrink-0 text-muted-foreground">{formatBytes(item.entry.size)}</span>
               </div>
             {/each}
-            <Button.Root variant="outline" size="sm" onclick={onOpenCollector}>Open Collector</Button.Root>
+            {#if onOpenCollector}
+              <Button.Root variant="outline" size="sm" onclick={onOpenCollector}>Open Collector</Button.Root>
+            {/if}
           </section>
         {/if}
 
