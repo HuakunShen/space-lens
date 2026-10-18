@@ -447,3 +447,123 @@ mod unix_signal {
     assert!(own.0 > 0, "the current process started after the epoch");
   }
 }
+
+/// The AppKit application directory against the live desktop (T11 of
+/// docs/memory-cleaner-plan.md). These read the real `NSWorkspace` application
+/// list, so they need a logged-in graphical session and are `#[ignore]`d out of
+/// the default run; run them manually with
+/// `cargo test -p spacelens-memory --features appkit -- --ignored appkit`.
+#[cfg(all(target_os = "macos", feature = "appkit"))]
+mod appkit {
+  use objc2_app_kit::NSRunningApplication;
+  use objc2_foundation::NSString;
+  use spacelens_memory::platform::appkit::AppKitApps;
+  use spacelens_memory::platform::default_sampler;
+  use spacelens_memory::raw::QuitAck;
+  use spacelens_memory::sampler::AppDirectory;
+  use std::process::Command;
+  use std::thread::sleep;
+  use std::time::Duration;
+
+  /// Finder runs in every logged-in graphical session.
+  const FINDER_BUNDLE_ID: &str = "com.apple.finder";
+  /// The manual quit check targets an ordinary, save-aware AppKit application.
+  const TEXT_EDIT_BUNDLE_ID: &str = "com.apple.TextEdit";
+
+  #[test]
+  #[ignore = "live: reads the AppKit running-application list; run manually in a GUI session"]
+  fn appkit_apps_are_non_empty_and_contain_finder() {
+    let mut apps = AppKitApps::new();
+    let running = apps.apps();
+
+    assert!(
+      !running.is_empty(),
+      "a logged-in session always has running applications"
+    );
+    assert!(
+      running
+        .iter()
+        .any(|app| app.bundle_id.as_deref() == Some(FINDER_BUNDLE_ID)),
+      "Finder is running in every logged-in session"
+    );
+    assert!(
+      running.iter().all(|app| app.pid > 0),
+      "AppKit never reports a non-positive pid for a running application"
+    );
+  }
+
+  #[test]
+  #[ignore = "live: needs the real process list; run manually in a GUI session"]
+  fn appkit_frontmost_pid_is_in_the_process_list() {
+    let mut apps = AppKitApps::new();
+    let frontmost = apps
+      .frontmost_pid()
+      .expect("a logged-in graphical session has a frontmost application");
+
+    let mut sampler = default_sampler();
+    let sample = sampler.sample().expect("a live process sample");
+    assert!(
+      sample
+        .processes
+        .iter()
+        .any(|process| process.pid == frontmost),
+      "the frontmost application ({frontmost}) must be one of the sampled processes"
+    );
+  }
+
+  #[test]
+  #[ignore = "live: asks a real application to quit; run manually, watch for a TCC prompt"]
+  fn appkit_request_quit_targets_text_edit() {
+    let mut apps = AppKitApps::new();
+
+    // The test runner is not an application, so AppKit knows no such app.
+    assert_eq!(
+      apps
+        .request_quit(std::process::id())
+        .expect("a quit request never fails"),
+      QuitAck::NotAnApp,
+      "a plain process is not an application"
+    );
+
+    ensure_text_edit_running();
+    let pid = text_edit_pid().expect("TextEdit is running after it was launched");
+    let ack = apps.request_quit(pid).expect("a quit request never fails");
+    eprintln!("request_quit(TextEdit {pid}) -> {ack:?}");
+    assert_eq!(
+      ack,
+      QuitAck::Sent,
+      "AppKit accepted the quit request for TextEdit"
+    );
+  }
+
+  /// Launch TextEdit through Launch Services if it is not already running.
+  fn ensure_text_edit_running() {
+    if text_edit_pid().is_some() {
+      return;
+    }
+    Command::new("/usr/bin/open")
+      .args(["-a", "TextEdit"])
+      .status()
+      .expect("opening TextEdit must succeed");
+    for _ in 0..50 {
+      if text_edit_pid().is_some() {
+        return;
+      }
+      sleep(Duration::from_millis(100));
+    }
+  }
+
+  /// The pid of a running TextEdit, read straight from Launch Services rather
+  /// than the possibly stale `NSWorkspace` cache.
+  ///
+  /// `-[NSRunningApplication processIdentifier]` sits behind the `libc` feature
+  /// of `objc2-app-kit`, which the crate does not enable, so the same message is
+  /// sent directly here.
+  fn text_edit_pid() -> Option<u32> {
+    let bundle_id = NSString::from_str(TEXT_EDIT_BUNDLE_ID);
+    let running = NSRunningApplication::runningApplicationsWithBundleIdentifier(&bundle_id);
+    let app = running.to_vec().into_iter().next()?;
+    let pid: i32 = unsafe { objc2::msg_send![&app, processIdentifier] };
+    u32::try_from(pid).ok()
+  }
+}

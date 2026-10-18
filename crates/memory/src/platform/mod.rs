@@ -7,10 +7,13 @@
 //! reads no per-process footprint and no kernel pressure; [`macos`] wraps it
 //! with the footprint, exact start time, VM page counters and kernel pressure
 //! that only macOS offers. [`unix_signal`] is the `kill(2)`-based signaller for
-//! every unix, and the AppKit application directory (T11) replaces the default
-//! below as it lands.
+//! every unix, and [`appkit`] is the macOS application directory that names the
+//! running apps and can ask one to quit (macOS with the `appkit` feature).
 
 pub mod portable;
+
+#[cfg(all(target_os = "macos", feature = "appkit"))]
+pub mod appkit;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
@@ -22,6 +25,8 @@ use crate::error::MemoryError;
 use crate::raw::{AppInfo, QuitAck, Signal};
 use crate::sampler::{AppDirectory, ProcessSampler, Signaller};
 
+#[cfg(all(target_os = "macos", feature = "appkit"))]
+pub use appkit::AppKitApps;
 #[cfg(target_os = "macos")]
 pub use macos::MacSampler;
 pub use portable::PortableSampler;
@@ -45,8 +50,16 @@ pub fn default_sampler() -> Box<dyn ProcessSampler> {
 
 /// The application directory for the platform this binary is built for.
 ///
-/// macOS gets `AppKitApps` under the `appkit` feature (T11); everywhere else,
+/// macOS gets [`AppKitApps`] under the `appkit` feature (T11); everywhere else,
 /// including a macOS build without that feature, this is [`NullApps`].
+#[cfg(all(target_os = "macos", feature = "appkit"))]
+pub fn default_apps() -> Box<dyn AppDirectory> {
+  Box::new(AppKitApps)
+}
+
+/// The application directory for platforms with no AppKit layer (see the macOS
+/// overload above).
+#[cfg(not(all(target_os = "macos", feature = "appkit")))]
 pub fn default_apps() -> Box<dyn AppDirectory> {
   Box::new(NullApps)
 }

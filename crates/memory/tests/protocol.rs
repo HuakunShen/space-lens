@@ -113,7 +113,11 @@ fn hello_leads_and_snapshot_replies_with_a_sequence() {
   assert_eq!(lines[0]["hello"]["protocol"], 1);
   assert_eq!(lines[0]["hello"]["platform"], "linux");
   assert_eq!(lines[0]["hello"]["terminate"], true);
-  assert_eq!(lines[0]["hello"]["gracefulAppQuit"], false);
+  assert_eq!(
+    lines[0]["hello"]["gracefulAppQuit"],
+    cfg!(all(target_os = "macos", feature = "appkit")),
+    "graceful AppKit quit is available exactly on macOS with the appkit feature"
+  );
 
   assert_eq!(lines[1]["id"], 1);
   assert_eq!(lines[1]["ok"], true);
