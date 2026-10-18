@@ -8,6 +8,10 @@
     ".": "./src/index.ts",
     "./lib/app-scan": "./src/lib/app-scan.ts",
     "./lib/selection": "./src/lib/selection.ts",
+    "./lib/memory/format": "./src/lib/memory/format.ts",
+    "./lib/memory/table": "./src/lib/memory/table.ts",
+    "./lib/memory/segments": "./src/lib/memory/segments.ts",
+    "./lib/memory/reasons": "./src/lib/memory/reasons.ts",
     "./styles.css": "./src/styles.css",
     "./types": "./src/types.ts",
     "./package.json": "./package.json"
