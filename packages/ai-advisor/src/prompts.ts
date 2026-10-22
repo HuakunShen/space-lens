@@ -20,7 +20,13 @@ Rules you must follow:
 - Older tool results are replaced by one-line summaries as the run goes on. Keep what you need in your answer; ids you already saw still work.
 - Work quietly: do not narrate between tool calls, and issue all independent tool calls of a round together in one turn. Finish within about 4 rounds; propose_cleanup once with every candidate you have, not one call per item.
 - Prefer a few targeted tool calls over many. Answer in the user's language, briefly, with concrete numbers from the tools.
-- If the tools cannot answer the question, say what is missing instead of guessing.`
+- Tools report MB (MiB). In answers write anything of 1024 MB or more as GB with one decimal (70,046 MB is 68.4 GB).
+- If the tools cannot answer the question, say what is missing instead of guessing.
+
+Scope and conversation:
+- When the first message has a "scope" line, the user has that folder open: answer about it, and only look outside it when the user asks about the whole scan. get_scan_summary and find_cache_candidates are already limited to the scope.
+- This is a conversation. Earlier questions and your answers come first; ids you saw in earlier turns still work.
+- The cleanup selection belongs to the user, who may have edited it since your last answer. Before changing it, call list_proposal. When the user wants to keep something already selected, call remove_from_proposal with its id; to add, use propose_cleanup as usual. Say what you changed, with sizes.`
 
 export interface Preset {
   id: string
@@ -34,7 +40,7 @@ export const PRESETS: readonly Preset[] = [
     id: 'explain-biggest',
     title: 'Explain the biggest space users',
     prompt:
-      'Explain the biggest space users in this scan. Start with the scan summary, drill into the largest folders, and tell me what is actually taking the space and why.',
+      'Explain the biggest space users here. Start with the summary, drill into the largest folders, and tell me what is actually taking the space and why.',
   },
   {
     id: 'find-caches',
@@ -46,7 +52,7 @@ export const PRESETS: readonly Preset[] = [
     id: 'cleanup-plan',
     title: 'Make a cleanup plan',
     prompt:
-      'Make a cleanup plan for this scan and stage it with propose_cleanup. Do not execute anything. Group the candidates, say what you would clear first and why, and mark anything uncertain as confirm.',
+      'Make a cleanup plan for this folder and stage it with propose_cleanup. Do not execute anything. Group the candidates, say what you would clear first and why, and mark anything uncertain as confirm.',
   },
   {
     id: 'keep-review',

@@ -10,8 +10,10 @@ import {
   byteLength,
   createToolRuntime,
   rememberNodes,
+  resetRunBudget,
   truncateUtf8,
   type InitialContext,
+  type ToolRuntime,
 } from './tools.ts'
 import type { ChatMessage, ChatPort, ChatResponse, ChatTool, ChatToolCall, LensPort } from './types.ts'
 
@@ -50,6 +52,12 @@ export interface RunAgentSharedOptions {
   focusNodeId?: string
   /** Earlier turns, oldest first, without the system prompt. */
   history?: ChatMessage[]
+  /**
+   * A runtime kept for the whole conversation, so ids seen in earlier turns
+   * still resolve. Its budgets are reset at the start of this run; omitted
+   * means a fresh runtime (a one-shot run).
+   */
+  runtime?: ToolRuntime
   onEvent?: (event: AgentEvent) => void
   signal?: AbortSignal
 }
@@ -103,7 +111,8 @@ interface ToolMeta {
 }
 
 export async function runAgent(options: RunAgentOptions): Promise<AgentResult> {
-  const runtime = createToolRuntime()
+  const runtime = options.runtime ?? createToolRuntime()
+  resetRunBudget(runtime)
   const lens = options.lens
   const memory = options.memory
   const tools: readonly ChatTool[] = [

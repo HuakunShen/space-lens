@@ -22,6 +22,14 @@ test('renders the table the model produced, escaping cells', () => {
   assert.ok(html.includes('<strong>confirm</strong> &lt;b&gt;'))
 })
 
+test('bold may wrap inline code', () => {
+  assert.equal(
+    renderMarkdown('**`/Users/hk` = 163,314 MB — about 60%.** Everything below'),
+    '<p><strong><code>/Users/hk</code> = 163,314 MB — about 60%.</strong> Everything below</p>',
+  )
+  assert.equal(renderMarkdown('`**not bold**`'), '<p><code>**not bold**</code></p>')
+})
+
 test('code fences stay literal', () => {
   assert.equal(renderMarkdown('```\n**x** <b>\n```'), '<pre><code>**x** &lt;b&gt;</code></pre>')
 })
