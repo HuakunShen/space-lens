@@ -70,18 +70,22 @@
     /** Optional secondary series drawn behind the primary (e.g. compressed bytes). */
     compare?: ReadonlyArray<number | null>
     height?: number
+    /** Fill the area under the primary line with a fading tint of the same colour. */
+    fill?: boolean
     /** Accessible description, e.g. `Used memory, last 10 minutes`. */
     label: string
     class?: string
   }
 
-  let { values, compare = [], height = 40, label, class: className = '' }: Props = $props()
+  let { values, compare = [], height = 40, fill = false, label, class: className = '' }: Props = $props()
 
   const WIDTH = 100
+  const gradientId = $props.id()
   let count = $derived(Math.max(values.length, compare.length))
   let bounds = $derived(sparklineBounds([values, compare]))
   let primaryPath = $derived(sparklinePath(values, bounds, count, WIDTH, height))
   let comparePath = $derived(compare.length > 0 ? sparklinePath(compare, bounds, count, WIDTH, height) : '')
+  let areaPath = $derived(primaryPath === '' ? '' : `${primaryPath}L${WIDTH} ${height}L0 ${height}Z`)
 </script>
 
 <div class={`text-primary ${className}`} style={`height: ${height}px`}>
@@ -92,6 +96,15 @@
     role="img"
     aria-label={label}
   >
+    {#if fill && areaPath !== ''}
+      <defs>
+        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0%" stop-color="currentColor" stop-opacity="0.18" />
+          <stop offset="100%" stop-color="currentColor" stop-opacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill={`url(#${gradientId})`} stroke="none" />
+    {/if}
     {#if comparePath !== ''}
       <path
         d={comparePath}

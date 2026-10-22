@@ -1413,6 +1413,24 @@
   })
 </script>
 
+{#snippet viewSwitch()}
+  <!-- Top-level Storage | Memory switch (§6.1). Memory sampling does not need
+       a disk scan, so the switch is available as soon as the host is paired —
+       including on the "New scan" page, where people look for it first. -->
+  <div class="flex items-center gap-0.5 rounded-full border bg-background/90 p-0.5 shadow-sm backdrop-blur">
+    <button type="button" class="rounded-full px-3 py-1 text-xs font-medium" aria-pressed={!memoryView} onclick={() => (memoryView = false)}>Storage</button>
+    <button type="button" class="rounded-full px-3 py-1 text-xs font-medium" aria-pressed={memoryView} onclick={() => (memoryView = true)}>Memory</button>
+  </div>
+{/snippet}
+
+{#if workbench.phase === 'ready' && memoryAvailable && !memoryView}
+  <!-- Storage view: the switch sits in the toolbar's empty middle. The memory
+       view has its own header row, so the pill is not rendered there. -->
+  <div class="fixed top-1.5 left-1/2 z-50 -translate-x-1/2" role="group" aria-label="Storage or memory view">
+    {@render viewSwitch()}
+  </div>
+{/if}
+
 {#if workbench.phase !== 'ready'}
   <div data-tauri-drag-region class="fixed top-0 right-0 left-0 z-40 h-10"></div>
   <ConnectionPanel
@@ -1428,6 +1446,15 @@
     onPassword={(value) => (passwordInput = value)}
     onConnect={() => void connect()}
   />
+{:else if memoryView && memoryAvailable}
+  <div class="flex h-dvh min-h-0 flex-col bg-background text-foreground">
+    <header class="grid h-10 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border/60 px-4">
+      <span class="text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">Memory</span>
+      <div role="group" aria-label="Storage or memory view">{@render viewSwitch()}</div>
+      <span aria-hidden="true"></span>
+    </header>
+    <MemoryPage service={workbench.service} capabilities={workbench.capabilities} />
+  </div>
 {:else if pickerOpen || workbench.status === null || workbench.status.state !== 'ready'}
   {#if view === 'apps' && appAuditAvailable}
     <main class="scan-picker flex h-dvh min-h-0 flex-col bg-background text-foreground">
@@ -1523,18 +1550,6 @@
     </div>
   {/if}
 {:else}
-  {#if memoryAvailable}
-    <!-- Top-level Storage | Memory switch (§6.1), sitting in the toolbar area. -->
-    <div class="fixed top-1.5 left-1/2 z-50 -translate-x-1/2" role="group" aria-label="Storage or memory view">
-      <div class="flex items-center gap-0.5 rounded-full border bg-background/90 p-0.5 shadow-sm backdrop-blur">
-        <button type="button" class="rounded-full px-3 py-1 text-xs font-medium" aria-pressed={!memoryView} onclick={() => (memoryView = false)}>Storage</button>
-        <button type="button" class="rounded-full px-3 py-1 text-xs font-medium" aria-pressed={memoryView} onclick={() => (memoryView = true)}>Memory</button>
-      </div>
-    </div>
-  {/if}
-  {#if memoryView && memoryAvailable}
-    <MemoryPage service={workbench.service} capabilities={workbench.capabilities} />
-  {:else}
   <div class="workbench-shell compact-workbench windows:bg-sidebar">
     <LensToolbar
       title={displayFocus?.name ?? workbench.status.label ?? 'Storage'}
@@ -1906,7 +1921,6 @@
       }}
     />
   </div>
-  {/if}
 {/if}
 <AppearancePanel
   open={settingsOpen}

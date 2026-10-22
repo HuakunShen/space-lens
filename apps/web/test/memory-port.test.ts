@@ -126,6 +126,38 @@ function fakeQuitList(initial: QuitListEntry[] = []) {
   }
 }
 
+test('the port walks the process tree up and down', async () => {
+  const terminal = group(gid(1), { name: 'Terminal', mainPid: 100 })
+  const host = group(gid(2), { name: 'spacelens serve', mainPid: 200 })
+  const scan = group(gid(3), { name: 'kuntu-scan', mainPid: 300 })
+  const { service } = fakeService(candidateReply())
+  const port = memoryPortFromService(
+    service,
+    () =>
+      snapshot(
+        [terminal, host, scan],
+        [
+          row(100, terminal.groupId, { name: 'Terminal' }),
+          row(200, host.groupId, { name: 'spacelens serve', ppid: 100 }),
+          row(300, scan.groupId, { name: 'kuntu-scan', ppid: 200 }),
+        ],
+      ),
+    fakeQuitList().handle,
+  )
+
+  const children = await port.children(terminal.groupId)
+  assert.equal(children.total, 1)
+  assert.deepEqual(children.rows.map((entry) => entry.name), ['spacelens serve'])
+  assert.equal(children.rows[0].parentName, 'Terminal')
+
+  const ancestry = await port.ancestry(scan.groupId)
+  assert.deepEqual(ancestry?.chain.map((entry) => entry.name), ['Terminal', 'spacelens serve', 'kuntu-scan'])
+  assert.equal(ancestry?.chain[1].parentName, 'Terminal')
+
+  const unknown = await port.ancestry('grp_ffffffffffffffff')
+  assert.equal(unknown, null)
+})
+
 test('summary reports pressure, breakdown, observed minutes and the largest groups', async () => {
   const alpha = group(gid(1), { name: 'Alpha', footprintBytes: 300 })
   const beta = group(gid(2), { name: 'Beta', footprintBytes: 500 })

@@ -17,7 +17,7 @@ import {
 /**
  * Memory tool layer for the AI advisor (§8 of docs/memory-cleaner-plan.md).
  *
- * Four read-mostly tools over `MemoryPort`, composed with the disk tools only
+ * Six read-mostly tools over `MemoryPort`, composed with the disk tools only
  * when a host supplies both ports. The model navigates by opaque `groupId` and
  * every guard is enforced in code rather than by the prompt:
  *
@@ -34,6 +34,9 @@ import {
  * 4. Nothing else leaves the host: no pids, start times, exe or bundle paths,
  *    command lines, windows or bundle ids — they are attacker-chosen strings
  *    too. Members are `name|MB|cpu` only.
+ * 5. The process tree is walked with `list_memory_children` (down, the mirror
+ *    of the disk `list_children`) and `get_memory_ancestry` (up). Both speak
+ *    group ids and names only, so the tree never widens what the model sees.
  *
  * Budgets are the shared `AGENT_LIMITS` / `ToolRuntime` counters from
  * `tools.ts`. The per-run group memory (`seenGroups`, cap 500) lives in a
@@ -50,6 +53,8 @@ export const MEMORY_LIMITS = {
   defaultListLimit: 20,
   /** Members listed by `get_memory_group`. */
   maxMembers: 20,
+  /** Links listed by `get_memory_ancestry`. */
+  maxAncestry: 12,
   /** Rows in the initial memory window and in `get_memory_summary`. */
   maxTop: 10,
   maxNameChars: 60,
@@ -60,14 +65,16 @@ export const MEMORY_LIMITS = {
 export const MEMORY_TOOL_NAMES = [
   'get_memory_summary',
   'list_memory_groups',
+  'list_memory_children',
   'get_memory_group',
+  'get_memory_ancestry',
   'propose_quit',
 ] as const
 
 export type MemoryToolName = (typeof MEMORY_TOOL_NAMES)[number]
 
 /** Column header for the group rows (`MB` is MiB, matching the disk tools). */
-const ROW_HEADER = 'gid|name|MB|cpu|procs|kind|flags'
+const ROW_HEADER = 'gid|name|MB|cpu|procs|kind|flags|parent'
 
 /** Column header for a group's member rows. */
 const MEMBER_HEADER = 'name|MB|cpu'
@@ -106,9 +113,43 @@ export const MEMORY_TOOLS: readonly ChatTool[] = [
   {
     type: 'function',
     function: {
+      name: 'list_memory_children',
+      description:
+        'One page of the app groups this group launched, largest first — the process tree. Hard cap 40 rows (default 20); the run is told `total` and `remaining`. groupId must come from an earlier result this run.',
+      parameters: {
+        type: 'object',
+        properties: {
+          groupId: { type: 'string', description: 'Group id from an earlier result this run.' },
+          limit: { type: 'integer', description: 'Rows to return (1-40, default 20).', minimum: 1, maximum: 40 },
+          offset: { type: 'integer', description: 'Rows to skip, largest first.', minimum: 0 },
+        },
+        required: ['groupId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_memory_group',
       description:
         "One group: its row, its 20 largest members as name|MB|cpu, and the engine's free-up verdict (reason codes and risks). groupId must come from an earlier result this run.",
+      parameters: {
+        type: 'object',
+        properties: {
+          groupId: { type: 'string', description: 'Group id from an earlier result this run.' },
+        },
+        required: ['groupId'],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_memory_ancestry',
+      description:
+        'The chain that launched this group, root first and the group itself last — "what started this?". Each link is a row, so any link can be walked further with list_memory_children. groupId must come from an earlier result this run.',
       parameters: {
         type: 'object',
         properties: {
@@ -300,6 +341,31 @@ const MEMORY_HANDLERS: Record<MemoryToolName, MemoryHandler> = {
     }
   },
 
+  async list_memory_children(runtime, memory, args): Promise<HandlerOutput> {
+    const groupId = asString(args.groupId)
+    if (groupId === null || groupId === '') {
+      return errorOutput('list_memory_children', 'groupId must be a non-empty string')
+    }
+    if (knownGroup(runtime, groupId) === undefined) return unknownGroup('list_memory_children', groupId)
+    const limit = readInt(args.limit, MEMORY_LIMITS.defaultListLimit, 1, MEMORY_LIMITS.maxListLimit)
+    if (limit === null) return errorOutput('list_memory_children', 'limit must be an integer')
+    const offset = readInt(args.offset, 0, 0, Number.MAX_SAFE_INTEGER)
+    if (offset === null) return errorOutput('list_memory_children', 'offset must be an integer')
+
+    const page = await memory.children(groupId)
+    const rows = page.rows.slice(offset, offset + limit)
+    rememberGroups(runtime, rows)
+    const remaining = Math.max(0, page.total - offset - rows.length)
+    return {
+      content: [
+        `list_memory_children parent=${safeId(groupId)} total=${page.total} rows=${rows.length} remaining=${remaining}`,
+        `rows ${ROW_HEADER}`,
+        ...rows.map(groupRow),
+      ].join('\n'),
+      summary: `list_memory_children: ${rows.length} rows`,
+    }
+  },
+
   async get_memory_group(runtime, memory, args): Promise<HandlerOutput> {
     const groupId = asString(args.groupId)
     if (groupId === null || groupId === '') {
@@ -327,6 +393,35 @@ const MEMORY_HANDLERS: Record<MemoryToolName, MemoryHandler> = {
         ),
       ].join('\n'),
       summary: `get_memory_group: ${sanitizeName(detail.group.name)}, ${members.length} members`,
+    }
+  },
+
+  async get_memory_ancestry(runtime, memory, args): Promise<HandlerOutput> {
+    const groupId = asString(args.groupId)
+    if (groupId === null || groupId === '') {
+      return errorOutput('get_memory_ancestry', 'groupId must be a non-empty string')
+    }
+    if (knownGroup(runtime, groupId) === undefined) return unknownGroup('get_memory_ancestry', groupId)
+
+    const ancestry = await memory.ancestry(groupId)
+    if (ancestry === null) {
+      return errorOutput('get_memory_ancestry', `group ${safeId(groupId)} is no longer running`)
+    }
+    // Keep the *end* of the chain: the group itself and the links closest to
+    // it. Cutting the far end would drop the group the model asked about and
+    // answer a different question.
+    const full = ancestry.chain
+    const chain = full.slice(Math.max(0, full.length - MEMORY_LIMITS.maxAncestry))
+    rememberGroups(runtime, chain)
+    const names = chain.map((group) => sanitizeName(group.name)).join(' ← ')
+    return {
+      content: [
+        `get_memory_ancestry depth=${full.length}${chain.length < full.length ? ' truncated=true' : ''}`,
+        `chain ${names}`,
+        `rows ${ROW_HEADER}`,
+        ...chain.map(groupRow),
+      ].join('\n'),
+      summary: `get_memory_ancestry: ${chain.length} links`,
     }
   },
 
@@ -440,7 +535,7 @@ export async function buildMemoryInitialContext(memory: MemoryPort): Promise<Mem
 // Row formatting and guards
 // ---------------------------------------------------------------------------
 
-/** One group row: `gid|name|MB|cpu|procs|kind|flags`. */
+/** One group row: `gid|name|MB|cpu|procs|kind|flags|parent`. */
 function groupRow(group: GroupView): string {
   return [
     group.groupId,
@@ -450,6 +545,7 @@ function groupRow(group: GroupView): string {
     group.processCount,
     group.kind,
     flags(group),
+    group.parentName === undefined || group.parentName === null ? '-' : sanitizeName(group.parentName),
   ].join('|')
 }
 

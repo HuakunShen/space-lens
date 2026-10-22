@@ -34,6 +34,12 @@ export interface GroupView {
   self: boolean
   /** Footprint is unreadable (other user / system); the row shows RSS only. */
   restricted: boolean
+  /**
+   * The name of the group that launched this one, or `null` when it has no
+   * known parent. A name, never an id: the id of the parent is what the tree
+   * tools hand out.
+   */
+  parentName?: string | null
 }
 
 /** The one-call overview placed at the head of a memory-only run. */
@@ -66,6 +72,15 @@ export interface GroupDetail {
   candidate: FreeUpCandidate | null
 }
 
+/**
+ * The chain of groups that led to one group: root first, the group itself
+ * last. This is the process tree the disk advisor walks with `list_children`,
+ * seen from a leaf: "what launched this?".
+ */
+export interface GroupAncestry {
+  chain: GroupView[]
+}
+
 /** One requested Quit-list addition, as the model asked for it. */
 export interface QuitStageItem {
   groupId: string
@@ -90,6 +105,13 @@ export interface MemoryPort {
   groups(sort: 'footprint' | 'cpu', limit: number, offset: number): Promise<GroupPage>
   /** One group with its members and the engine's candidate verdict; `null` when it is gone. */
   group(groupId: string): Promise<GroupDetail | null>
+  /**
+   * The groups this group launched, largest first — the process tree the disk
+   * advisor walks with `list_children`, one level up from `groups`.
+   */
+  children(groupId: string): Promise<GroupPage>
+  /** The chain that led to this group, root first; `null` when it is gone. */
+  ancestry(groupId: string): Promise<GroupAncestry | null>
   /**
    * Adds ids to the client Quit list the user reviews; never plans or quits.
    * The host owns that list, including its 20-entry cap (§8 rule 2, T20's

@@ -1,13 +1,15 @@
 <script lang="ts">
   /**
-   * System memory breakdown bar (§6.2 item 1): App / Wired / Compressed / Cached
-   * files / Free as one stacked bar with a legend. When the platform cannot
-   * report the optional fields (`appBytes` … `cachedFilesBytes` are `null`) it
-   * says so and falls back to a plain Used / Free bar.
+   * System memory breakdown (§6.2 item 1): App / Wired / Compressed / Cached
+   * files / Free as one stacked bar with a legend that also carries each
+   * segment's share. When the platform cannot report the optional fields
+   * (`appBytes` … `cachedFilesBytes` are `null`) it says so and falls back to a
+   * plain Used / Free bar.
    *
    * Props only; no transport.
    */
   import type { MemoryBreakdown } from '@space-lens/contract'
+  import { Card } from '../ui/card/index'
   import { formatBytes } from '../../lib/memory/format.ts'
 
   interface Props {
@@ -61,37 +63,64 @@
       .join(', ')}`,
   )
 
+  let usedPercent = $derived(
+    Math.max(0, Math.min(100, (breakdown.usedBytes / total) * 100)),
+  )
+
   function widthPercent(bytes: number): number {
     return Math.max(0, Math.min(100, (bytes / total) * 100))
   }
+
+  function shareLabel(bytes: number): string {
+    const percent = widthPercent(bytes)
+    return percent > 0 && percent < 0.1 ? '<0.1%' : `${percent.toFixed(percent < 10 ? 1 : 0)}%`
+  }
 </script>
 
-<div class={`memory-breakdown ${className}`}>
-  <div class="flex h-3 w-full overflow-hidden rounded-full bg-muted" role="img" aria-label={ariaLabel}>
-    {#each segments as segment (segment.key)}
-      <div
-        class="h-full transition-[width] duration-300 motion-reduce:transition-none"
-        style={`width: ${widthPercent(segment.bytes)}%; background-color: ${segment.color}`}
-        title={`${segment.label} — ${formatBytes(segment.bytes)}`}
-      ></div>
-    {/each}
+<Card class={`memory-breakdown h-full gap-0 py-0 ${className}`}>
+  <div class="flex h-full flex-col justify-between gap-3 p-4">
+    <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+      <p class="text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">
+        Memory distribution
+      </p>
+      <p class="text-[11px] text-muted-foreground tabular-nums">
+        {formatBytes(breakdown.usedBytes)} used · {usedPercent.toFixed(0)}%
+      </p>
+    </div>
+
+    <div
+      class="flex h-4 w-full overflow-hidden rounded-full bg-muted"
+      role="img"
+      aria-label={ariaLabel}
+    >
+      {#each segments as segment (segment.key)}
+        <div
+          class="h-full transition-[width] duration-300 motion-reduce:transition-none"
+          style={`width: ${widthPercent(segment.bytes)}%; background-color: ${segment.color}`}
+          title={`${segment.label} — ${formatBytes(segment.bytes)} (${shareLabel(segment.bytes)})`}
+        ></div>
+      {/each}
+    </div>
+
+    <ul role="list" class="grid grid-cols-1 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-2 2xl:grid-cols-3">
+      {#each segments as segment (segment.key)}
+        <li class="flex items-center gap-2">
+          <span
+            class="inline-block size-2 shrink-0 rounded-[3px]"
+            style={`background-color: ${segment.color}`}
+            aria-hidden="true"
+          ></span>
+          <span class="min-w-0 flex-1 truncate text-muted-foreground">{segment.label}</span>
+          <span class="font-medium tabular-nums">{formatBytes(segment.bytes)}</span>
+          <span class="w-10 text-right text-[11px] text-muted-foreground tabular-nums">
+            {shareLabel(segment.bytes)}
+          </span>
+        </li>
+      {/each}
+    </ul>
+
+    {#if detailed === null}
+      <p class="text-[11px] text-muted-foreground">Breakdown unavailable on this platform.</p>
+    {/if}
   </div>
-
-  {#if detailed === null}
-    <p class="mt-2 text-xs text-muted-foreground">Breakdown unavailable on this platform.</p>
-  {/if}
-
-  <ul role="list" class="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-    {#each segments as segment (segment.key)}
-      <li class="flex items-center gap-1.5">
-        <span
-          class="inline-block size-2.5 rounded-[3px]"
-          style={`background-color: ${segment.color}`}
-          aria-hidden="true"
-        ></span>
-        <span>{segment.label}</span>
-        <span class="font-medium tabular-nums text-foreground">{formatBytes(segment.bytes)}</span>
-      </li>
-    {/each}
-  </ul>
-</div>
+</Card>

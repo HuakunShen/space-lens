@@ -28,8 +28,10 @@
     MemoryBreakdownBar,
     MemoryPressureCard,
     ProcessDrawer,
+    ProcessGraph,
     ProcessSegmentBar,
     ProcessTable,
+    ProcessTree,
     QuitListPanel,
     StateBanner,
     TerminateDialog,
@@ -121,6 +123,19 @@
   let intervalMs = $state(INITIAL_INTERVAL_MS)
   let query = $state<TableQuery>({ sort: 'footprint', desc: true, filter: 'all', search: '' })
   let selection = $state<Set<string>>(new Set())
+
+  /**
+   * The table lists apps by size; the tree lists processes by who launched
+   * them. Both read the same snapshot and the same search text, so switching
+   * between them keeps the context.
+   */
+  let view = $state<'table' | 'tree'>('table')
+  let treeScope = $state<'all' | 'mine'>('mine')
+  /**
+   * The process the relationship diagram is open on. A row click in the tree
+   * sets it; it is not the Quit selection, which stays on the checkboxes.
+   */
+  let focusPid = $state<number | null>(null)
   let openGroup = $state<ProcessGroup | null>(null)
   let quitList = $state<QuitListEntry[]>([])
   let quitListOpen = $state(false)
@@ -440,7 +455,7 @@
 
 {#if snapshot === null}
   <section
-    class="flex h-dvh min-h-0 flex-col items-center justify-center gap-4 bg-background p-6 text-foreground"
+    class="flex h-full min-h-0 flex-col items-center justify-center gap-4 bg-background p-6 text-foreground"
   >
     {#if error}
       <StateBanner state="error" title="Could not read memory" detail={error} />
@@ -457,28 +472,25 @@
     {/if}
   </section>
 {:else}
-  <main class="memory-page flex h-dvh min-h-0 flex-col gap-4 overflow-auto bg-background p-4 text-foreground">
-    <div class="flex flex-wrap items-start gap-4">
-      <div class="min-w-0 flex-1">
-        <MemoryPressureCard {snapshot} {history} />
-      </div>
-      <div class="flex min-w-0 flex-1 flex-col gap-3">
-        <MemoryBreakdownBar breakdown={snapshot.breakdown} />
-        <div class="flex flex-wrap items-center gap-2">
-          {#if terminateAvailable}
-            <Button.Root onclick={() => void openFreeUp()}>Free up memory…</Button.Root>
-            <Button.Root variant="outline" onclick={() => (quitListOpen = true)}>
-              Quit list ({quitList.length})
-            </Button.Root>
-          {:else}
-            <p class="text-sm text-muted-foreground">This host does not allow process control.</p>
-          {/if}
-          {#if aiAvailable}
-            <Button.Root variant="outline" onclick={() => (aiOpen = true)}>AI advisor</Button.Root>
-          {/if}
-          {#if paused}<span class="text-xs text-muted-foreground">Paused</span>{/if}
-        </div>
-      </div>
+  <main class="memory-page flex h-full min-h-0 flex-col gap-3 overflow-auto bg-background p-4 text-foreground">
+    <div class="grid items-stretch gap-3 lg:grid-cols-[minmax(18rem,0.9fr)_minmax(0,1.5fr)]">
+      <MemoryPressureCard {snapshot} {history} />
+      <MemoryBreakdownBar breakdown={snapshot.breakdown} />
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2">
+      {#if terminateAvailable}
+        <Button.Root onclick={() => void openFreeUp()}>Free up memory…</Button.Root>
+        <Button.Root variant="outline" onclick={() => (quitListOpen = true)}>
+          Quit list ({quitList.length})
+        </Button.Root>
+      {:else}
+        <p class="text-xs text-muted-foreground">This host does not allow process control.</p>
+      {/if}
+      {#if aiAvailable}
+        <Button.Root variant="outline" onclick={() => (aiOpen = true)}>AI advisor</Button.Root>
+      {/if}
+      {#if paused}<span class="text-xs text-muted-foreground">Paused</span>{/if}
     </div>
 
     {#if error}
@@ -515,19 +527,58 @@
       </div>
     {/if}
 
-    <ProcessTable
-      {snapshot}
-      {query}
-      {selection}
-      onSelect={toggleSelect}
-      onOpen={openDrawer}
-      onStage={terminateAvailable ? stage : undefined}
-      onQueryChange={(next) => (query = next)}
-      {intervalMs}
-      onIntervalChange={changeInterval}
-      {paused}
-      onTogglePause={togglePause}
-    />
+    <div class="flex flex-wrap items-start gap-4">
+      <div class="flex min-w-0 flex-1 basis-[32rem] flex-col gap-3">
+        <div class="flex items-center gap-1" role="group" aria-label="Table or process tree">
+          <Button.Root size="sm" variant={view === 'table' ? 'secondary' : 'ghost'} onclick={() => (view = 'table')}>
+            By size
+          </Button.Root>
+          <Button.Root size="sm" variant={view === 'tree' ? 'secondary' : 'ghost'} onclick={() => (view = 'tree')}>
+            Process tree
+          </Button.Root>
+        </div>
+
+        {#if view === 'table'}
+          <ProcessTable
+            {snapshot}
+            {query}
+            {selection}
+            onSelect={toggleSelect}
+            onOpen={openDrawer}
+            onStage={terminateAvailable ? stage : undefined}
+            onQueryChange={(next) => (query = next)}
+            {intervalMs}
+            onIntervalChange={changeInterval}
+            {paused}
+            onTogglePause={togglePause}
+          />
+        {:else}
+          <ProcessTree
+            {snapshot}
+            search={query.search}
+            onSearchChange={(search) => (query = { ...query, search })}
+            {selection}
+            onSelect={toggleSelect}
+            onOpen={openDrawer}
+            onFocus={(pid) => (focusPid = pid)}
+            {focusPid}
+            onStage={terminateAvailable ? stage : undefined}
+            scope={treeScope}
+            onScopeChange={(scope) => (treeScope = scope)}
+          />
+        {/if}
+      </div>
+
+      {#if focusPid !== null}
+        <ProcessGraph
+          {snapshot}
+          pid={focusPid}
+          onFocus={(pid) => (focusPid = pid)}
+          onClose={() => (focusPid = null)}
+          class="w-full self-start xl:sticky xl:top-4 xl:w-[36rem] xl:shrink-0"
+        />
+      {/if}
+    </div>
 
     <AuditLogPanel
       log={auditLog}

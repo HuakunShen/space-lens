@@ -78,25 +78,20 @@
    */
   import type { MemorySnapshot } from '@space-lens/contract'
   import {
-    AppWindow,
     ArrowDown,
     ArrowUp,
-    Bot,
-    Boxes,
     ChevronDown,
     ChevronRight,
     Lock,
     Pause,
     Play,
     Search,
-    Server,
-    Square,
-    Terminal,
   } from '@lucide/svelte'
   import { Badge } from '../ui/badge/index'
   import { Button } from '../ui/button/index'
   import { Checkbox } from '../ui/checkbox/index'
   import { Input } from '../ui/input/index'
+  import KindGlyph from './KindGlyph.svelte'
   import { formatBytes, formatPercentValue } from '../../lib/memory/format.ts'
   import {
     applyOrderFreeze,
@@ -163,8 +158,16 @@
 
   let ordered = $derived(applyOrderFreeze(prevOrder, selectGroups(snapshot, query), frozen))
 
+  // Remember the order for the next freeze. `ordered` reads `prevOrder` (the
+  // value is passed to `applyOrderFreeze` even when nothing is frozen), so
+  // assigning on every run makes this effect invalidate its own input — the
+  // 1 Hz snapshot would then loop a thousand times per tick and trip Svelte's
+  // update-depth guard. Write only when the order really changed.
   $effect(() => {
-    if (!frozen) prevOrder = ordered.map((group) => group.groupId)
+    if (frozen) return
+    const next = ordered.map((group) => group.groupId)
+    if (next.length === prevOrder.length && next.every((id, index) => prevOrder[index] === id)) return
+    prevOrder = next
   })
 
   let processByPid = $derived.by(() => {
@@ -534,22 +537,6 @@
   </div>
 </div>
 
-{#snippet glyph(kind: ProcessKind)}
-  {#if kind === 'app'}
-    <AppWindow class="size-3.5 shrink-0 text-muted-foreground" />
-  {:else if kind === 'helper'}
-    <Boxes class="size-3.5 shrink-0 text-muted-foreground" />
-  {:else if kind === 'agent'}
-    <Bot class="size-3.5 shrink-0 text-muted-foreground" />
-  {:else if kind === 'cli'}
-    <Terminal class="size-3.5 shrink-0 text-muted-foreground" />
-  {:else if kind === 'system'}
-    <Server class="size-3.5 shrink-0 text-muted-foreground" />
-  {:else}
-    <Square class="size-3.5 shrink-0 text-muted-foreground" />
-  {/if}
-{/snippet}
-
 {#snippet dataRow(row: TableRow, index: number)}
   {@const focused = index === focusIndex}
   {@const selected = selection.has(row.key)}
@@ -597,7 +584,7 @@
           <span class="size-3.5 shrink-0"></span>
         {/if}
       {/if}
-      {@render glyph(rowKind(row))}
+      <KindGlyph kind={rowKind(row)} />
       <span class={`truncate ${row.kind === 'process' ? 'text-muted-foreground' : 'font-medium'}`}>
         {rowName(row)}
       </span>
