@@ -77,7 +77,14 @@ test('a scan that measures more than the container reports never shows negative 
 test('skip reasons are labelled, sorted, and symlinks are not missing data', () => {
   const coverage = {
     skippedCount: 161_808,
-    skippedByReason: { symlink: 150_000, 'permission-denied': 11_000, 'mount-boundary': 8, 'odd-new-reason': 800 },
+    skippedByReason: {
+      symlink: 150_000,
+      'permission-denied': 11_000,
+      'special-file': 2_500,
+      'mount-boundary': 8,
+      'duplicate-directory': 18,
+      'odd-new-reason': 800,
+    },
   } as unknown as ScanCoverage
   const rows = skipReasonRows(coverage)
   assert.deepEqual(
@@ -85,10 +92,13 @@ test('skip reasons are labelled, sorted, and symlinks are not missing data', () 
     [
       ['symlink', false],
       ['permission-denied', true],
+      ['special-file', false],
       ['odd-new-reason', true],
+      ['duplicate-directory', false],
       ['mount-boundary', true],
     ],
   )
-  assert.equal(rows[2]?.label, 'odd-new-reason')
+  assert.equal(rows[3]?.label, 'odd-new-reason')
+  assert.equal(rows[4]?.label, 'Duplicate folder aliases')
   assert.deepEqual(skipReasonRows({ skippedCount: 3 } as unknown as ScanCoverage), [])
 })

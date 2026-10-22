@@ -71,10 +71,18 @@ export const ScanCoverageSchema = z.strictObject({
 export type ScanCoverage = z.infer<typeof ScanCoverageSchema>
 
 /**
- * Skip reasons that leave no space unmeasured: a symlink is never followed by
- * design and occupies only its own entry, so it is not missing data.
+ * Skip reasons that leave no space unmeasured: a symlink is never followed and
+ * holds no file data; sockets and devices hold none either; a duplicate
+ * directory alias and a separately selected root are measured once elsewhere;
+ * an online-only (dataless) file uses no local space.
  */
-export const BY_DESIGN_SKIP_REASONS: readonly string[] = ['symlink']
+export const BY_DESIGN_SKIP_REASONS: readonly string[] = [
+  'symlink',
+  'special-file',
+  'duplicate-directory',
+  'separate-root',
+  'dataless',
+]
 
 /** Skipped entries whose size this scan could not measure. */
 export function unmeasuredSkipCount(coverage: ScanCoverage): number {

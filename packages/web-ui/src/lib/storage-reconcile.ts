@@ -1,7 +1,7 @@
 // Turns a scan's APFS breakdown and skip counts into the rows of the scan
 // details sheet: where the disk's "used" figure goes beyond what was measured,
 // and what each kind of skip means. Pure, so the arithmetic is testable.
-import type { ScanCoverage, StorageBreakdown } from '@space-lens/contract'
+import { BY_DESIGN_SKIP_REASONS, type ScanCoverage, type StorageBreakdown } from '@space-lens/contract'
 
 export interface ReconcileRow {
   key: string
@@ -102,12 +102,12 @@ export interface SkipReasonRow {
   label: string
   detail: string
   count: number
-  /** False when the skip leaves no space unmeasured (a symlink is never followed by design). */
+  /** False when the skip leaves no space unmeasured (see `BY_DESIGN_SKIP_REASONS`). */
   missing: boolean
 }
 
-const SKIP_REASONS: Record<string, { label: string; detail: string; missing?: false }> = {
-  symlink: { label: 'Symbolic links', detail: 'Never followed by design; a link holds no file data.', missing: false },
+const SKIP_REASONS: Record<string, { label: string; detail: string }> = {
+  symlink: { label: 'Symbolic links', detail: 'Never followed by design; a link holds no file data.' },
   'permission-denied': {
     label: 'Access denied',
     detail: 'macOS refused to list these folders. Full Disk Access lets the scan read them.',
@@ -117,6 +117,10 @@ const SKIP_REASONS: Record<string, { label: string; detail: string; missing?: fa
     detail: 'Separate filesystems; on APFS they appear as volume rows above.',
   },
   'separate-root': { label: 'Scanned as its own root', detail: 'Measured once, under its own root.' },
+  'duplicate-directory': {
+    label: 'Duplicate folder aliases',
+    detail: 'The same folder reached by a second path, such as a firmlink; measured once.',
+  },
   dataless: {
     label: 'Online-only iCloud files',
     detail: 'Not downloaded, so they use no local space. Downloads stay disabled during scans.',
@@ -144,7 +148,7 @@ export function skipReasonRows(coverage: ScanCoverage): SkipReasonRow[] {
         label: known?.label ?? reason,
         detail: known?.detail ?? 'Left out of this scan.',
         count,
-        missing: known?.missing ?? true,
+        missing: !BY_DESIGN_SKIP_REASONS.includes(reason),
       }
     })
     .sort((left, right) => right.count - left.count || left.reason.localeCompare(right.reason))

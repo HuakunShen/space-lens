@@ -130,6 +130,14 @@ describe('scan contract', () => {
       elapsedMs: 1,
     })
     expect(unmeasuredSkipCount(coverage)).toBe(3)
+    // Sockets, duplicate aliases and online-only files hide no data either.
+    expect(
+      unmeasuredSkipCount({
+        ...coverage,
+        skippedCount: 20,
+        skippedByReason: { ...coverage.skippedByReason, 'special-file': 5, 'duplicate-directory': 2, dataless: 1 },
+      }),
+    ).toBe(3)
     // Older reports have no split; every skip stays counted.
     expect(unmeasuredSkipCount({ ...coverage, skippedByReason: undefined })).toBe(12)
   })
