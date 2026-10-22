@@ -26,6 +26,7 @@ space-lens = { package = "kuntu-scan", version = "0.3", path = "../../vendors/ku
 spacelens-discovery = { path = "../../crates/discovery", version = "0.3", optional = true }
 spacelens-memory = { path = "../../crates/memory", version = "0.3", features = ["appkit"] }
 spacelens-app-audit = { path = "../../crates/app-audit", version = "0.3" }
+spacelens-storage-usage = { path = "../../crates/storage-usage", version = "0.3" }
 
 # cargo-binstall: prebuilt archives from the `cli-v<version>` GitHub release,
 # produced by .github/workflows/cli-release.yml.

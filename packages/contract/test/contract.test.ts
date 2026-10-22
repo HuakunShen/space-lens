@@ -18,6 +18,9 @@ import {
   ScanSessionSchema,
   SessionSchema,
   ScanStatusSchema,
+  ScanCoverageSchema,
+  StorageBreakdownSchema,
+  unmeasuredSkipCount,
   buildContractArtifacts,
   CleanupExecuteRequestSchema,
   CleanupPlanRequestSchema,
@@ -107,6 +110,43 @@ describe('scan contract', () => {
     expect(LocalScanReportSchema.safeParse({ nodes: [], coverage: { mode: 'local-only' }, volumes: [] }).success).toBe(
       false,
     )
+  })
+  it('splits skips by reason and counts only unmeasured ones as missing', () => {
+    const coverage = ScanCoverageSchema.parse({
+      mode: 'local-only',
+      protection: 'macos-no-materialization',
+      sizeMetric: 'allocated',
+      logicalBytes: 0,
+      files: 0,
+      directories: 0,
+      skippedCount: 12,
+      skippedByReason: { symlink: 9, 'permission-denied': 2, 'mount-boundary': 1 },
+      deniedCount: 2,
+      issueCount: 3,
+      issuesTruncated: false,
+      issues: [],
+      elapsedMs: 1,
+    })
+    expect(unmeasuredSkipCount(coverage)).toBe(3)
+    // Older reports have no split; every skip stays counted.
+    expect(unmeasuredSkipCount({ ...coverage, skippedByReason: undefined })).toBe(12)
+  })
+  it('accepts an APFS storage breakdown on scan status', () => {
+    const storage = {
+      container: 'disk3',
+      capacityBytes: 1000,
+      inUseBytes: 520,
+      purgeableBytes: 119,
+      scannedBytes: 287,
+      volumes: [{ name: 'Macintosh HD - Data', role: 'Data', device: 'disk3s5', inUseBytes: 459 }],
+      snapshots: { volume: 'disk3s5', count: 25, timeMachineCount: 25, oldestTimeMachine: '2026-10-05T16:01:11' },
+    }
+    expect(StorageBreakdownSchema.parse(storage)).toEqual(storage)
+    expect(StorageBreakdownSchema.safeParse({ ...storage, purgeableBytes: null, snapshots: null }).success).toBe(true)
+    expect(
+      StorageBreakdownSchema.safeParse({ ...storage, snapshots: { ...storage.snapshots, oldestTimeMachine: 'Oct 5' } })
+        .success,
+    ).toBe(false)
   })
   it('fills defaults and accepts a minimal scan start', () => {
     const parsed = ScanStartRequestSchema.parse({ paths: ['/tmp/demo'] })

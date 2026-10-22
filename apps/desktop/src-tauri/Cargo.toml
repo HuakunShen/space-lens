@@ -46,6 +46,8 @@ space-lens = { package = "kuntu-scan", path = "../../../vendors/kuntu/crates/kun
 # consumes the same crate, so the catalogs cannot drift apart.
 spacelens-discovery = { path = "../../../crates/discovery" }
 spacelens-app-audit = { path = "../../../crates/app-audit" }
+# APFS container accounting attached to finished scans ("hidden space").
+spacelens-storage-usage = { path = "../../../crates/storage-usage" }
 # The process/memory engine, in-process for the desktop (§3 of
 # docs/memory-cleaner-plan.md). The `appkit` feature enables the macOS
 # NSRunningApplication quit and the frontmost-app reading.

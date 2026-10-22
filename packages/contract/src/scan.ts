@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { LocalNodeMetadataShape, ScanCoverageSchema, ScanVolumeSchema } from './local-scan.ts'
+import { LocalNodeMetadataShape, ScanCoverageSchema, ScanVolumeSchema, StorageBreakdownSchema } from './local-scan.ts'
 import { AppScanOriginSchema } from './apps.ts'
 
 export const IgnoredModeSchema = z.enum(['summarize', 'exclude'])
@@ -57,6 +57,8 @@ export const ScanStatusSchema = z.strictObject({
   updatedAt: IsoDateTimeSchema,
   coverage: ScanCoverageSchema.optional(),
   volumes: z.array(ScanVolumeSchema).optional(),
+  /** APFS accounting for the container holding the scan; absent off APFS or when unreadable. */
+  storage: StorageBreakdownSchema.optional(),
   app: AppScanOriginSchema.optional(),
 })
 

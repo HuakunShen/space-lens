@@ -16,6 +16,7 @@ use space_lens::local_scan::{
   LocalScanReport, ScanCoverage, ScanVolume,
 };
 use space_lens::{scan_directory, IgnoredMode, ScanNode, ScanOptions};
+use spacelens_storage_usage::StorageBreakdown;
 
 use crate::app_cleanup_policy as policy;
 
@@ -96,6 +97,8 @@ pub struct ScanStatus {
   pub coverage: Option<ScanCoverage>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub volumes: Option<Vec<ScanVolume>>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub storage: Option<StorageBreakdown>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub app: Option<AppScanOrigin>,
 }
@@ -811,6 +814,7 @@ impl EngineStore {
       updated_at: now_iso(),
       coverage: None,
       volumes: None,
+      storage: None,
       app: None,
     };
     let session = ScanSession {
@@ -924,6 +928,7 @@ impl EngineStore {
       updated_at: now_iso(),
       coverage: None,
       volumes: None,
+      storage: None,
       app: None,
     };
     self.scans.insert(
@@ -985,6 +990,23 @@ impl EngineStore {
         progress.files, progress.directories, progress.skipped_count, progress.denied_count
       );
       record.status.updated_at = now_iso();
+    }
+    Ok(record.status.clone())
+  }
+
+  /// Attach APFS accounting to a finished scan. Read off the engine lock
+  /// (it spawns `diskutil`), so it lands only if the scan is still ready.
+  pub fn attach_storage(
+    &mut self,
+    scan_id: &str,
+    storage: Option<StorageBreakdown>,
+  ) -> EngineResult<ScanStatus> {
+    let record = self
+      .scans
+      .get_mut(scan_id)
+      .ok_or_else(|| problem("NotFound", "scan vanished"))?;
+    if record.status.state == "ready" && storage.is_some() {
+      record.status.storage = storage;
     }
     Ok(record.status.clone())
   }
@@ -1208,6 +1230,7 @@ impl EngineStore {
       updated_at: now_iso(),
       coverage: None,
       volumes: None,
+      storage: None,
       app: Some(origin),
     };
     self.scans.insert(

@@ -24,6 +24,7 @@ use crate::engine::{
 use crate::events::{EventSink, ScopedEventFrame, SubscriptionAck};
 use crate::memory::MemoryState;
 use spacelens_memory::{TerminateExecuteRequest, TerminatePlanRequest};
+use spacelens_storage_usage::{storage_breakdown, ScannedRoot};
 
 pub const EVENT_NAME: &str = "spacelens://event";
 pub const API_MAJOR: u32 = 1;
@@ -839,11 +840,25 @@ fn run_local_scan_task(bundle: &SessionBundle, task: LocalScanTask) {
     )
   }))
   .unwrap_or_else(|_| Err(std::io::Error::other("protected scanner panicked")));
+  // Read before taking the engine lock: it spawns `diskutil`.
+  let storage = result.as_ref().ok().and_then(|report| {
+    let roots: Vec<ScannedRoot> = report
+      .nodes
+      .iter()
+      .map(|node| ScannedRoot {
+        path: node.path.clone(),
+        bytes: node.size,
+      })
+      .collect();
+    storage_breakdown(&roots)
+  });
   let mut engine = bundle.engine.lock().unwrap();
   let was_scanning = engine
     .status(&scan_id)
     .is_ok_and(|status| status.state == "scanning");
-  let status = engine.finish_local_scan(&scan_id, result);
+  let status = engine
+    .finish_local_scan(&scan_id, result)
+    .and_then(|_| engine.attach_storage(&scan_id, storage));
   drop(engine);
   if was_scanning {
     if let Ok(status) = status {

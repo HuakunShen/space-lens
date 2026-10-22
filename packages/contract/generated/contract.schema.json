@@ -112,6 +112,18 @@
             },
             "appLocationReveal": {
               "type": "boolean"
+            },
+            "pathReveal": {
+              "type": "boolean"
+            },
+            "platform": {
+              "type": "string",
+              "enum": [
+                "macos",
+                "windows",
+                "linux",
+                "unknown"
+              ]
             }
           },
           "required": [
@@ -325,6 +337,19 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
+            "skippedByReason": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
             "deniedCount": {
               "type": "integer",
               "minimum": 0,
@@ -425,6 +450,133 @@
             "additionalProperties": false
           }
         },
+        "storage": {
+          "type": "object",
+          "properties": {
+            "container": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "capacityBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "inUseBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "purgeableBytes": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "scannedBytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "volumes": {
+              "maxItems": 64,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 256
+                  },
+                  "role": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "device": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  },
+                  "inUseBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "name",
+                  "role",
+                  "device",
+                  "inUseBytes"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "snapshots": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "volume": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "timeMachineCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "oldestTimeMachine": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "volume",
+                    "count",
+                    "timeMachineCount",
+                    "oldestTimeMachine"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "container",
+            "capacityBytes",
+            "inUseBytes",
+            "purgeableBytes",
+            "scannedBytes",
+            "volumes",
+            "snapshots"
+          ],
+          "additionalProperties": false
+        },
         "app": {
           "type": "object",
           "properties": {
@@ -512,6 +664,19 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "skippedByReason": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
             },
             "deniedCount": {
               "type": "integer",
@@ -1125,6 +1290,19 @@
                       "minimum": 0,
                       "maximum": 9007199254740991
                     },
+                    "skippedByReason": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "additionalProperties": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
                     "deniedCount": {
                       "type": "integer",
                       "minimum": 0,
@@ -1353,6 +1531,19 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
+        },
+        "skippedByReason": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
         },
         "deniedCount": {
           "type": "integer",
@@ -2323,6 +2514,40 @@
       ],
       "additionalProperties": false
     },
+    "RevealPathRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "reveal",
+            "open"
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "RevealPathResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "revealed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "revealed"
+      ],
+      "additionalProperties": false
+    },
     "AppScanOrigin": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2849,7 +3074,8 @@
               "cleanup:execute",
               "ai:chat",
               "memory:read",
-              "memory:terminate"
+              "memory:terminate",
+              "host:reveal"
             ]
           }
         }
@@ -2990,6 +3216,19 @@
                           "minimum": 0,
                           "maximum": 9007199254740991
                         },
+                        "skippedByReason": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
                         "deniedCount": {
                           "type": "integer",
                           "minimum": 0,
@@ -3089,6 +3328,133 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "container": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "capacityBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "inUseBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "purgeableBytes": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "scannedBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "volumes": {
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "maxLength": 256
+                              },
+                              "role": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "device": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "inUseBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "role",
+                              "device",
+                              "inUseBytes"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "snapshots": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "volume": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64
+                                },
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "timeMachineCount": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "oldestTimeMachine": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "volume",
+                                "count",
+                                "timeMachineCount",
+                                "oldestTimeMachine"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "container",
+                        "capacityBytes",
+                        "inUseBytes",
+                        "purgeableBytes",
+                        "scannedBytes",
+                        "volumes",
+                        "snapshots"
+                      ],
+                      "additionalProperties": false
                     },
                     "app": {
                       "type": "object",
@@ -3249,6 +3615,19 @@
                           "minimum": 0,
                           "maximum": 9007199254740991
                         },
+                        "skippedByReason": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
                         "deniedCount": {
                           "type": "integer",
                           "minimum": 0,
@@ -3348,6 +3727,133 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "storage": {
+                      "type": "object",
+                      "properties": {
+                        "container": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "capacityBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "inUseBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "purgeableBytes": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "scannedBytes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "volumes": {
+                          "maxItems": 64,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "maxLength": 256
+                              },
+                              "role": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "device": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "inUseBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "role",
+                              "device",
+                              "inUseBytes"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "snapshots": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "volume": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64
+                                },
+                                "count": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "timeMachineCount": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "oldestTimeMachine": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "volume",
+                                "count",
+                                "timeMachineCount",
+                                "oldestTimeMachine"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "container",
+                        "capacityBytes",
+                        "inUseBytes",
+                        "purgeableBytes",
+                        "scannedBytes",
+                        "volumes",
+                        "snapshots"
+                      ],
+                      "additionalProperties": false
                     },
                     "app": {
                       "type": "object",

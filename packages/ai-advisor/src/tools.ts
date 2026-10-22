@@ -1,5 +1,6 @@
 import type { WorkbenchService } from '@space-lens/client'
 import type { ChildrenPage, CollectorEntry, ScanStatus, TreeNodeSummary } from '@space-lens/contract'
+import { unmeasuredSkipCount } from '@space-lens/contract'
 import { canCollectNode, collectRefusalReason } from '@space-lens/web-ui/lib/app-scan'
 import {
   CLEANUP_RISKS,
@@ -690,7 +691,7 @@ function summaryNotes(status: ScanStatus): string[] {
   if (status.message !== '') notes.push(status.message.slice(0, 300))
   const coverage = status.coverage
   if (coverage) {
-    notes.push(`${coverage.skippedCount} skipped, ${coverage.deniedCount} denied, ${coverage.issueCount} unreadable`)
+    notes.push(`${unmeasuredSkipCount(coverage)} skipped, ${coverage.deniedCount} denied, ${coverage.issueCount} unreadable`)
     for (const issue of coverage.issues.slice(0, 3)) notes.push(`${issue.path}: ${issue.reason}`)
   }
   return notes

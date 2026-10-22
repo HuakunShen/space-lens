@@ -1,0 +1,22 @@
+[package]
+authors.workspace    = true
+description          = "Read-only APFS container accounting that reconciles a scan with what the disk reports."
+edition.workspace    = true
+license.workspace    = true
+name                 = "spacelens-storage-usage"
+repository.workspace = true
+version.workspace    = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+# APFS accounting is macOS-only; other platforms report no breakdown, so the
+# plist and Foundation trees stay out of their builds.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc             = "0.2"
+plist            = "1"
+objc2            = "0.6.4"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSError", "NSString", "NSURL", "NSValue"] }
+
+[dev-dependencies]
+serde_json = "1"

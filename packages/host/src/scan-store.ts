@@ -28,6 +28,7 @@ import type { TrashPort } from './trash.ts'
 import { DISCOVERY_BOOTSTRAP, type DiscoveredEntry, type DiscoverySnapshot } from './discovery.ts'
 import { resolveLocalScanBin, spawnLocalScan, type LocalScanProcess } from './local-process.ts'
 import { protectedDiscovery } from './protected-discovery.ts'
+import { readStorageUsage } from './storage-usage.ts'
 
 type ScanNode = DirectoryNode & Partial<Pick<LocalScanNode, 'logicalSize' | 'isDirectory' | 'scanState' | 'skipReason'>>
 
@@ -676,9 +677,17 @@ export class ScanManager {
     record.process = process
     this.activeLocalProcesses.add(process)
     void process.done
-      .then((report) => {
+      .then(async (report) => {
+        if (record.status.state !== 'scanning' || this.closed) return
+        // Read before the scan turns ready, so the first ready status already
+        // carries the reconciliation; a failed read just leaves it out.
+        const storage = await readStorageUsage(
+          binary,
+          report.nodes.map((root) => ({ path: root.path, bytes: root.size })),
+        )
         if (record.status.state !== 'scanning' || this.closed) return
         this.acceptLocalReport(record, report)
+        if (storage !== undefined) record.status = { ...record.status, storage }
       })
       .catch((error: unknown) => {
         if (record.status.state !== 'scanning') return
