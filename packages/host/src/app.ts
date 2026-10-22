@@ -150,7 +150,12 @@ export function buildApp(deps: HostDeps): HonoApp {
       throw Problems.forbidden(`client address ${normalizeRemoteAddress(remote)} is not in the allowed networks`)
     }
     const verdict = checkOrigin(
-      { hostHeader: c.req.header('host') ?? null, origin, secFetchSite: c.req.header('sec-fetch-site') ?? null },
+      {
+        hostHeader: c.req.header('host') ?? null,
+        origin,
+        secFetchSite: c.req.header('sec-fetch-site') ?? null,
+        secFetchMode: c.req.header('sec-fetch-mode') ?? null,
+      },
       policy,
     )
     if (verdict !== 'ok') {
