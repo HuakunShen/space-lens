@@ -1,24 +1,31 @@
-import type { DiscoveryItem, DiscoveryKind, LocalScanNode, TreeNodeSummary } from '@space-lens/contract'
+import type { DiscoveryKind } from '@space-lens/contract'
 import { basename, dirname, join } from 'node:path'
-import type { DiscoverySnapshot } from './discovery.ts'
+import type { DiscoveryView } from './discovery.ts'
+import { nodeIdOf, type ScanIndex } from './scan-index.ts'
 
-interface ProtectedEntry {
-  id: string
-  node: { path: string; name: string; size: number; ignored: boolean } & Partial<
-    Pick<LocalScanNode, 'scanState' | 'isDirectory'>
-  >
-  parent: string | null
-  childIds: string[]
-  depth: number
+/**
+ * Size-descending, then path order. Paths are rebuilt only for rows whose
+ * size ties, so large-file lists never hold one path string per file.
+ */
+function sortRows(index: ScanIndex, rows: number[]): Int32Array {
+  const order = Int32Array.from(rows)
+  order.sort((a, b) => index.sizeOf(b) - index.sizeOf(a) || a - b)
+  for (let start = 0; start < order.length; ) {
+    const size = index.sizeOf(order[start])
+    let end = start + 1
+    while (end < order.length && index.sizeOf(order[end]) === size) end += 1
+    if (end - start > 1) {
+      const run = Array.from(order.subarray(start, end), (row) => ({ row, path: index.pathOf(row) }))
+      run.sort((a, b) => a.path.localeCompare(b.path) || a.row - b.row)
+      for (let offset = 0; offset < run.length; offset += 1) order[start + offset] = run[offset].row
+    }
+    start = end
+  }
+  return order
 }
 
 /** Classify already protected report metadata; no filesystem probes or rescans. */
-export async function protectedDiscovery<T extends ProtectedEntry>(
-  entries: Iterable<T>,
-  summarize: (entry: T) => TreeNodeSummary,
-): Promise<DiscoverySnapshot> {
-  const all = [...entries]
-  const byPath = new Map(all.map((entry) => [entry.node.path, entry]))
+export async function protectedDiscovery(index: ScanIndex): Promise<DiscoveryView> {
   const python = new Map([
     ['__pycache__', 'Python bytecode'],
     ['.pytest_cache', 'pytest cache'],
@@ -27,8 +34,8 @@ export async function protectedDiscovery<T extends ProtectedEntry>(
   ])
   const js = new Set(['.next', '.nuxt', '.turbo', '.parcel-cache', '.svelte-kit'])
   const isLocalFile = (path: string) => {
-    const node = byPath.get(path)?.node
-    return node?.isDirectory === false && node.scanState === 'complete'
+    const row = index.find(nodeIdOf(path))
+    return row !== -1 && index.isDirectory(row) === false && index.scanStateOf(row) === 'complete'
   }
   const inEnvironment = (path: string) => {
     let cursor = dirname(path)
@@ -39,48 +46,83 @@ export async function protectedDiscovery<T extends ProtectedEntry>(
       cursor = parent
     }
   }
-  const items: Record<DiscoveryKind, DiscoveryItem[]> = { 'large-files': [], caches: [], gitignored: [] }
-  let count = 0
-  for (const entry of all) {
-    if (++count % 1000 === 0) await new Promise<void>((yieldTurn) => setImmediate(yieldTurn))
-    if (entry.node.scanState === 'skipped' || entry.parent === null) continue
-    const item = (category: string): DiscoveryItem => ({
-      node: summarize(entry),
-      parentId: entry.parent,
-      category,
-      isDirectory: entry.node.isDirectory === true,
-    })
-    if (entry.node.ignored) items.gitignored.push(item('Gitignored'))
-    if (entry.node.isDirectory === false) {
-      items['large-files'].push(item('Large file'))
+  const rows: Record<DiscoveryKind, number[]> = { 'large-files': [], caches: [], gitignored: [] }
+  const cacheCategories = new Map<number, string>()
+  for (let row = 0; row < index.count; row += 1) {
+    if ((row + 1) % 1000 === 0) await new Promise<void>((yieldTurn) => setImmediate(yieldTurn))
+    if (index.scanStateOf(row) === 'skipped' || index.parentOf(row) === -1) continue
+    if (index.isIgnored(row)) rows.gitignored.push(row)
+    if (index.isDirectory(row) === false) {
+      rows['large-files'].push(row)
       continue
     }
-    const name = basename(entry.node.path)
+    const name = index.baseNameOf(row)
     let category = python.get(name)
-    if (name === 'node_modules' && isLocalFile(join(dirname(entry.node.path), 'package.json')))
-      category = 'Node dependencies'
-    if (name === 'target' && isLocalFile(join(dirname(entry.node.path), 'Cargo.toml'))) category = 'Rust build output'
-    if (js.has(name) && isLocalFile(join(dirname(entry.node.path), 'package.json'))) category = 'JavaScript build cache'
-    if (category !== undefined && !inEnvironment(entry.node.path)) items.caches.push(item(category))
+    if (category === undefined && name !== 'node_modules' && name !== 'target' && !js.has(name)) continue
+    const path = index.pathOf(row)
+    if (name === 'node_modules' && isLocalFile(join(dirname(path), 'package.json'))) category = 'Node dependencies'
+    if (name === 'target' && isLocalFile(join(dirname(path), 'Cargo.toml'))) category = 'Rust build output'
+    if (js.has(name) && isLocalFile(join(dirname(path), 'package.json'))) category = 'JavaScript build cache'
+    if (category !== undefined && !inEnvironment(path)) {
+      rows.caches.push(row)
+      cacheCategories.set(row, category)
+    }
   }
   for (const kind of ['caches', 'gitignored'] as const) {
-    const directories = new Set(items[kind].filter((item) => item.isDirectory).map((item) => item.node.path))
-    items[kind] = items[kind].filter((item) => {
-      let cursor = dirname(item.node.path)
+    // Drop candidates nested under another directory candidate of the same kind.
+    const selected = new Uint8Array(index.count)
+    for (const row of rows[kind]) if (index.isDirectory(row) === true) selected[row] = 1
+    const rootNested = new Map<number, boolean>()
+    const nestedAboveRoot = (root: number) => {
+      let nested = rootNested.get(root)
+      if (nested === undefined) {
+        nested = false
+        let cursor = index.pathOf(root)
+        for (let parent = dirname(cursor); parent !== cursor; cursor = parent, parent = dirname(cursor)) {
+          const row = index.find(nodeIdOf(parent))
+          if (row !== -1 && selected[row] === 1) {
+            nested = true
+            break
+          }
+        }
+        rootNested.set(root, nested)
+      }
+      return nested
+    }
+    rows[kind] = rows[kind].filter((row) => {
+      let cursor = index.parentOf(row)
       for (;;) {
-        if (directories.has(cursor)) return false
-        const parent = dirname(cursor)
-        if (parent === cursor) return true
+        if (selected[cursor] === 1) return false
+        const parent = index.parentOf(cursor)
+        if (parent === -1) return !nestedAboveRoot(cursor)
         cursor = parent
       }
     })
   }
-  const cumulativeSizes = {} as Record<DiscoveryKind, number[]>
-  for (const kind of Object.keys(items) as DiscoveryKind[]) {
-    items[kind].sort((a, b) => b.node.size - a.node.size || a.node.path.localeCompare(b.node.path))
-    const totals = [0]
-    for (const item of items[kind]) totals.push(totals[totals.length - 1] + item.node.size)
-    cumulativeSizes[kind] = totals
+  const order = {} as Record<DiscoveryKind, Int32Array>
+  const cumulative = {} as Record<DiscoveryKind, Float64Array>
+  for (const kind of Object.keys(rows) as DiscoveryKind[]) {
+    order[kind] = sortRows(index, rows[kind])
+    rows[kind] = []
+    const totals = new Float64Array(order[kind].length + 1)
+    for (let position = 0; position < order[kind].length; position += 1)
+      totals[position + 1] = totals[position] + index.sizeOf(order[kind][position])
+    cumulative[kind] = totals
   }
-  return { entries: [], items, cumulativeSizes }
+  const categoryOf = (kind: DiscoveryKind, row: number) =>
+    kind === 'large-files' ? 'Large file' : kind === 'gitignored' ? 'Gitignored' : cacheCategories.get(row)!
+  return {
+    count: (kind) => order[kind].length,
+    sizeAt: (kind, position) => index.sizeOf(order[kind][position]),
+    itemAt: (kind, position) => {
+      const row = order[kind][position]
+      return {
+        node: index.summarize(row),
+        parentId: index.idOf(index.parentOf(row)),
+        category: categoryOf(kind, row),
+        isDirectory: index.isDirectory(row) === true,
+      }
+    },
+    cumulativeSize: (kind, count) => cumulative[kind][count],
+  }
 }

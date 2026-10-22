@@ -1,7 +1,7 @@
 import { lstatSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, dirname, isAbsolute, resolve, sep } from 'node:path'
-import { createHash, randomBytes } from 'node:crypto'
+import { dirname, isAbsolute, resolve, sep } from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { Worker } from 'node:worker_threads'
 
@@ -18,17 +18,17 @@ import type {
   TreeNodeSummary,
   TreeSliceNode,
   LocalScanNode,
-  LocalScanReport,
 } from '@space-lens/contract'
 import type { DirectoryNode } from 'space-lens'
 
 import type { EventRing } from './events.ts'
 import { ProblemError, Problems } from './problems.ts'
 import type { TrashPort } from './trash.ts'
-import { DISCOVERY_BOOTSTRAP, type DiscoveredEntry, type DiscoverySnapshot } from './discovery.ts'
-import { resolveLocalScanBin, spawnLocalScan, type LocalScanProcess } from './local-process.ts'
+import { DISCOVERY_BOOTSTRAP, snapshotView, type DiscoverySnapshot, type DiscoveryView } from './discovery.ts'
+import { resolveLocalScanBin, spawnLocalScan, type LocalScanProcess, type LocalScanResult } from './local-process.ts'
 import { protectedDiscovery } from './protected-discovery.ts'
 import { readStorageUsage } from './storage-usage.ts'
+import { nodeIdOf, ScanIndex } from './scan-index.ts'
 
 type ScanNode = DirectoryNode & Partial<Pick<LocalScanNode, 'logicalSize' | 'isDirectory' | 'scanState' | 'skipReason'>>
 
@@ -77,34 +77,19 @@ export function normalizeLocalScanPath(path: string): string {
   return normalized
 }
 
-function nodeIdOf(path: string): string {
-  return createHash('sha1').update(path).digest('hex').slice(0, 24)
-}
-
 function newId(prefix: string): string {
   return `${prefix}${randomBytes(6).toString('hex')}`
-}
-
-interface IndexEntry {
-  id: string
-  node: ScanNode
-  parent: string | null
-  childIds: string[]
-  depth: number
-  fingerprint?: { size: number; mtimeMs: number }
-  cleanup?: DiscoveredEntry
 }
 
 interface ScanRecord {
   session: ScanSession
   status: ScanStatus
   worker: Worker | null
-  tree: DirectoryNode[] | null
-  index: Map<string, IndexEntry> | null
+  index: ScanIndex | null
   done: Promise<void>
   resolveDone: () => void
   roots: string[]
-  discovery: Promise<DiscoverySnapshot> | null
+  discovery: Promise<DiscoveryView> | null
   discoveryWorker: Worker | null
   localOnly: boolean
   gitignoreClassified: boolean
@@ -113,8 +98,8 @@ interface ScanRecord {
 
 interface DiscoveryJob {
   record: ScanRecord
-  index: Map<string, IndexEntry>
-  resolve: (snapshot: DiscoverySnapshot) => void
+  index: ScanIndex
+  resolve: (view: DiscoveryView) => void
   reject: (error: Error) => void
 }
 
@@ -136,7 +121,7 @@ export class ScanManager {
   private readonly plans = new Map<string, CleanupPlan>()
   private readonly options: ScanManagerOptions
   private readonly discoveryQueue: DiscoveryJob[] = []
-  private readonly activeDiscovery = new Set<Promise<DiscoverySnapshot>>()
+  private readonly activeDiscovery = new Set<Promise<DiscoveryView>>()
   private readonly activeScanWorkers = new Set<Worker>()
   private readonly activeLocalProcesses = new Set<LocalScanProcess>()
   private closed = false
@@ -199,7 +184,6 @@ export class ScanManager {
       session,
       status,
       worker: null,
-      tree: null,
       index: null,
       done,
       resolveDone,
@@ -237,13 +221,12 @@ export class ScanManager {
     worker.on('message', (message: { type: string; tree?: DirectoryNode[]; message?: string }) => {
       if (record.status.state !== 'scanning') return
       if (message.type === 'done' && message.tree) {
-        record.tree = message.tree
         record.index = this.buildIndex(message.tree)
         record.status = {
           ...record.status,
           state: 'ready',
           bytesScanned: message.tree.reduce((total, root) => total + root.size, 0),
-          entriesScanned: this.countNodes(message.tree),
+          entriesScanned: record.index.count,
           rootIds: message.tree.map((root) => nodeIdOf(root.path)),
           updatedAt: new Date().toISOString(),
         }
@@ -307,23 +290,19 @@ export class ScanManager {
 
   slice(scanId: string, nodeId: string, depth: number, maxChildrenPerNode: number): TreeSlice {
     const { index } = this.requireReady(scanId)
-    const entry = index.get(nodeId)
-    if (entry === undefined) throw Problems.notFound(`no node ${nodeId} in scan ${scanId}`)
+    const row = index.find(nodeId)
+    if (row === -1) throw Problems.notFound(`no node ${nodeId} in scan ${scanId}`)
     const ancestors: TreeNodeSummary[] = []
-    let cursor = entry
-    while (cursor.parent !== null) {
-      const parent = index.get(cursor.parent)
-      if (parent === undefined) break
-      ancestors.unshift(this.summarize(parent))
-      cursor = parent
+    for (let parent = index.parentOf(row); parent !== -1; parent = index.parentOf(parent)) {
+      ancestors.unshift(index.summarize(parent))
     }
-    const tree = this.buildSliceNode(index, entry, depth, maxChildrenPerNode)
+    const tree = this.buildSliceNode(index, row, depth, maxChildrenPerNode)
     return {
       scanId,
-      focusNode: this.summarize(entry),
+      focusNode: index.summarize(row),
       ancestors,
       tree,
-      totalSize: entry.node.size,
+      totalSize: index.sizeOf(row),
       truncated: tree.truncated,
       omittedBytes: tree.omittedBytes,
       omittedCount: tree.omittedCount,
@@ -339,10 +318,11 @@ export class ScanManager {
     sort: 'size' | 'name' | 'path',
   ): ChildrenPage {
     const { index } = this.requireReady(scanId)
-    const entry = index.get(nodeId)
-    if (entry === undefined) throw Problems.notFound(`no node ${nodeId} in scan ${scanId}`)
-    const items = entry.childIds
-      .map((childId) => this.summarize(index.get(childId)!))
+    const row = index.find(nodeId)
+    if (row === -1) throw Problems.notFound(`no node ${nodeId} in scan ${scanId}`)
+    const items = index
+      .childrenOf(row)
+      .map((child) => index.summarize(child))
       .sort((a, b) => {
         if (sort === 'size') return b.size - a.size || a.name.localeCompare(b.name)
         if (sort === 'name') return a.name.localeCompare(b.name)
@@ -369,43 +349,43 @@ export class ScanManager {
     }
     // One worker and promise per ready scan. Paging and switching kinds never
     // rescan the disk, and native scans never block the server's event loop.
-    record.discovery ??= record.localOnly
-      ? protectedDiscovery(index.values(), (entry) => this.summarize(entry))
-      : this.startDiscovery(record, index)
+    record.discovery ??= record.localOnly ? protectedDiscovery(index) : this.startDiscovery(record, index)
     const pending = record.discovery
-    let snapshot: DiscoverySnapshot
+    let view: DiscoveryView
     try {
-      snapshot = await pending
+      view = await pending
     } catch (error) {
       // Failed inspection is retryable; concurrent callers must not clear a
       // newer attempt when they observe the same old rejection.
       if (record.discovery === pending) record.discovery = null
       throw error
     }
-    const items = snapshot.items[request.kind]
-    // Results are sorted and summed in the worker. Find the threshold by
-    // binary search; large lists do not need filtering or summing per page.
+    // Results are sorted and summed once. Find the threshold by binary
+    // search; large lists do not need filtering or summing per page.
     let low = 0
-    let high = items.length
+    let high = view.count(request.kind)
     while (low < high) {
       const middle = Math.floor((low + high) / 2)
-      if (items[middle].node.size >= request.minSize) low = middle + 1
+      if (view.sizeAt(request.kind, middle) >= request.minSize) low = middle + 1
       else high = middle
     }
     const total = low
+    const items = []
+    for (let position = request.offset; position < Math.min(total, request.offset + request.limit); position += 1) {
+      items.push(view.itemAt(request.kind, position))
+    }
     return {
       scanId: request.scanId,
       kind: request.kind,
-      items:
-        request.offset >= total ? [] : items.slice(request.offset, Math.min(total, request.offset + request.limit)),
+      items,
       total,
-      totalSize: snapshot.cumulativeSizes[request.kind][total],
+      totalSize: view.cumulativeSize(request.kind, total),
       offset: request.offset,
       limit: request.limit,
     }
   }
 
-  private startDiscovery(record: ScanRecord, index: Map<string, IndexEntry>): Promise<DiscoverySnapshot> {
+  private startDiscovery(record: ScanRecord, index: ScanIndex): Promise<DiscoveryView> {
     return new Promise((resolve, reject) => {
       this.discoveryQueue.push({ record, index, resolve, reject })
       this.pumpDiscovery()
@@ -439,7 +419,7 @@ export class ScanManager {
     }
   }
 
-  private runDiscovery(record: ScanRecord, index: Map<string, IndexEntry>): Promise<DiscoverySnapshot> {
+  private runDiscovery(record: ScanRecord, index: ScanIndex): Promise<DiscoveryView> {
     return new Promise((resolve, reject) => {
       const worker = new Worker(DISCOVERY_BOOTSTRAP, {
         eval: true,
@@ -464,12 +444,28 @@ export class ScanManager {
           }
           // Keep existing children and sizes exactly as the original scan
           // reported; extra indexed nodes only support discovered selections.
-          const original = index.get(entry.id)
-          if (original === undefined) index.set(entry.id, entry)
-          else original.cleanup = entry
+          const original = index.find(entry.id)
+          if (original === -1) {
+            const parent = entry.parent === null ? -1 : index.find(entry.parent)
+            index.append(
+              {
+                path: entry.node.path,
+                size: entry.node.size,
+                ignored: entry.node.ignored,
+                collapsed: entry.node.collapsed,
+                fingerprint: entry.fingerprint,
+              },
+              parent,
+              parent === -1 ? null : index.pathOf(parent),
+              true,
+            )
+          } else {
+            index.setCleanup(original, entry.node.size, entry.node.ignored, entry.fingerprint)
+          }
           if (++registered % 1000 === 0) await new Promise<void>((yieldTurn) => setImmediate(yieldTurn))
         }
-        resolve(snapshot!)
+        // Registered entries now live in the index; keep only the sorted items.
+        resolve(snapshotView({ items: snapshot!.items, cumulativeSizes: snapshot!.cumulativeSizes }))
       }
       worker.on('message', (message: { type: string; result?: DiscoverySnapshot; message?: string }) => {
         if (message.type === 'done' && message.result) finish(null, message.result)
@@ -519,24 +515,21 @@ export class ScanManager {
         example: unknown[0],
       })
     }
-    const selections = [...new Set(nodeIds)].map((nodeId) => {
-      const entry = index.get(nodeId)!
-      return entry.cleanup ?? entry
-    })
+    const selections = [...new Set(nodeIds)].map((nodeId) => index.cleanupView(index.find(nodeId)))
     for (const entry of selections) {
-      this.guardSelection(record, entry.node.path)
-      const current = this.fingerprintOf(entry.node.path)
+      this.guardSelection(record, entry.path)
+      const current = this.fingerprintOf(entry.path)
       if (
         entry.fingerprint === undefined ||
         current.size !== entry.fingerprint.size ||
         current.mtimeMs !== entry.fingerprint.mtimeMs
       ) {
-        throw Problems.staleSnapshot(`path changed since scanning: ${entry.node.path}; scan again`)
+        throw Problems.staleSnapshot(`path changed since scanning: ${entry.path}; scan again`)
       }
     }
-    const selectedPaths = new Set(selections.map((entry) => entry.node.path))
+    const selectedPaths = new Set(selections.map((entry) => entry.path))
     const normalized = selections.filter((entry) => {
-      let parent = dirname(entry.node.path)
+      let parent = dirname(entry.path)
       for (;;) {
         if (selectedPaths.has(parent)) return false
         const next = dirname(parent)
@@ -546,12 +539,12 @@ export class ScanManager {
     })
     const entries = normalized.map((entry) => {
       return {
-        path: entry.node.path,
-        size: entry.node.size,
-        reason: entry.node.ignored ? 'ignored' : 'staged',
+        path: entry.path,
+        size: entry.size,
+        reason: entry.ignored ? 'ignored' : 'staged',
         preset: null,
-        ignored: entry.node.ignored,
-        fingerprint: this.fingerprintOf(entry.node.path),
+        ignored: entry.ignored,
+        fingerprint: this.fingerprintOf(entry.path),
       }
     })
     const now = Date.now()
@@ -688,6 +681,9 @@ export class ScanManager {
         if (record.status.state !== 'scanning' || this.closed) return
         this.acceptLocalReport(record, report)
         if (storage !== undefined) record.status = { ...record.status, storage }
+      .then((result) => {
+        if (record.status.state !== 'scanning' || this.closed) return
+        this.acceptLocalReport(record, result)
       })
       .catch((error: unknown) => {
         if (record.status.state !== 'scanning') return
@@ -706,40 +702,49 @@ export class ScanManager {
       })
   }
 
-  private acceptLocalReport(record: ScanRecord, report: LocalScanReport): void {
+  private acceptLocalReport(record: ScanRecord, { report, index: streamed }: LocalScanResult): void {
     if (process.platform === 'darwin' && report.coverage.protection !== 'macos-no-materialization') {
       throw Problems.unavailable('protected scanner did not establish macOS no-materialization protection')
     }
     const roots = new Set(record.roots)
-    if (report.nodes.length !== roots.size || report.nodes.some((node) => !roots.has(node.path))) {
-      throw Problems.invalid('protected scanner report does not cover the requested roots')
-    }
-    const seen = new Set<string>()
-    const validate = (node: LocalScanNode, parent: LocalScanNode | null): void => {
-      if (
-        !isAbsolute(node.path) ||
-        resolve(node.path) !== node.path ||
-        seen.has(node.path) ||
-        !record.roots.some((root) => within(node.path, root)) ||
-        (parent !== null && dirname(node.path) !== parent.path) ||
-        (node.scanState === 'skipped' && node.children.length > 0)
-      ) {
-        throw Problems.invalid('protected scanner report contains unsafe or duplicate paths')
+    let index: ScanIndex
+    if (streamed !== null) {
+      // Streamed nodes were validated one by one as they were indexed.
+      if (streamed.roots.length !== roots.size || streamed.roots.some((root) => !roots.has(streamed.pathOf(root)))) {
+        throw Problems.invalid('protected scanner report does not cover the requested roots')
       }
-      seen.add(node.path)
-      for (const child of node.children) validate(child, node)
+      index = streamed
+    } else {
+      if (report.nodes.length !== roots.size || report.nodes.some((node) => !roots.has(node.path))) {
+        throw Problems.invalid('protected scanner report does not cover the requested roots')
+      }
+      const seen = new Set<string>()
+      const validate = (node: LocalScanNode, parent: LocalScanNode | null): void => {
+        if (
+          !isAbsolute(node.path) ||
+          resolve(node.path) !== node.path ||
+          seen.has(node.path) ||
+          !record.roots.some((root) => within(node.path, root)) ||
+          (parent !== null && dirname(node.path) !== parent.path) ||
+          (node.scanState === 'skipped' && node.children.length > 0)
+        ) {
+          throw Problems.invalid('protected scanner report contains unsafe or duplicate paths')
+        }
+        seen.add(node.path)
+        for (const child of node.children) validate(child, node)
+      }
+      for (const root of report.nodes) validate(root, null)
+      index = this.buildIndex(report.nodes, false)
     }
-    for (const root of report.nodes) validate(root, null)
-    record.tree = report.nodes
-    record.index = this.buildIndex(report.nodes, false)
+    record.index = index
     record.status = {
       ...record.status,
       state: 'ready',
       message: '',
       currentPath: null,
-      bytesScanned: report.nodes.reduce((total, root) => total + root.size, 0),
+      bytesScanned: index.roots.reduce((total, root) => total + index.sizeOf(root), 0),
       entriesScanned: report.coverage.files + report.coverage.directories,
-      rootIds: report.nodes.map((root) => nodeIdOf(root.path)),
+      rootIds: index.roots.map((root) => index.idOf(root)),
       coverage: report.coverage,
       volumes: report.volumes,
       updatedAt: new Date().toISOString(),
@@ -769,7 +774,7 @@ export class ScanManager {
     return record
   }
 
-  private requireReady(scanId: string): { record: ScanRecord; index: Map<string, IndexEntry> } {
+  private requireReady(scanId: string): { record: ScanRecord; index: ScanIndex } {
     const record = this.requireScan(scanId)
     if (record.index === null || record.status.state !== 'ready') {
       throw Problems.staleSnapshot(`scan ${scanId} is not ready (state: ${record.status.state})`)
@@ -788,71 +793,52 @@ export class ScanManager {
     this.pumpDiscovery()
   }
 
-  private buildIndex(tree: ScanNode[], fingerprintEnabled = true): Map<string, IndexEntry> {
-    const index = new Map<string, IndexEntry>()
-    const walk = (node: ScanNode, parent: string | null, depth: number): string => {
-      const id = nodeIdOf(node.path)
-      const childIds = (node.children ?? []).map((child) => walk(child, id, depth + 1))
-      let fingerprint: IndexEntry['fingerprint']
+  private buildIndex(tree: ScanNode[], fingerprintEnabled = true): ScanIndex {
+    const index = new ScanIndex()
+    const walk = (node: ScanNode, parent: number, parentPath: string | null): void => {
+      let fingerprint: { size: number; mtimeMs: number } | undefined
       try {
         if (fingerprintEnabled) fingerprint = this.fingerprintOf(node.path)
       } catch {
         /* disappeared during scan; planning fails closed */
       }
-      index.set(id, { id, node, parent, childIds, depth, fingerprint })
-      return id
+      const row = index.append(
+        {
+          path: node.path,
+          size: node.size,
+          ignored: node.ignored,
+          collapsed: node.collapsed,
+          logicalSize: node.logicalSize,
+          isDirectory: node.isDirectory,
+          scanState: node.scanState,
+          skipReason: node.skipReason,
+          fingerprint,
+        },
+        parent,
+        parentPath,
+      )
+      if (row === -1) return
+      for (const child of node.children ?? []) walk(child, row, node.path)
     }
-    for (const root of tree) walk(root, null, 0)
+    for (const root of tree) walk(root, -1, null)
+    index.seal()
     return index
   }
 
-  private countNodes(tree: DirectoryNode[]): number {
-    let count = 0
-    const walk = (node: DirectoryNode): void => {
-      count += 1
-      for (const child of node.children ?? []) walk(child)
-    }
-    for (const root of tree) walk(root)
-    return count
-  }
-
-  private summarize(entry: IndexEntry): TreeNodeSummary {
-    const childCount = entry.childIds.length
-    return {
-      id: entry.id,
-      // the engine reports the full path as `name` under fullPath mode; the
-      // UI wants the basename
-      name: basename(entry.node.path),
-      path: entry.node.path,
-      size: entry.node.size,
-      // the engine's per-node depth is unreliable (hidden roots report 0);
-      // the index tracks the real walk depth
-      depth: entry.depth,
-      ignored: entry.node.ignored,
-      collapsed: entry.node.collapsed,
-      hasChildren: childCount > 0,
-      childCount,
-      ...(entry.node.logicalSize === undefined ? {} : { logicalSize: entry.node.logicalSize }),
-      ...(entry.node.isDirectory === undefined ? {} : { isDirectory: entry.node.isDirectory }),
-      ...(entry.node.scanState === undefined ? {} : { scanState: entry.node.scanState }),
-      ...(entry.node.skipReason === undefined ? {} : { skipReason: entry.node.skipReason }),
-    }
-  }
-
   private buildSliceNode(
-    index: Map<string, IndexEntry>,
-    entry: IndexEntry,
+    index: ScanIndex,
+    row: number,
     remainingDepth: number,
     maxChildrenPerNode: number,
   ): TreeSliceNode & { truncated: boolean } {
-    const summary = this.summarize(entry)
-    const children = entry.childIds.map((childId) => index.get(childId)!).sort((a, b) => b.node.size - a.node.size)
+    const summary = index.summarize(row)
+    const children = index.childrenOf(row).sort((a, b) => index.sizeOf(b) - index.sizeOf(a))
     let omittedBytes = 0
     let omittedCount = 0
     const kept = children.slice(0, remainingDepth > 0 ? maxChildrenPerNode : 0)
     const dropped = children.slice(kept.length)
     for (const child of dropped) {
-      omittedBytes += child.node.size
+      omittedBytes += index.sizeOf(child)
       omittedCount += 1
     }
     let truncated = dropped.length > 0
@@ -864,7 +850,7 @@ export class ScanManager {
             omittedCount += slice.omittedCount
             truncated ||= slice.truncated
             return {
-              ...this.summarize(child),
+              ...index.summarize(child),
               children: slice.children,
               omittedBytes: slice.omittedBytes,
               omittedCount: slice.omittedCount,

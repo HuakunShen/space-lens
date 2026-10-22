@@ -6,10 +6,11 @@ import {
   LocalScanMessageSchema,
   type LocalScanProgress,
   type LocalScanReport,
-  type LocalScanNode,
+  type LocalScanStreamNode,
   type ScanStartRequest,
 } from '@space-lens/contract'
 import { Problems } from './problems.ts'
+import { ScanIndex } from './scan-index.ts'
 
 export const LOCAL_SCAN_BIN_ENV = 'SPACLENS_LOCAL_SCAN_BIN'
 const MAX_STDERR_BYTES = 8192
@@ -51,9 +52,18 @@ export function resolveLocalScanBin(explicit?: string): string {
   )
 }
 
+/**
+ * A streamed scan arrives already indexed and its report carries no nodes;
+ * a non-streamed report carries the whole tree and `index` is null.
+ */
+export interface LocalScanResult {
+  report: LocalScanReport
+  index: ScanIndex | null
+}
+
 export interface LocalScanProcess {
   child: ChildProcessWithoutNullStreams
-  done: Promise<LocalScanReport>
+  done: Promise<LocalScanResult>
   terminate(): void
 }
 
@@ -91,7 +101,7 @@ export function spawnLocalScan(
     killTimer ??= setTimeout(() => child.kill('SIGKILL'), 2000)
     killTimer.unref()
   }
-  const done = new Promise<LocalScanReport>((resolveDone, rejectDone) => {
+  const done = new Promise<LocalScanResult>((resolveDone, rejectDone) => {
     let parts: string[] = []
     let pendingBytes = 0
     let header = ''
@@ -102,17 +112,14 @@ export function spawnLocalScan(
     }
     let stderr = Buffer.alloc(0)
     let report: LocalScanReport | null = null
-    let roots: LocalScanNode[] = []
-    const seenPaths = new Set<string>()
-    // Pin only the active preorder ancestors. Closed branches remain owned
-    // by their parent arrays, without a second map retaining every directory.
-    const parents = new Map<string, LocalScanNode>()
-    const ancestors: LocalScanNode[] = []
+    // Streamed nodes go straight into the compact index; no JS tree or set
+    // of every path is kept. Duplicate paths are caught by the id table.
+    let index = new ScanIndex(1 << 16)
+    // Only the active preorder ancestors stay pinned, with their index rows.
+    const ancestors: { node: LocalScanStreamNode; row: number }[] = []
     let streamed = false
     discardTree = () => {
-      roots = []
-      seenPaths.clear()
-      parents.clear()
+      index = new ScanIndex()
       ancestors.length = 0
       report = null
     }
@@ -121,8 +128,8 @@ export function spawnLocalScan(
       failure ??= new Error(message)
       terminate()
     }
-    const attach = (node: LocalScanNode) => {
-      if (!isAbsolute(node.path) || resolve(node.path) !== node.path || seenPaths.has(node.path)) {
+    const attach = (node: LocalScanStreamNode) => {
+      if (!isAbsolute(node.path) || resolve(node.path) !== node.path) {
         throw new Error('stream node path is non-absolute, unnormalized, or duplicated')
       }
       const cloud = /\/Library\/(?:CloudStorage|Mobile Documents)(?=\/|$)|\/Volumes\/GoogleDrive(?=\/|$)/.exec(
@@ -134,27 +141,25 @@ export function spawnLocalScan(
           throw new Error('stream cloud roots must be skipped and must not contain measured descendants')
         }
       }
+      let parent: { node: LocalScanStreamNode; row: number } | null = null
       if (node.depth === 0) {
         if (!paths.includes(node.path)) throw new Error('stream root was not explicitly requested')
       } else {
-        const parent = parents.get(dirname(node.path))
+        parent = node.depth <= ancestors.length ? ancestors[node.depth - 1] : null
         if (
-          parent === undefined ||
-          parent.depth + 1 !== node.depth ||
-          ancestors[node.depth - 1] !== parent ||
-          !parent.isDirectory ||
-          parent.scanState === 'skipped'
+          parent === null ||
+          parent.node.path !== dirname(node.path) ||
+          parent.node.depth + 1 !== node.depth ||
+          !parent.node.isDirectory ||
+          parent.node.scanState === 'skipped'
         ) {
           throw new Error('stream node has an absent, skipped, non-directory, or invalid preorder parent')
         }
-        parent.children.push(node)
       }
-      for (let depth = ancestors.length - 1; depth >= node.depth; depth -= 1) parents.delete(ancestors[depth].path)
+      const row = index.append(node, parent?.row ?? -1, parent?.node.path ?? null)
+      if (row === -1) throw new Error('stream node path is non-absolute, unnormalized, or duplicated')
       ancestors.length = node.depth + 1
-      ancestors[node.depth] = node
-      if (node.isDirectory && node.scanState !== 'skipped') parents.set(node.path, node)
-      if (node.depth === 0) roots.push(node)
-      seenPaths.add(node.path)
+      ancestors[node.depth] = { node, row }
       streamed = true
     }
     const line = (input: string) => {
@@ -182,9 +187,8 @@ export function spawnLocalScan(
         else {
           if (streamed && message.report.nodes.length !== 0)
             throw new Error('stream completion must not repeat the full tree')
-          // A streaming completion has no tree to clone. Parsed node objects
-          // are already validated and retain their assembled child arrays.
-          report = streamed ? { ...message.report, nodes: roots } : message.report
+          // A streaming completion has no tree; its nodes are already indexed.
+          report = message.report
         }
       } catch (error) {
         fail(
@@ -229,8 +233,6 @@ export function spawnLocalScan(
       if (killTimer !== undefined) clearTimeout(killTimer)
       if (!ignoreOutput && parts.length > 0) line(parts.join(''))
       discardPending()
-      seenPaths.clear()
-      parents.clear()
       ancestors.length = 0
       if (failure !== null) {
         discardTree()
@@ -242,8 +244,9 @@ export function spawnLocalScan(
         discardTree()
         rejectDone(new Error('protected scanner exited without a final report'))
       } else {
-        const accepted = report
-        roots = []
+        const accepted: LocalScanResult = { report, index: streamed ? index : null }
+        if (streamed) index.seal()
+        index = new ScanIndex()
         report = null
         resolveDone(accepted)
       }

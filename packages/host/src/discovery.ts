@@ -17,6 +17,27 @@ export interface DiscoverySnapshot {
 }
 
 /**
+ * Discovery results sorted by size descending, read one page at a time.
+ * Protected scans keep only row numbers here and build items per page.
+ */
+export interface DiscoveryView {
+  count(kind: DiscoveryKind): number
+  sizeAt(kind: DiscoveryKind, position: number): number
+  itemAt(kind: DiscoveryKind, position: number): DiscoveryItem
+  /** Total size of the first `count` items. */
+  cumulativeSize(kind: DiscoveryKind, count: number): number
+}
+
+export function snapshotView(snapshot: Pick<DiscoverySnapshot, 'items' | 'cumulativeSizes'>): DiscoveryView {
+  return {
+    count: (kind) => snapshot.items[kind].length,
+    sizeAt: (kind, position) => snapshot.items[kind][position].node.size,
+    itemAt: (kind, position) => snapshot.items[kind][position],
+    cumulativeSize: (kind, count) => snapshot.cumulativeSizes[kind][count],
+  }
+}
+
+/**
  * Plain JavaScript source is embedded deliberately: serializing transpiled
  * functions captures loader/bundler helpers (for example tsx keepNames), which
  * are unavailable in an isolated worker. This also keeps bundled hosts free
