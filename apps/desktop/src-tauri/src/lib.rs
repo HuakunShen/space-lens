@@ -11,6 +11,12 @@ pub mod reveal;
 use std::path::PathBuf;
 use tauri::Manager;
 
+/// A full-disk scan allocates and frees millions of small blocks; the macOS
+/// system allocator kept those pages resident (and counted by Activity
+/// Monitor) long after the scan, piling up with every rescan.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub fn run() {
   let roots = default_roots();
 

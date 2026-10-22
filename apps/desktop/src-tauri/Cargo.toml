@@ -37,6 +37,11 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 trash = "5"
 sha1 = "0.10"
+# Global allocator (src/lib.rs). The system allocator kept a freed scan's
+# memory resident — gigabytes after a rescan — while mimalloc hands freed
+# pages back to the OS; `extended` exposes `mi_collect` for doing so at once.
+mimalloc = { version = "0.1.52", default-features = false }
+libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 # statvfs for pre-scan volume capacity on roots; the engine crate owns the
 # scan-time volume walk, but `roots()` lives in this shell.
 libc = "0.2"
