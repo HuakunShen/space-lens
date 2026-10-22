@@ -24,6 +24,7 @@
     formatBytes,
     formatNodeName,
     resolveScanVolume,
+    scanBaseline,
     isVirtualAppPath,
     isAppBundleNode,
     isAccountingLeaf,
@@ -47,9 +48,11 @@
     describeError,
     loadRecentTargets,
     loadRoot,
+    loadScanSizes,
     loadToken,
     rememberBaseUrl,
     rememberRecentTarget,
+    rememberScanSize,
     resolveBaseUrl,
     saveToken,
     startEventStream,
@@ -242,6 +245,20 @@
   let startingScan = $state(false)
   let startingAppId = $state<string | null>(null)
   let recentTargets = $state(loadRecentTargets())
+  let scanSizes = $state(loadScanSizes())
+  // A finished folder scan becomes the progress baseline for the next scan of
+  // the same location (keyed by the scan label the host echoes back).
+  $effect(() => {
+    const status = workbench.status
+    if (status?.state !== 'ready' || !status.coverage || status.app || !status.label) return
+    if (scanSizes[status.label]?.at === status.updatedAt) return
+    rememberScanSize(status.label, {
+      bytes: status.bytesScanned,
+      entries: status.coverage.files + status.coverage.directories,
+      at: status.updatedAt,
+    })
+    scanSizes = loadScanSizes()
+  })
   let recentAppScans = $state(loadRecentAppScans())
   /** Pinned per-scan audit reports (§1 Q3): browsing never invalidates. */
   let pinnedReports = $state(new Map<string, AppAuditReport>())
@@ -1520,6 +1537,14 @@
               ? 'Scan cancelled. Choose a location to start again.'
               : null)}
         status={workbench.status}
+        progressBaseline={workbench.status?.state === 'scanning'
+          ? scanBaseline(
+              workbench.status.label,
+              pathsByScan.get(workbench.status.scanId) ?? scannedPaths,
+              scanSizes,
+              workbench.volumes,
+            )
+          : null}
         onScan={(paths) => void startScan(paths)}
         onForget={forgetRecent}
         auditReport={appAuditReport}

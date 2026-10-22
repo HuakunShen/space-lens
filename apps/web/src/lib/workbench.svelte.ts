@@ -9,6 +9,7 @@ import type {
 import type { HttpService } from '@space-lens/client'
 import { connectEventStream } from '@space-lens/client'
 import type { WorkbenchService } from '@space-lens/client'
+import type { ScanSizeRecord } from '@space-lens/web-ui'
 import { parseBaseUrl } from './base-url.ts'
 import { reduceScanEvent } from './desktop-events'
 
@@ -80,6 +81,34 @@ export function loadRecentTargets(): RecentTarget[] {
     return JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? '[]') as RecentTarget[]
   } catch {
     return []
+  }
+}
+
+export const SCAN_SIZES_KEY = 'spacelens.scanSizes'
+
+/** Size of the last finished scan per scan label: the next scan's progress baseline. */
+export function loadScanSizes(): Record<string, ScanSizeRecord> {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(SCAN_SIZES_KEY) ?? '{}')
+    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, ScanSizeRecord>) : {}
+  } catch {
+    return {}
+  }
+}
+
+export function rememberScanSize(label: string, record: ScanSizeRecord): void {
+  // Newest first, bounded: one entry per location the user scans.
+  const next = { [label]: record, ...loadScanSizes() }
+  next[label] = record
+  const trimmed = Object.fromEntries(
+    Object.entries(next)
+      .sort(([, a], [, b]) => b.at.localeCompare(a.at))
+      .slice(0, 20),
+  )
+  try {
+    window.localStorage.setItem(SCAN_SIZES_KEY, JSON.stringify(trimmed))
+  } catch {
+    // A full or blocked store only costs the next scan its estimate.
   }
 }
 

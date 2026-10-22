@@ -92,6 +92,8 @@
   import { Checkbox } from '../ui/checkbox/index'
   import { Input } from '../ui/input/index'
   import KindGlyph from './KindGlyph.svelte'
+  import ColumnResizer from './ColumnResizer.svelte'
+  import { TABLE_COLUMNS, loadWidths, saveWidths } from '../../lib/memory/columns.ts'
   import { formatBytes, formatPercentValue } from '../../lib/memory/format.ts'
   import {
     applyOrderFreeze,
@@ -136,6 +138,9 @@
   }: Props = $props()
 
   const ROW_HEIGHT = 28
+  const WIDTHS_KEY = 'spacelens.memory.tableColumns'
+  /** The fixed checkbox and lock columns either side of the resizable ones. */
+  const EDGE_COLUMNS_WIDTH = 64
   const OVERSCAN = 10
   const FILTERS: readonly MemoryFilter[] = ['all', 'apps', 'background', 'mine', 'protected']
   const FILTER_LABELS: Record<MemoryFilter, string> = {
@@ -214,6 +219,23 @@
     Math.min(rows.length, Math.ceil((scrollTop + viewportHeight) / ROW_HEIGHT) + OVERSCAN),
   )
   let visible = $derived(rows.slice(startIndex, endIndex))
+
+  let widths = $state(loadWidths(WIDTHS_KEY, TABLE_COLUMNS))
+  type TableColumn = keyof typeof TABLE_COLUMNS
+  function resizeColumn(column: TableColumn, width: number): void {
+    widths = { ...widths, [column]: width }
+  }
+  /** Rows are exactly as wide as their columns, so spare width collects at the right edge. */
+  let rowWidth = $derived(
+    EDGE_COLUMNS_WIDTH +
+      widths.name +
+      widths.cpu +
+      widths.memory +
+      widths.real +
+      (showVirtual ? widths.virtual : 0) +
+      widths.pid +
+      widths.kind,
+  )
 
   let columnCount = $derived(showVirtual ? 9 : 8)
   let restrictedCount = $derived(snapshot.processes.filter((process) => process.restricted).length)
@@ -465,50 +487,82 @@
     onfocusout={handleFocusOut}
   >
     <div role="rowgroup" class="sticky top-0 z-10 border-b bg-background">
-      <div role="row" class="flex h-7 items-center text-xs text-muted-foreground">
+      <div role="row" class="flex h-7 items-center text-xs text-muted-foreground" style:min-width={`${rowWidth}px`}>
         <div role="columnheader" class="w-8 shrink-0">
           <span class="sr-only">Select</span>
         </div>
-        <div role="columnheader" aria-sort={sortAria('name')} class="flex min-w-0 flex-1 items-center px-2">
+        <div
+          role="columnheader"
+          aria-sort={sortAria('name')}
+          class="relative flex shrink-0 items-center px-2"
+          style:width={`${widths.name}px`}
+        >
           <button type="button" class="flex items-center gap-1 hover:text-foreground" onclick={() => sortBy('name')}>
             Application
             {#if query.sort === 'name'}{#if query.desc}<ArrowDown class="size-3" />{:else}<ArrowUp class="size-3" />{/if}{/if}
-          </button>
+          </button>{@render resizer('name', 'Application')}
         </div>
-        <div role="columnheader" aria-sort={sortAria('cpu')} class="flex w-14 items-center justify-end px-2">
+        <div
+          role="columnheader"
+          aria-sort={sortAria('cpu')}
+          class="relative flex shrink-0 items-center justify-end px-2"
+          style:width={`${widths.cpu}px`}
+        >
           <button type="button" class="flex items-center gap-1 hover:text-foreground" onclick={() => sortBy('cpu')}>
             CPU
             {#if query.sort === 'cpu'}{#if query.desc}<ArrowDown class="size-3" />{:else}<ArrowUp class="size-3" />{/if}{/if}
-          </button>
+          </button>{@render resizer('cpu', 'CPU')}
         </div>
-        <div role="columnheader" aria-sort={sortAria('footprint')} class="flex w-24 items-center justify-end px-2">
+        <div
+          role="columnheader"
+          aria-sort={sortAria('footprint')}
+          class="relative flex shrink-0 items-center justify-end px-2"
+          style:width={`${widths.memory}px`}
+        >
           <button type="button" class="flex items-center gap-1 hover:text-foreground" onclick={() => sortBy('footprint')}>
             Memory
             {#if query.sort === 'footprint'}{#if query.desc}<ArrowDown class="size-3" />{:else}<ArrowUp class="size-3" />{/if}{/if}
-          </button>
+          </button>{@render resizer('memory', 'Memory')}
         </div>
-        <div role="columnheader" aria-sort={sortAria('resident')} class="flex w-24 items-center justify-end px-2">
+        <div
+          role="columnheader"
+          aria-sort={sortAria('resident')}
+          class="relative flex shrink-0 items-center justify-end px-2"
+          style:width={`${widths.real}px`}
+        >
           <button type="button" class="flex items-center gap-1 hover:text-foreground" onclick={() => sortBy('resident')}>
             Real
             {#if query.sort === 'resident'}{#if query.desc}<ArrowDown class="size-3" />{:else}<ArrowUp class="size-3" />{/if}{/if}
-          </button>
+          </button>{@render resizer('real', 'Real')}
         </div>
         {#if showVirtual}
-          <div role="columnheader" aria-sort={sortAria('virtual')} class="flex w-24 items-center justify-end px-2">
+          <div
+            role="columnheader"
+            aria-sort={sortAria('virtual')}
+            class="relative flex shrink-0 items-center justify-end px-2"
+            style:width={`${widths.virtual}px`}
+          >
             <button type="button" class="flex items-center gap-1 hover:text-foreground" onclick={() => sortBy('virtual')}>
               Virtual
               {#if query.sort === 'virtual'}{#if query.desc}<ArrowDown class="size-3" />{:else}<ArrowUp class="size-3" />{/if}{/if}
-            </button>
+            </button>{@render resizer('virtual', 'Virtual')}
           </div>
         {/if}
-        <div role="columnheader" aria-sort={sortAria('pid')} class="flex w-16 items-center justify-end px-2">
+        <div
+          role="columnheader"
+          aria-sort={sortAria('pid')}
+          class="relative flex shrink-0 items-center justify-end px-2"
+          style:width={`${widths.pid}px`}
+        >
           <button type="button" class="flex items-center gap-1 hover:text-foreground" onclick={() => sortBy('pid')}>
             PID
             {#if query.sort === 'pid'}{#if query.desc}<ArrowDown class="size-3" />{:else}<ArrowUp class="size-3" />{/if}{/if}
-          </button>
+          </button>{@render resizer('pid', 'PID')}
         </div>
-        <div role="columnheader" class="w-20 px-2">Kind</div>
-        <div role="columnheader" class="w-8">
+        <div role="columnheader" class="relative shrink-0 px-2" style:width={`${widths.kind}px`}>
+          Kind{@render resizer('kind', 'Kind')}
+        </div>
+        <div role="columnheader" class="w-8 shrink-0">
           <span class="sr-only">Protection</span>
         </div>
       </div>
@@ -537,6 +591,16 @@
   </div>
 </div>
 
+{#snippet resizer(column: TableColumn, label: string)}
+  <ColumnResizer
+    {label}
+    width={widths[column]}
+    spec={TABLE_COLUMNS[column]}
+    onResize={(width) => resizeColumn(column, width)}
+    onCommit={() => saveWidths(WIDTHS_KEY, widths)}
+  />
+{/snippet}
+
 {#snippet dataRow(row: TableRow, index: number)}
   {@const focused = index === focusIndex}
   {@const selected = selection.has(row.key)}
@@ -548,7 +612,7 @@
     data-focused={focused}
     data-row-index={index}
     class={`absolute left-0 flex w-full items-center text-sm ${focused ? 'bg-muted/60' : ''}`}
-    style={`top: ${index * ROW_HEIGHT}px; height: ${ROW_HEIGHT}px`}
+    style={`top: ${index * ROW_HEIGHT}px; height: ${ROW_HEIGHT}px; min-width: ${rowWidth}px`}
   >
     <div role="gridcell" class="flex w-8 shrink-0 items-center justify-center">
       <Checkbox
@@ -560,7 +624,8 @@
 
     <div
       role="gridcell"
-      class={`flex min-w-0 flex-1 items-center gap-1.5 px-2 ${row.kind === 'process' ? 'pl-6' : ''}`}
+      class={`flex min-w-0 shrink-0 items-center gap-1.5 px-2 ${row.kind === 'process' ? 'pl-6' : ''}`}
+      style:width={`${widths.name}px`}
     >
       {#if row.kind === 'group'}
         {#if row.group.pids.length > 1}
@@ -599,15 +664,15 @@
       {/if}
     </div>
 
-    <div role="gridcell" class="w-14 px-2 text-right tabular-nums">{cpuText(row.kind === 'group' ? row.group.cpuPercent : row.process.cpuPercent)}</div>
-    <div role="gridcell" class="w-24 px-2 text-right tabular-nums">{memoryText(rowFootprint(row), rowResident(row))}</div>
-    <div role="gridcell" class="w-24 px-2 text-right tabular-nums">{rowResident(row) === null ? '—' : formatBytes(rowResident(row) ?? 0)}</div>
+    <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.cpu}px`}>{cpuText(row.kind === 'group' ? row.group.cpuPercent : row.process.cpuPercent)}</div>
+    <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.memory}px`}>{memoryText(rowFootprint(row), rowResident(row))}</div>
+    <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.real}px`}>{rowResident(row) === null ? '—' : formatBytes(rowResident(row) ?? 0)}</div>
     {#if showVirtual}
-      <div role="gridcell" class="w-24 px-2 text-right tabular-nums">{rowVirtual(row) === null ? '—' : formatBytes(rowVirtual(row) ?? 0)}</div>
+      <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.virtual}px`}>{rowVirtual(row) === null ? '—' : formatBytes(rowVirtual(row) ?? 0)}</div>
     {/if}
-    <div role="gridcell" class="w-16 px-2 text-right tabular-nums">{rowPid(row)}</div>
-    <div role="gridcell" class="w-20 px-2">{KIND_LABEL[rowKind(row)]}</div>
-    <div role="gridcell" class="flex w-8 items-center justify-center">
+    <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.pid}px`}>{rowPid(row)}</div>
+    <div role="gridcell" class="shrink-0 truncate px-2" style:width={`${widths.kind}px`}>{KIND_LABEL[rowKind(row)]}</div>
+    <div role="gridcell" class="flex w-8 shrink-0 items-center justify-center">
       {#if reason}
         <Lock class="size-3.5 text-muted-foreground" aria-label={reason} title={reason} />
       {/if}

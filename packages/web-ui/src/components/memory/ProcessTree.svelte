@@ -19,6 +19,8 @@
   import { buildForest, flattenForest, searchForest, withAncestors, type TreeRow } from '../../lib/memory/tree.ts'
   import { KIND_LABEL, processKey, protectionReason, type StageTarget } from './ProcessTable.svelte'
   import KindGlyph from './KindGlyph.svelte'
+  import ColumnResizer from './ColumnResizer.svelte'
+  import { TREE_COLUMNS, loadWidths, saveWidths } from '../../lib/memory/columns.ts'
 
   interface Props {
     snapshot: MemorySnapshot
@@ -60,6 +62,19 @@
   const ROW_HEIGHT = 28
   const OVERSCAN = 10
   const INDENT = 14
+  const WIDTHS_KEY = 'spacelens.memory.treeColumns'
+  /** The fixed checkbox and lock columns either side of the resizable ones. */
+  const EDGE_COLUMNS_WIDTH = 64
+
+  type TreeColumn = keyof typeof TREE_COLUMNS
+  let widths = $state(loadWidths(WIDTHS_KEY, TREE_COLUMNS))
+  function resizeColumn(column: TreeColumn, width: number): void {
+    widths = { ...widths, [column]: width }
+  }
+  /** Rows are exactly as wide as their columns, so spare width collects at the right edge. */
+  let rowWidth = $derived(
+    EDGE_COLUMNS_WIDTH + widths.name + widths.launchedBy + widths.cpu + widths.memory + widths.pid + widths.kind,
+  )
 
   let collapsed = $state<Set<number>>(new Set())
   let focusIndex = $state(0)
@@ -351,17 +366,29 @@
     }}
   >
     <div class="sticky top-0 z-10 border-b bg-background">
-      <div class="flex h-7 items-center text-xs text-muted-foreground">
+      <div class="flex h-7 items-center text-xs text-muted-foreground" style:min-width={`${rowWidth}px`}>
         <div class="flex w-8 shrink-0 items-center justify-center">
           <span class="sr-only">Select</span>
         </div>
-        <div class="flex min-w-0 flex-1 items-center px-2">Process</div>
-        <div class="flex w-20 items-center px-2">Launched by</div>
-        <div class="flex w-14 items-center justify-end px-2">CPU</div>
-        <div class="flex w-24 items-center justify-end px-2">Memory</div>
-        <div class="flex w-16 items-center justify-end px-2">PID</div>
-        <div class="w-20 px-2">Kind</div>
-        <div class="w-8"></div>
+        <div class="relative flex shrink-0 items-center px-2" style:width={`${widths.name}px`}>
+          Process{@render resizer('name', 'Process')}
+        </div>
+        <div class="relative flex shrink-0 items-center px-2" style:width={`${widths.launchedBy}px`}>
+          Launched by{@render resizer('launchedBy', 'Launched by')}
+        </div>
+        <div class="relative flex shrink-0 items-center justify-end px-2" style:width={`${widths.cpu}px`}>
+          CPU{@render resizer('cpu', 'CPU')}
+        </div>
+        <div class="relative flex shrink-0 items-center justify-end px-2" style:width={`${widths.memory}px`}>
+          Memory{@render resizer('memory', 'Memory')}
+        </div>
+        <div class="relative flex shrink-0 items-center justify-end px-2" style:width={`${widths.pid}px`}>
+          PID{@render resizer('pid', 'PID')}
+        </div>
+        <div class="relative shrink-0 px-2" style:width={`${widths.kind}px`}>
+          Kind{@render resizer('kind', 'Kind')}
+        </div>
+        <div class="w-8 shrink-0"></div>
       </div>
     </div>
 
@@ -390,6 +417,16 @@
   </div>
 </div>
 
+{#snippet resizer(column: TreeColumn, label: string)}
+  <ColumnResizer
+    {label}
+    width={widths[column]}
+    spec={TREE_COLUMNS[column]}
+    onResize={(width) => resizeColumn(column, width)}
+    onCommit={() => saveWidths(WIDTHS_KEY, widths)}
+  />
+{/snippet}
+
 {#snippet treeRow(row: TreeRow, index: number)}
   {@const node = row.node}
   {@const key = processKey(node.pid, node.startTimeUs)}
@@ -412,7 +449,7 @@
     class={`absolute left-0 flex w-full cursor-pointer items-center border-l-2 text-sm ${
       diagram ? 'border-primary bg-primary/5' : focused ? 'border-transparent bg-muted/60' : 'border-transparent'
     } ${diagram ? '' : 'hover:bg-muted/40'}`}
-    style={`top: ${index * ROW_HEIGHT}px; height: ${ROW_HEIGHT}px`}
+    style={`top: ${index * ROW_HEIGHT}px; height: ${ROW_HEIGHT}px; min-width: ${rowWidth}px`}
   >
     <div class="flex w-8 shrink-0 items-center justify-center">
       <Checkbox
@@ -422,7 +459,10 @@
       />
     </div>
 
-    <div class="flex min-w-0 flex-1 items-center" style={`padding-left: ${row.depth * INDENT}px`}>
+    <div
+      class="flex min-w-0 shrink-0 items-center"
+      style={`width: ${widths.name}px; padding-left: ${row.depth * INDENT}px`}
+    >
       {#if row.hasChildren}
         <button
           type="button"
@@ -458,14 +498,22 @@
       {/if}
     </div>
 
-    <div class="w-20 truncate px-2 text-xs text-muted-foreground" title={chainText(row)}>
+    <div
+      class="shrink-0 truncate px-2 text-xs text-muted-foreground"
+      style:width={`${widths.launchedBy}px`}
+      title={chainText(row)}
+    >
       {parent ?? '—'}
     </div>
-    <div class="w-14 px-2 text-right tabular-nums">{cpuText(node.cpuPercent)}</div>
-    <div class="w-24 px-2 text-right tabular-nums">{memoryText(node.footprintBytes, node.residentBytes)}</div>
-    <div class="w-16 px-2 text-right tabular-nums">{node.pid}</div>
-    <div class="w-20 px-2 text-xs">{KIND_LABEL[node.kind]}</div>
-    <div class="flex w-8 items-center justify-center">
+    <div class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.cpu}px`}>
+      {cpuText(node.cpuPercent)}
+    </div>
+    <div class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.memory}px`}>
+      {memoryText(node.footprintBytes, node.residentBytes)}
+    </div>
+    <div class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.pid}px`}>{node.pid}</div>
+    <div class="shrink-0 truncate px-2 text-xs" style:width={`${widths.kind}px`}>{KIND_LABEL[node.kind]}</div>
+    <div class="flex w-8 shrink-0 items-center justify-center">
       {#if reason}
         <Lock class="size-3.5 text-muted-foreground" aria-label={reason} title={reason} />
       {/if}
