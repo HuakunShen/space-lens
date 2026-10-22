@@ -22,6 +22,7 @@ import type {
   MemoryHistory,
   MemorySnapshot,
   Problem,
+  RevealAction,
   RootsResponse,
   VolumesResponse,
   ScanListResponse,
@@ -139,6 +140,15 @@ export function createHttpService(options: HttpServiceOptions) {
       request<AppAuditReport>('/api/v1/apps/audit', { method: 'POST', body: JSON.stringify(body) }),
     appIcon: (body: AppIconRequest) =>
       request<AppIcon>('/api/v1/apps/icon', { method: 'POST', body: JSON.stringify(body) }),
+    /**
+     * Opens a scanned path in the host's own file manager. The host resolves
+     * the path against the roots it serves and refuses anything outside them.
+     */
+    revealPath: (body: { path: string; action?: RevealAction }) =>
+      request<{ revealed: boolean }>('/api/v1/host/reveal', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     plan: (body: CleanupPlanRequest) =>
       request<CleanupPlan>('/api/v1/cleanup/plan', { method: 'POST', body: JSON.stringify(body) }),
     execute: (body: CleanupExecuteRequest) =>

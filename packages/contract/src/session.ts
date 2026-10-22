@@ -8,6 +8,8 @@ export const SCOPES = [
   'ai:chat',
   'memory:read',
   'memory:terminate',
+  /** Open a scanned path in the host's own file manager. */
+  'host:reveal',
 ] as const
 
 export type Scope = (typeof SCOPES)[number]

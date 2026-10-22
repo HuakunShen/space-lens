@@ -56,6 +56,7 @@ import {
   ScanVolumeSchema,
 } from './local-scan.ts'
 import { ProblemSchema } from './problem.ts'
+import { RevealPathRequestSchema, RevealPathResultSchema } from './reveal.ts'
 import { ScanStartRequestSchema, ScanStatusSchema, TreeSliceSchema, TreeSliceRequestSchema } from './scan.ts'
 import { SessionExchangeRequestSchema, SessionSchema } from './session.ts'
 import { API_MAJOR, CONTRACT_VERSION } from './version.ts'
@@ -88,6 +89,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   AppAuditReport: AppAuditReportSchema,
   AppIconRequest: AppIconRequestSchema,
   AppIcon: AppIconSchema,
+  RevealPathRequest: RevealPathRequestSchema,
+  RevealPathResult: RevealPathResultSchema,
   AppScanOrigin: AppScanOriginSchema,
   AppScanStartRequest: AppScanStartRequestSchema,
   RecentAppScan: RecentAppScanSchema,

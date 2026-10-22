@@ -28,10 +28,11 @@
     isAppBundleNode,
     isAccountingLeaf,
     annotationForNode,
+    fileManagerLabel,
   } from '@space-lens/web-ui'
   import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
-  import type { AppAuditEntry, AppAuditReport, CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, ScanStatus } from '@space-lens/contract'
+  import type { AppAuditEntry, AppAuditReport, CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, ScanStatus, Session } from '@space-lens/contract'
   import { setMode, userPrefersMode } from 'mode-watcher'
   import { addSelection, selectedAncestor } from '../lib/selection'
   import { canCollectNode } from '@space-lens/web-ui/lib/app-scan'
@@ -65,6 +66,7 @@
     appAuditAvailable as appAuditGate,
     appScanAvailable as appScanGate,
     memoryAvailable as memoryGate,
+    pathRevealAvailable as pathRevealGate,
   } from '../lib/gates'
   import MemoryPage from '../lib/memory/MemoryPage.svelte'
   import AiPanel from '../lib/ai/panel.svelte'
@@ -346,6 +348,16 @@
     }),
   )
   const hostAi = $derived(Boolean(workbench.capabilities?.ai && workbench.service?.aiChat))
+  /**
+   * Opening a scanned path in the host's own file manager. The label names the
+   * *host's* file manager — for the HTTP host that is the machine that ran
+   * the scan, not the browser's.
+   */
+  const pathRevealAvailable = $derived(
+    pathRevealGate({ capabilities: workbench.capabilities, service: workbench.service }),
+  )
+  const revealLabel = $derived(fileManagerLabel(workbench.capabilities?.host.platform, 'reveal'))
+  const openLabel = $derived(fileManagerLabel(workbench.capabilities?.host.platform, 'open'))
   const aiAvailable = $derived(aiGate({ desktop: __SPACLENS_DESKTOP__, ports: aiPorts, hostAi }))
   const memoryAvailable = $derived(
     memoryGate({ capabilities: workbench.capabilities, service: workbench.service }),
@@ -1193,6 +1205,25 @@
       notice = `Copy this path: ${path}`
     }
   }
+  /**
+   * Open a scanned path in the host's own file manager. `reveal` shows the
+   * item in its parent folder, selected; `open` opens a folder in the file
+   * manager itself. The host resolves the path against the roots it serves, so
+   * the request is refused there when it points outside them.
+   */
+  async function revealInFileManager(node: TreeNodeSummary, action: 'reveal' | 'open'): Promise<void> {
+    const service = workbench.service
+    if (!service?.revealPath) {
+      notice = 'This host cannot open folders in a file manager'
+      return
+    }
+    try {
+      await service.revealPath({ path: node.path, action })
+      notice = action === 'open' ? `Opened ${node.name}` : `Revealed ${node.name}`
+    } catch (error) {
+      notice = describeError(error)
+    }
+  }
   function newLocation(path = ''): void {
     if (workbench.deleting || planning) return
     navigationRequest++
@@ -1578,6 +1609,8 @@
               onSelect={(node) => void focus(node)}
               onBack={goUp}
               canGoBack={ancestors.length > 1}
+              onReveal={pathRevealAvailable ? (node, action) => void revealInFileManager(node, action) : undefined}
+              revealLabel={revealLabel}
             />
             <span
               >{navigating
@@ -1706,6 +1739,9 @@
                   onOpen={(node) => void focus(node)}
                   onCollect={collect}
                   onRemove={uncollect}
+                  onReveal={pathRevealAvailable ? (node, action) => void revealInFileManager(node, action) : undefined}
+                  revealLabel={revealLabel}
+                  openLabel={openLabel}
                 />{/key}
               {#if workbench.items.length < workbench.childrenTotal}<div class="load-more">
                   <Button.Root variant="ghost" size="sm" disabled={navigating} onclick={() => void loadMoreChildren()}
@@ -1752,6 +1788,9 @@
               onRetry={() => void refreshDiscovery(true)}
               onBrowse={(item) => void browseDiscovered(item)}
               onCopy={(path) => void copyPath(path)}
+              onReveal={pathRevealAvailable ? (node, action) => void revealInFileManager(node, action) : undefined}
+              revealLabel={revealLabel}
+              openLabel={openLabel}
             />{/key}
         {/if}
       </div>

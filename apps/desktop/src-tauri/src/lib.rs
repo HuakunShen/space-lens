@@ -6,6 +6,7 @@ pub mod engine;
 pub mod events;
 pub mod memory;
 mod native_material;
+pub mod reveal;
 
 use std::path::PathBuf;
 use tauri::Manager;

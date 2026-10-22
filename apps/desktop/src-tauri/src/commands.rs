@@ -141,7 +141,7 @@ fn capabilities_json(memory: Value) -> Value {
       "contractVersion": CONTRACT_VERSION,
       "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true, "appScan": true },
       "cleanup": { "plan": true, "execute": true, "mode": "trash", "appPlan": true, "appExecute": true },
-      "host": { "folderPicker": true, "appLocationReveal": true },
+      "host": { "folderPicker": true, "appLocationReveal": true, "pathReveal": true, "platform": crate::reveal::host_platform() },
       "icloud": "unavailable",
       "memory": memory,
   })
@@ -352,9 +352,23 @@ pub enum SubmitRequest {
   deny_unknown_fields
 )]
 pub enum HostRequest {
-  PickDirectory { title: Option<String> },
-  RevealPath { app_id: String, path: String },
-  ReopenApp { audit_id: String },
+  PickDirectory {
+    title: Option<String>,
+  },
+  RevealPath {
+    app_id: String,
+    path: String,
+  },
+  RevealScanPath {
+    path: String,
+    /// `reveal` (default) shows the item in its parent folder, selected;
+    /// `open` opens the folder itself.
+    #[serde(default)]
+    action: Option<crate::reveal::RevealAction>,
+  },
+  ReopenApp {
+    audit_id: String,
+  },
 }
 
 // -------------------------------------------------------------------- reads
@@ -1135,6 +1149,15 @@ pub async fn sl_host_request(
         let snapshot = bundle.app_audit.lock().unwrap().audit.clone();
         crate::app_cleanup::reveal_app_location(snapshot.as_ref(), &app_id, &path)
       }
+      HostRequest::RevealScanPath { path, action } => {
+        // A scanned path: resolved against the roots this shell serves and
+        // refused when it sits outside them.
+        crate::reveal::reveal_scan_path(
+          &state.roots,
+          &path,
+          action.unwrap_or(crate::reveal::RevealAction::Reveal),
+        )
+      }
       HostRequest::ReopenApp { audit_id } => {
         // The bundle id comes from the memory audit record alone (§4.7); the
         // arm opens an allow-listed identifier, never a caller-supplied path.
@@ -1507,6 +1530,11 @@ mod tests {
     assert_eq!(capabilities["cleanup"]["mode"], "trash");
     assert_eq!(capabilities["host"]["folderPicker"], true);
     assert_eq!(capabilities["host"]["appLocationReveal"], true);
+    assert_eq!(capabilities["host"]["pathReveal"], true);
+    assert_eq!(
+      capabilities["host"]["platform"],
+      crate::reveal::host_platform()
+    );
     // The memory capability is carried through untouched.
     assert_eq!(capabilities["memory"]["sample"], true);
     assert_eq!(capabilities["memory"]["terminate"], true);
@@ -2467,6 +2495,45 @@ mod tests {
     }))
     .unwrap();
     assert!(matches!(reveal, super::HostRequest::RevealPath { .. }));
+    // The scanned-path reveal is its own arm: one path, no app id.
+    let scan_reveal: super::HostRequest = serde_json::from_value(serde_json::json!({
+      "kind": "revealScanPath", "path": "/tmp/a",
+    }))
+    .unwrap();
+    assert!(matches!(
+      scan_reveal,
+      super::HostRequest::RevealScanPath { .. }
+    ));
+    // The action is optional (it defaults to reveal) but never free-form.
+    let scan_reveal_open: super::HostRequest = serde_json::from_value(serde_json::json!({
+      "kind": "revealScanPath", "path": "/tmp/a", "action": "open",
+    }))
+    .unwrap();
+    assert!(matches!(
+      scan_reveal_open,
+      super::HostRequest::RevealScanPath {
+        action: Some(crate::reveal::RevealAction::Open),
+        ..
+      }
+    ));
+    assert!(
+      serde_json::from_value::<super::HostRequest>(serde_json::json!({
+        "kind": "revealScanPath", "path": "/tmp/a", "action": "delete",
+      }))
+      .is_err()
+    );
+    assert!(
+      serde_json::from_value::<super::HostRequest>(serde_json::json!({
+        "kind": "revealScanPath",
+      }))
+      .is_err()
+    );
+    assert!(
+      serde_json::from_value::<super::HostRequest>(serde_json::json!({
+        "kind": "revealScanPath", "path": "/tmp/a", "extra": 1,
+      }))
+      .is_err()
+    );
     assert!(
       serde_json::from_value::<super::HostRequest>(serde_json::json!({
         "kind": "revealPath", "appId": "codex-cli",

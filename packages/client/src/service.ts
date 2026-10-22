@@ -31,6 +31,7 @@ import type {
   HistoryRequest,
   MemoryHistory,
   MemorySnapshot,
+  RevealAction,
   TerminateExecuteRequest,
   TerminateOutcome,
   TerminatePlan,
@@ -75,6 +76,14 @@ export interface WorkbenchService {
   /** Reveals an allow-listed audited app location in Finder. Optional: older
    * hosts predate the host request. */
   revealAppLocation?(body: { appId: string; path: string }): Promise<{ revealed: boolean }>
+  /**
+   * Opens a *scanned* path in the host's own file manager (Finder / Explorer /
+   * the Linux file manager). `reveal` shows the item in its parent folder,
+   * selected; `open` opens a folder in the file manager itself. The path is
+   * resolved by the host against the roots it serves, so a path outside them
+   * is refused there. Optional: older hosts predate the route and the request.
+   */
+  revealPath?(body: { path: string; action?: RevealAction }): Promise<{ revealed: boolean }>
   /**
    * Opens the host's own folder picker and answers the one absolute path
    * chosen, or `null` for a cancelled dialog. The affordance is gated by the

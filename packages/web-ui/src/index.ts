@@ -86,6 +86,7 @@ export {
 } from './lib/app-scan.js'
 export type { AuditAnnotation, CleanupEligibility, RecentAppEntry } from './lib/app-scan.js'
 export { cn } from './lib/utils.js'
+export { fileManagerLabel } from './lib/file-manager.js'
 export { chartEmptyMessage } from './lib/chart-empty.js'
 export {
   CHART_MODES,

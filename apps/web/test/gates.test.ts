@@ -7,6 +7,7 @@ import {
   discoveryAvailable,
   gitignoredAvailable,
   appAuditAvailable,
+  pathRevealAvailable,
 } from '../src/lib/gates.ts'
 import type { Capabilities, ScanStatus } from '@space-lens/contract'
 
@@ -96,6 +97,21 @@ test('app scans need the host flag and the submit arm', () => {
   // service method missing (older adapters, HTTP this round) -> hidden
   assert.equal(appScanAvailable({ capabilities: scanCapabilities, service: {} }), false)
   assert.equal(appScanAvailable({ capabilities: scanCapabilities, service: null }), false)
+})
+
+test('opening a scanned path in the file manager needs the host flag and the request method', () => {
+  const revealCapabilities: Capabilities = {
+    ...capabilities(),
+    host: { folderPicker: false, pathReveal: true, platform: 'macos' },
+  }
+  const revealService = { revealPath: () => Promise.reject(new Error('unused')) }
+  assert.equal(pathRevealAvailable({ capabilities: revealCapabilities, service: revealService }), true)
+  // host flag missing (older host) -> hidden
+  assert.equal(pathRevealAvailable({ capabilities: capabilities(), service: revealService }), false)
+  assert.equal(pathRevealAvailable({ capabilities: null, service: revealService }), false)
+  // service method missing -> hidden
+  assert.equal(pathRevealAvailable({ capabilities: revealCapabilities, service: {} }), false)
+  assert.equal(pathRevealAvailable({ capabilities: revealCapabilities, service: null }), false)
 })
 
 test('the AI advisor needs the desktop proxy or an HTTP host that serves it', () => {

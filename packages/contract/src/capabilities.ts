@@ -5,6 +5,15 @@ import { API_MAJOR, CONTRACT_VERSION } from './version.ts'
 
 const UintSchema = z.number().int().nonnegative()
 
+/**
+ * The operating system the host itself runs on. The frontend uses it to name
+ * the right file manager ("Open in Finder" / "Open in Explorer" / …): for the
+ * HTTP host that is the *server's* platform, not the browser's.
+ */
+export const HOST_PLATFORMS = ['macos', 'windows', 'linux', 'unknown'] as const
+
+export type HostPlatform = (typeof HOST_PLATFORMS)[number]
+
 export const CapabilitiesSchema = z.strictObject({
   apiMajor: z.literal(API_MAJOR),
   contractVersion: z.string(),
@@ -30,6 +39,13 @@ export const CapabilitiesSchema = z.strictObject({
     folderPicker: z.boolean(),
     /** Finder reveal of an allow-listed audited app location. Absent on older hosts. */
     appLocationReveal: z.boolean().optional(),
+    /**
+     * Reveal of a *scanned* path in the host's own file manager. Absent on
+     * older hosts, which never had the route.
+     */
+    pathReveal: z.boolean().optional(),
+    /** The host's operating system, so the UI can name the file manager. */
+    platform: z.enum(HOST_PLATFORMS).optional(),
   }),
   icloud: z.enum(['unavailable']),
   /**

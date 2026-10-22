@@ -23,6 +23,7 @@ import type {
   MemoryHistory,
   MemorySnapshot,
   Problem,
+  RevealAction,
   RootsResponse,
   VolumesResponse,
   ScanSession,
@@ -235,6 +236,11 @@ export function createTauriService(ports: TauriPorts): WorkbenchService {
     async revealAppLocation(body: { appId: string; path: string }) {
       return invokeReply<{ revealed: boolean }>('sl_host_request', {
         request: { kind: 'revealPath', appId: body.appId, path: body.path },
+      })
+    },
+    async revealPath(body: { path: string; action?: RevealAction }) {
+      return invokeReply<{ revealed: boolean }>('sl_host_request', {
+        request: { kind: 'revealScanPath', path: body.path, action: body.action ?? 'reveal' },
       })
     },
     async pickFolder(title?: string) {

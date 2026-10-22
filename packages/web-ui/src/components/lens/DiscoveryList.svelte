@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { File, Folder, Copy, FolderOpen, Search, LoaderCircle, ArrowDown } from '@lucide/svelte'
+  import { File, Folder, Copy, FolderOpen, Search, LoaderCircle, ArrowDown, ExternalLink } from '@lucide/svelte'
   import type { DiscoveryItem, DiscoveryKind, DiscoveryPage, TreeNodeSummary } from '@space-lens/contract'
   import { formatBytes } from '../../lib/format'
-  import { canCollectNode, collectRefusalReason } from '../../lib/app-scan'
+  import { canCollectNode, collectRefusalReason, isVirtualAppPath } from '../../lib/app-scan'
   import LensSelect from './LensSelect.svelte'
   import { Button } from '../ui/button/index'
   import { Checkbox } from '../ui/checkbox/index'
@@ -25,6 +25,14 @@
     onRetry: () => void
     onBrowse: (item: DiscoveryItem) => void
     onCopy: (path: string) => void
+    /**
+     * Shows the item in the host's own file manager (Finder / Explorer / the
+     * Linux file manager). Absent when the host cannot do it.
+     */
+    onReveal?: (node: TreeNodeSummary, action: 'reveal' | 'open') => void
+    /** The labels for those actions, named after the host's platform. */
+    revealLabel?: string
+    openLabel?: string
   }
   let {
     kind,
@@ -44,6 +52,9 @@
     onRetry,
     onBrowse,
     onCopy,
+    onReveal,
+    revealLabel = 'Reveal in file manager',
+    openLabel = 'Open in file manager',
   }: Props = $props()
   let query = $state('')
   let category = $state('all')
@@ -90,6 +101,10 @@
     if (name.includes('pytest')) return 'Test state · previous run hints will reset'
     if (kind === 'caches') return 'Tool cache · regenerated on next use'
     return category
+  }
+  /** A synthetic app-scan path names no real file to show. */
+  function revealDisabled(node: TreeNodeSummary): boolean {
+    return disabled || isVirtualAppPath(node.path)
   }
 </script>
 
@@ -194,7 +209,14 @@
             onclick={() => onBrowse(item)}
             aria-label={`Show ${item.node.name} in browse`}
             title="Show containing folder"><FolderOpen size={15} /></button
-          >
+          >{#if onReveal}<button
+              class="toolbar-icon"
+              type="button"
+              disabled={revealDisabled(item.node)}
+              onclick={() => onReveal(item.node, 'reveal')}
+              aria-label={`Reveal ${item.node.name} in the file manager`}
+              title={revealLabel}><ExternalLink size={14} /></button
+            >{/if}
         </div>
       </div>
     {:else}

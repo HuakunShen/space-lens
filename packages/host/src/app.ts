@@ -17,6 +17,7 @@ import {
   HistoryRequestSchema,
   MemoryHistorySchema,
   MemorySnapshotSchema,
+  RevealPathRequestSchema,
   ScanIdSchema,
   ScanStartRequestSchema,
   SessionExchangeRequestSchema,
@@ -32,6 +33,7 @@ import type {
   AiConfigView,
   CandidatesRequest,
   HistoryRequest,
+  RevealAction,
   TerminateExecuteRequest,
   TerminatePlanRequest,
 } from '@space-lens/contract'
@@ -50,6 +52,7 @@ import { resolveLocalScanBin } from './local-process.ts'
 import { runAppAuditCli, runAppIconCli } from './app-audit.ts'
 import { forwardChatCompletion, forwardChatStream } from './ai.ts'
 import type { MemoryBridge, MemoryCall } from './memory.ts'
+import { revealPath, type FileManagerTarget } from './reveal.ts'
 
 export interface HostDeps {
   config: ResolvedServeConfig
@@ -68,6 +71,12 @@ export interface HostDeps {
    * `/api/v1/memory/*` route into the standard `Unavailable` problem.
    */
   memory?: MemoryBridge
+  /**
+   * How a revealed path reaches the file manager. Absent in production (the
+   * platform launcher runs); tests inject a recorder so no test ever opens a
+   * real window.
+   */
+  revealLauncher?: (target: FileManagerTarget) => void | Promise<void>
 }
 
 type AppEnv = { Variables: { session: SessionRecord } }
@@ -370,6 +379,25 @@ export function buildApp(deps: HostDeps): HonoApp {
       if (error instanceof ProblemError) throw error
       throw Problems.notFound('no icon available for this app')
     }
+  })
+
+  // 4c. Reveal a scanned path in the host's own file manager. The path is
+  // data, never a command: the host resolves it against the roots it serves
+  // and refuses anything outside them before a process is spawned.
+  app.post('/api/v1/host/reveal', async (c) => {
+    ensureScope(c.get('session'), 'host:reveal')
+    const request = await parseBody<{ path: string; action?: RevealAction }>(c, RevealPathRequestSchema)
+    const outcome = await revealPath(request.path, config.roots, {
+      launch: deps.revealLauncher,
+      action: request.action ?? 'reveal',
+    })
+    if (!outcome.ok) {
+      if (outcome.reason === 'invalid') throw Problems.invalid(outcome.message)
+      if (outcome.reason === 'forbidden') throw Problems.forbidden(outcome.message)
+      if (outcome.reason === 'notFound') throw Problems.notFound(outcome.message)
+      throw Problems.unavailable(outcome.message)
+    }
+    return c.json({ revealed: true })
   })
 
   // 5. AI advisor: only when the operator configured one. The base URL, model

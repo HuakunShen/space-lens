@@ -61,6 +61,20 @@ export function revealAvailable(input: RevealGateInput): boolean {
   return Boolean(input.capabilities?.host.appLocationReveal && input.service?.revealAppLocation)
 }
 
+export interface PathRevealGateInput {
+  capabilities: Capabilities | null
+  /** `Pick` of the workbench service; only the reveal method matters. */
+  service: { revealPath?: unknown } | null
+}
+
+/**
+ * Opening a scanned path in the host's own file manager needs the host flag
+ * and the host request method — both, like every other gate here.
+ */
+export function pathRevealAvailable(input: PathRevealGateInput): boolean {
+  return Boolean(input.capabilities?.host.pathReveal && input.service?.revealPath)
+}
+
 export interface AppScanGateInput {
   capabilities: Capabilities | null
   /** `Pick` of the workbench service; only the optional startAppScan method matters. */

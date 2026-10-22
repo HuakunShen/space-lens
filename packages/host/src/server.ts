@@ -13,6 +13,7 @@ import { EventRing } from './events.ts'
 import { buildApp } from './app.ts'
 import { resolveLocalScanBin } from './local-process.ts'
 import { createMemoryBridge, type MemoryBridge } from './memory.ts'
+import { hostPlatform } from './reveal.ts'
 import { ScanManager } from './scan-store.ts'
 import { createSystemTrash } from './trash.ts'
 
@@ -63,6 +64,10 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
   const scopes = [
     'scan:read',
     'scan:start',
+    // Reveal a scanned path in this host's own file manager. It never writes
+    // and never leaves the roots the operator configured, so it rides along
+    // with the read scopes.
+    'host:reveal',
     ...(config.allowCleanup ? ['cleanup:plan', 'cleanup:execute'] : []),
     // The AI scope is granted only when the operator configured an advisor.
     ...(config.ai !== null ? ['ai:chat'] : []),
@@ -136,7 +141,7 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
       maxConcurrent: config.maxConcurrentScans,
     },
     cleanup: { plan: config.allowCleanup, execute: config.allowCleanup, mode: config.allowCleanup ? 'trash' : 'none' },
-    host: { folderPicker: false },
+    host: { folderPicker: false, pathReveal: true, platform: hostPlatform() },
     icloud: 'unavailable',
     ai: config.ai !== null,
     ...(memoryCapability === undefined ? {} : { memory: memoryCapability }),
