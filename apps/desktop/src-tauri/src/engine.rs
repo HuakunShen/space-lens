@@ -519,6 +519,8 @@ struct ScanRecord {
   /// Per location-root completeness evidence (A1/R2): canonical location
   /// path string -> whole-folder cleanable. Absent entries count as false.
   app_folder_cleanable: HashMap<String, bool>,
+  /// Engine clock tick of the last read; orders eviction (LRU).
+  last_used: std::cell::Cell<u64>,
 }
 
 /// Prepared under a short lock, executed with all filesystem work outside it.
@@ -578,6 +580,13 @@ impl AppScanContext {
 }
 
 /// The whole desktop engine behind one session.
+/// Finished scans other than the most recently used one are kept only while
+/// their indexes together stay within this many nodes: a few app or folder
+/// scans, never a second full disk (millions of nodes, hundreds of MB).
+const RETAINED_NODE_BUDGET: usize = 500_000;
+/// And never more than this many finished scans in all.
+const RETAINED_SCAN_LIMIT: usize = 16;
+
 pub struct EngineStore {
   roots: Vec<PathBuf>,
   scans: HashMap<String, ScanRecord>,
@@ -585,6 +594,9 @@ pub struct EngineStore {
   /// Private recursive manifests for app-scan plans (A4), keyed by plan id
   /// and consumed atomically with the plan.
   app_manifests: HashMap<String, HashMap<String, (u64, i64)>>,
+  /// Monotonic tick stamped on a scan whenever it is read.
+  clock: std::cell::Cell<u64>,
+  retained_node_budget: usize,
 }
 
 impl EngineStore {
@@ -594,7 +606,68 @@ impl EngineStore {
       scans: HashMap::new(),
       plans: HashMap::new(),
       app_manifests: HashMap::new(),
+      clock: std::cell::Cell::new(0),
+      retained_node_budget: RETAINED_NODE_BUDGET,
     }
+  }
+
+  fn tick(&self) -> u64 {
+    let next = self.clock.get() + 1;
+    self.clock.set(next);
+    next
+  }
+
+  /// Drops finished scans nobody is looking at, so memory stays bounded
+  /// across rescans. Running scans are never touched, and the most recently
+  /// used ready scan always stays (it is what the UI shows while a new scan
+  /// runs, or after one is cancelled). Other finished scans stay only within
+  /// the node budget, newest first. Plans for dropped scans go with them;
+  /// reads of a dropped scan answer NotFound.
+  fn evict_finished_scans(&mut self) {
+    let mut finished: Vec<(u64, String, usize, bool)> = self
+      .scans
+      .iter()
+      .filter(|(_, record)| record.active_worker.is_none() && record.status.state != "scanning")
+      .map(|(scan_id, record)| {
+        (
+          record.last_used.get(),
+          scan_id.clone(),
+          record.index.len(),
+          record.status.state == "ready",
+        )
+      })
+      .collect();
+    finished.sort_by_key(|(last_used, ..)| std::cmp::Reverse(*last_used));
+    let pinned = finished
+      .iter()
+      .find(|(_, _, _, ready)| *ready)
+      .map(|(_, scan_id, _, _)| scan_id.clone());
+    let mut budget = self.retained_node_budget;
+    let mut kept = 1;
+    let mut evicted = HashSet::new();
+    for (_, scan_id, nodes, _) in finished {
+      if Some(&scan_id) == pinned.as_ref() {
+        continue;
+      }
+      if kept < RETAINED_SCAN_LIMIT && nodes <= budget {
+        budget -= nodes;
+        kept += 1;
+        continue;
+      }
+      evicted.insert(scan_id);
+    }
+    if evicted.is_empty() {
+      return;
+    }
+    self.scans.retain(|scan_id, _| !evicted.contains(scan_id));
+    release_freed_memory();
+    self
+      .plans
+      .retain(|_, (plan, _)| !evicted.contains(&plan.scan_id));
+    let plans = &self.plans;
+    self
+      .app_manifests
+      .retain(|plan_id, _| plans.contains_key(plan_id));
   }
 
   pub fn roots(&self) -> Vec<ScanTarget> {
@@ -831,8 +904,10 @@ impl EngineStore {
         virtual_root_id: None,
         bundle_node_id: None,
         app_folder_cleanable: HashMap::new(),
+        last_used: std::cell::Cell::new(self.tick()),
       },
     );
+    self.evict_finished_scans();
     Ok(session)
   }
 
@@ -938,8 +1013,10 @@ impl EngineStore {
         virtual_root_id: None,
         bundle_node_id: None,
         app_folder_cleanable: HashMap::new(),
+        last_used: std::cell::Cell::new(self.tick()),
       },
     );
+    self.evict_finished_scans();
     Ok((
       session,
       LocalScanTask {
@@ -1030,6 +1107,7 @@ impl EngineStore {
         let roots = index_local_nodes(&mut index, nodes, NONE);
         index.seal();
         let root_ids: Vec<String> = roots.iter().map(|root| index.wire_id(*root)).collect();
+        release_freed_memory();
         record.status.entries_scanned = index.len();
         record.status.state = "ready".into();
         record.status.message = format!(
@@ -1055,7 +1133,18 @@ impl EngineStore {
     }
     record.status.current_path = None;
     record.status.updated_at = now_iso();
-    Ok(record.status.clone())
+    let status = record.status.clone();
+    self.finished(scan_id);
+    Ok(status)
+  }
+
+  /// A scan just left `scanning`: it becomes the most recently used one,
+  /// and older finished scans beyond the retention budget are dropped.
+  fn finished(&mut self, scan_id: &str) {
+    if let Some(record) = self.scans.get(scan_id) {
+      record.last_used.set(self.tick());
+    }
+    self.evict_finished_scans();
   }
 
   /// Starts an app scan: validates the closed request against the pinned
@@ -1243,8 +1332,10 @@ impl EngineStore {
         virtual_root_id: None,
         bundle_node_id: None,
         app_folder_cleanable: HashMap::new(),
+        last_used: std::cell::Cell::new(self.tick()),
       },
     );
+    self.evict_finished_scans();
     Ok((
       session,
       LocalScanTask {
@@ -1319,7 +1410,9 @@ impl EngineStore {
     match result {
       Ok(report) => {
         Self::index_app_report(record, &context, report);
-        Ok(record.status.clone())
+        let status = record.status.clone();
+        self.finished(scan_id);
+        Ok(status)
       }
       Err(error) => {
         record.status.state = if error.kind() == std::io::ErrorKind::Interrupted {
@@ -2229,10 +2322,12 @@ impl EngineStore {
   }
 
   fn record(&self, scan_id: &str) -> EngineResult<&ScanRecord> {
-    self
+    let record = self
       .scans
       .get(scan_id)
-      .ok_or_else(|| problem("NotFound", format!("no scan {scan_id}")))
+      .ok_or_else(|| problem("NotFound", format!("no scan {scan_id}")))?;
+    record.last_used.set(self.tick());
+    Ok(record)
   }
 
   fn ready(&self, scan_id: &str) -> EngineResult<&ScanRecord> {
@@ -2931,6 +3026,13 @@ fn walk_local_index(
   id
 }
 
+/// Returns memory freed by a finished walk or a dropped scan to the OS now,
+/// instead of whenever the allocator next purges on its own.
+fn release_freed_memory() {
+  // SAFETY: `mi_collect` only walks the allocator's own free lists.
+  unsafe { libmimalloc_sys::mi_collect(true) };
+}
+
 fn count_nodes(node: &ScanNode) -> usize {
   1 + node.children.iter().map(count_nodes).sum::<usize>()
 }
@@ -2993,5 +3095,125 @@ fn build_slice_node(
     truncated,
     omitted_bytes,
     omitted_count,
+  }
+}
+
+#[cfg(test)]
+mod retention_tests {
+  use super::*;
+
+  struct Fixture(PathBuf);
+  impl Fixture {
+    fn new() -> Self {
+      static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+      let path = std::env::temp_dir().join(format!(
+        "sl-retention-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+      ));
+      fs::create_dir_all(path.join("data")).unwrap();
+      fs::write(path.join("data/file"), vec![b'x'; 8192]).unwrap();
+      Self(fs::canonicalize(path).unwrap())
+    }
+    fn request(&self) -> ScanStartRequest {
+      ScanStartRequest {
+        paths: vec![self.0.to_string_lossy().into_owned()],
+        local_only: true,
+        ignore_hidden: false,
+        respect_gitignore: true,
+        ignored_mode: WireIgnoredMode::Summarize,
+        label: None,
+      }
+    }
+  }
+  impl Drop for Fixture {
+    fn drop(&mut self) {
+      let _ = fs::remove_dir_all(&self.0);
+    }
+  }
+
+  fn store(fixture: &Fixture, budget: usize) -> EngineStore {
+    let mut store = EngineStore::new(vec![fixture.0.clone()]);
+    store.retained_node_budget = budget;
+    store
+  }
+
+  fn scan(store: &mut EngineStore, fixture: &Fixture) -> String {
+    store.start_scan(fixture.request()).unwrap().scan_id
+  }
+
+  #[test]
+  fn a_rescan_keeps_the_previous_scan_until_it_finishes_then_drops_it() {
+    let fixture = Fixture::new();
+    let mut store = store(&fixture, 0);
+    let first = scan(&mut store, &fixture);
+    let (second, task) = store.prepare_local_scan(fixture.request()).unwrap();
+    // While the rescan runs, the UI can still browse the previous result.
+    assert_eq!(store.status(&first).unwrap().state, "ready");
+    let report = scan_local_directory_with_progress(task.options, task.cancellation, |_| {});
+    store.finish_local_scan(&second.scan_id, report).unwrap();
+    assert_eq!(store.status(&second.scan_id).unwrap().state, "ready");
+    assert_eq!(store.status(&first).unwrap_err().code, "NotFound");
+  }
+
+  #[test]
+  fn a_cancelled_rescan_does_not_push_out_the_scan_on_screen() {
+    let fixture = Fixture::new();
+    let mut store = store(&fixture, 0);
+    let first = scan(&mut store, &fixture);
+    let (second, _task) = store.prepare_local_scan(fixture.request()).unwrap();
+    store.cancel_scan(&second.scan_id).unwrap();
+    store
+      .finish_local_scan(
+        &second.scan_id,
+        Err(std::io::Error::new(
+          std::io::ErrorKind::Interrupted,
+          "cancelled",
+        )),
+      )
+      .unwrap();
+    // The cancelled scan is read last, yet the ready one stays pinned.
+    assert_eq!(store.status(&second.scan_id).unwrap().state, "cancelled");
+    let third = store.prepare_local_scan(fixture.request()).unwrap().0;
+    assert_eq!(store.status(&first).unwrap().state, "ready");
+    assert_eq!(store.status(&third.scan_id).unwrap().state, "scanning");
+  }
+
+  #[test]
+  fn small_scans_stay_within_the_node_budget_and_their_plans_go_with_them() {
+    let fixture = Fixture::new();
+    let mut store = store(&fixture, RETAINED_NODE_BUDGET);
+    let scans: Vec<String> = (0..3).map(|_| scan(&mut store, &fixture)).collect();
+    for scan_id in &scans {
+      assert_eq!(store.status(scan_id).unwrap().state, "ready");
+    }
+    // Shrinking the budget drops all but the most recently used ready scan.
+    let root = store.status(&scans[0]).unwrap().root_ids[0].clone();
+    let data = store
+      .children(&ChildrenPageRequest {
+        scan_id: scans[0].clone(),
+        node_id: root,
+        offset: 0,
+        limit: 10,
+        sort: "size".into(),
+      })
+      .unwrap()
+      .items[0]
+      .id
+      .clone();
+    store
+      .plan(&CleanupPlanRequest {
+        scan_id: scans[0].clone(),
+        node_ids: vec![data],
+      })
+      .unwrap();
+    assert_eq!(store.plans.len(), 1);
+    store.status(&scans[2]).unwrap();
+    store.retained_node_budget = 0;
+    store.evict_finished_scans();
+    assert_eq!(store.status(&scans[0]).unwrap_err().code, "NotFound");
+    assert_eq!(store.status(&scans[1]).unwrap_err().code, "NotFound");
+    assert_eq!(store.status(&scans[2]).unwrap().state, "ready");
+    assert!(store.plans.is_empty());
   }
 }

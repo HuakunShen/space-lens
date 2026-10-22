@@ -4,7 +4,9 @@
 //!
 //! Prints the process's physical footprint (what Activity Monitor shows as
 //! "Memory" on macOS) after the walk, after indexing, and after the
-//! large-files discovery, plus the lifetime peak.
+//! discovery views, plus the lifetime peak. `SCAN_FOOTPRINT_RESCANS=n` scans
+//! the same paths n more times; `SCAN_FOOTPRINT_HOLD=seconds` keeps the
+//! process alive at the end for `vmmap --summary <pid>`.
 
 use std::path::PathBuf;
 use std::time::Instant;
@@ -37,19 +39,6 @@ fn footprint() -> (u64, u64) {
   (0, 0)
 }
 
-fn relieve() {
-  #[cfg(target_os = "macos")]
-  {
-    extern "C" {
-      fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
-    }
-    // SAFETY: null zone = all zones; no borrowed memory.
-    unsafe {
-      malloc_zone_pressure_relief(std::ptr::null_mut(), 0);
-    }
-  }
-}
-
 fn report(stage: &str, started: Instant) {
   let (now, peak) = footprint();
   println!(
@@ -70,16 +59,15 @@ fn main() {
   let started = Instant::now();
   report("baseline", started);
   let mut engine = EngineStore::new(vec![PathBuf::from("/")]);
-  let (session, task) = engine
-    .prepare_local_scan(ScanStartRequest {
-      paths,
-      local_only: true,
-      ignore_hidden: false,
-      respect_gitignore: true,
-      ignored_mode: WireIgnoredMode::Summarize,
-      label: None,
-    })
-    .expect("prepare");
+  let request = |paths: &[String]| ScanStartRequest {
+    paths: paths.to_vec(),
+    local_only: true,
+    ignore_hidden: false,
+    respect_gitignore: true,
+    ignored_mode: WireIgnoredMode::Summarize,
+    label: None,
+  };
+  let (session, task) = engine.prepare_local_scan(request(&paths)).expect("prepare");
   let result = scan_local_directory_with_progress(task.options, task.cancellation, |_| {});
   report("walk finished (report)", started);
   let status = engine
@@ -127,9 +115,6 @@ fn main() {
       limit: 200,
     };
     let prepared = engine.prepare_discovery(&request).expect("discovery");
-    report("  prepared", started);
-    relieve();
-    report("  prepared + relief", started);
     let data = match prepared {
       PreparedDiscovery::Ready(data) => Some(data),
       PreparedDiscovery::Cached => None,
@@ -138,6 +123,34 @@ fn main() {
     let page = engine.finish_discovery(&request, data).expect("finish");
     println!("{kind:?}: total {} size {}", page.total, page.total_size);
     report("discovery", started);
+  }
+  // `SCAN_FOOTPRINT_RESCANS=n` scans the same paths n more times, as a user
+  // rescanning the disk would; finished scans must not pile up.
+  let rescans: usize = std::env::var("SCAN_FOOTPRINT_RESCANS")
+    .ok()
+    .and_then(|value| value.parse().ok())
+    .unwrap_or(0);
+  let mut previous = session.scan_id.clone();
+  for round in 1..=rescans {
+    let (session, task) = engine
+      .prepare_local_scan(request(&paths))
+      .expect("prepare rescan");
+    let result = scan_local_directory_with_progress(task.options, task.cancellation, |_| {});
+    report(&format!("rescan {round} walk finished"), started);
+    let status = engine
+      .finish_local_scan(&session.scan_id, result)
+      .expect("finish rescan");
+    println!(
+      "rescan {round}: entries {} state {}; previous scan {}",
+      status.entries_scanned,
+      status.state,
+      match engine.status(&previous) {
+        Ok(_) => "still held",
+        Err(_) => "dropped",
+      }
+    );
+    report(&format!("rescan {round} indexed"), started);
+    previous = session.scan_id;
   }
   if let Ok(seconds) = std::env::var("SCAN_FOOTPRINT_HOLD") {
     // Keep the process alive for `vmmap --summary <pid>` or `footprint`.
