@@ -670,20 +670,17 @@ export class ScanManager {
     record.process = process
     this.activeLocalProcesses.add(process)
     void process.done
-      .then(async (report) => {
+      .then(async (result) => {
         if (record.status.state !== 'scanning' || this.closed) return
         // Read before the scan turns ready, so the first ready status already
         // carries the reconciliation; a failed read just leaves it out.
         const storage = await readStorageUsage(
           binary,
-          report.nodes.map((root) => ({ path: root.path, bytes: root.size })),
+          result.report.nodes.map((root) => ({ path: root.path, bytes: root.size })),
         )
         if (record.status.state !== 'scanning' || this.closed) return
-        this.acceptLocalReport(record, report)
-        if (storage !== undefined) record.status = { ...record.status, storage }
-      .then((result) => {
-        if (record.status.state !== 'scanning' || this.closed) return
         this.acceptLocalReport(record, result)
+        if (storage !== undefined) record.status = { ...record.status, storage }
       })
       .catch((error: unknown) => {
         if (record.status.state !== 'scanning') return
