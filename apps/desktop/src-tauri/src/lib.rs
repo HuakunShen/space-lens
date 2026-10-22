@@ -69,7 +69,18 @@ fn dirs_home() -> PathBuf {
 fn default_roots() -> Vec<PathBuf> {
   let mut roots = vec![dirs_home()];
   #[cfg(target_os = "macos")]
-  roots.push(PathBuf::from("/Volumes"));
+  {
+    // The startup disk. `/` is the firmlink union of the read-only system
+    // volume and the writable data volume; `/System/Volumes/Data` is that
+    // writable half, which the protected walker treats as its own root (it
+    // excludes nested roots from the parent traversal, so the disk is
+    // measured once). Serving both is what lets the drive list offer
+    // "Macintosh HD" — the same pair the browser host uses when it is
+    // started with `--root /`.
+    roots.push(PathBuf::from("/"));
+    roots.push(PathBuf::from("/System/Volumes/Data"));
+    roots.push(PathBuf::from("/Volumes"));
+  }
   #[cfg(target_os = "linux")]
   {
     roots.push(PathBuf::from("/mnt"));
@@ -102,6 +113,11 @@ mod tests {
     assert!(roots
       .iter()
       .any(|root| root == std::path::Path::new("/Volumes")));
+    // The startup disk is scannable too: `/` and its writable data volume.
+    assert!(roots.iter().any(|root| root == std::path::Path::new("/")));
+    assert!(roots
+      .iter()
+      .any(|root| root == std::path::Path::new("/System/Volumes/Data")));
   }
 
   #[cfg(target_os = "linux")]
