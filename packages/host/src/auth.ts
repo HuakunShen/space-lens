@@ -141,6 +141,18 @@ export class AuthService {
     }
     // A successful exchange consumes the ticket exactly once, here.
     this.tickets.delete(key)
+    return { ok: true, session: this.mintSession() }
+  }
+
+  /**
+   * Creates a session with this host's scopes, without a ticket.
+   *
+   * Only the development-only `--dev-open-session` route uses it: the operator
+   * asked for a host that a loopback client can use without the pairing
+   * handshake. It is not a way around the ticket in normal operation — the
+   * route that reaches it refuses to exist unless the flag is on.
+   */
+  mintSession(): SessionRecord {
     const session: SessionRecord = {
       token: randomId('sls_'),
       sessionId: randomId('sess_', 12),
@@ -153,7 +165,7 @@ export class AuthService {
       if (oldest !== undefined) this.sessions.delete(oldest)
     }
     this.sessions.set(sha256(session.token), session)
-    return { ok: true, session }
+    return session
   }
 
   authorize(bearer: string | null | undefined): SessionRecord | null {

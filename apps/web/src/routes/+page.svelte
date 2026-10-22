@@ -682,6 +682,52 @@
     }
   }
 
+  /**
+   * Opens a session: the printed pairing ticket when there is one, otherwise a
+   * development-only session from a host started with `--dev-open-session`.
+   *
+   * The dev route is a convenience, not a fallback that hides a broken host: it
+   * is only tried when there is no ticket to spend, and a host without the flag
+   * answers Unavailable, so the pairing form stays the answer for a normal
+   * host.
+   */
+  async function openSession(
+    service: { exchange: (ticket: string, password?: string) => Promise<Session>; devSession?: () => Promise<Session> },
+    ticket: string | null,
+  ): Promise<Session> {
+    if (ticket !== null) {
+      return service.exchange(ticket, hosted && passwordInput !== '' ? passwordInput : undefined)
+    }
+    if (service.devSession !== undefined) {
+      try {
+        return await service.devSession()
+      } catch {
+        // No dev session on this host — fall through to the ticket exchange.
+      }
+    }
+    return service.exchange('', hosted && passwordInput !== '' ? passwordInput : undefined)
+  }
+
+  /**
+   * Pairs a fresh browser against a development host. The token is saved before
+   * `connect()` runs, so connect sees a stored token and skips the exchange.
+   * Anything else (no flag, a remote host, an old build) is left alone and the
+   * pairing form stays up.
+   */
+  async function openDevSession(): Promise<void> {
+    const resolved = resolveBaseUrl(explicitUrlInput || null)
+    const [{ createHttpService }] = await Promise.all([import('@space-lens/client')])
+    const service = createHttpService({ baseUrl: resolved.url, getToken: loadToken })
+    if (service.devSession === undefined) return
+    try {
+      const session = await service.devSession()
+      saveToken(session.token)
+    } catch {
+      return
+    }
+    await connect()
+  }
+
   async function connect(): Promise<void> {
     workbench.phase = 'connecting'
     workbench.connectMessage = null
@@ -699,7 +745,7 @@
         )
       const ticket = ticketInput === '' ? ticketFromLocation() : ticketInput
       if (ticket || loadToken() === null) {
-        const session = await service.exchange(ticket ?? '', hosted && passwordInput !== '' ? passwordInput : undefined)
+        const session = await openSession(service, ticket)
         saveToken(session.token)
       }
       if (ticket !== null) {
@@ -1348,6 +1394,14 @@
     const autoscan = new URLSearchParams(window.location.search).get('autoscan')
     if (initialTicket !== null || loadToken() !== null) {
       void connect().then(() => {
+        if (autoscan === null || workbench.phase !== 'ready') return
+        return startScan(workbench.targets.map((target) => target.path))
+      })
+    } else {
+      // A host started with `--dev-open-session` opens a session without a
+      // ticket; a normal host answers Unavailable and this leaves the pairing
+      // form untouched. Developers should not copy a ticket on every reload.
+      void openDevSession().then(() => {
         if (autoscan === null || workbench.phase !== 'ready') return
         return startScan(workbench.targets.map((target) => target.path))
       })

@@ -120,6 +120,10 @@ export function createHttpService(options: HttpServiceOptions) {
         method: 'POST',
         body: JSON.stringify({ ticket, ...(password ? { password } : {}) }),
       }),
+    // Development only: the host opens a session without a ticket when it was
+    // started with `--dev-open-session`. Hosts without the flag answer
+    // Unavailable, and the caller falls back to the pairing form.
+    devSession: () => request<Session>('/api/v1/session/dev', { method: 'POST', body: '{}' }),
     capabilities: () => request<Capabilities>('/api/v1/capabilities'),
     roots: () => request<RootsResponse>('/api/v1/roots'),
     volumes: () => request<VolumesResponse>('/api/v1/volumes'),

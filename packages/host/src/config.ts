@@ -61,6 +61,12 @@ export interface ServeOptions {
    * `resolveServeConfig` refuses anything else with a {@link ConfigError}.
    */
   allowProcessControl?: boolean
+  /**
+   * Development only: let a loopback client open a session without the pairing
+   * ticket (`POST /api/v1/session/dev`). It requires a loopback bind;
+   * `resolveServeConfig` refuses anything else with a {@link ConfigError}.
+   */
+  devOpenSession?: boolean
   /** Exact origins allowed to talk to this API cross-origin (Cloudflare PWA). */
   uiOrigins?: readonly string[]
   ticketTtlSeconds?: number
@@ -119,6 +125,8 @@ export interface ResolvedServeConfig {
   allowMemory: boolean
   /** Process control (`memory:terminate`); only ever true with a loopback bind. */
   allowProcessControl: boolean
+  /** Development only: loopback clients may open a session without a ticket. */
+  devOpenSession: boolean
   uiOrigins: string[]
   ticketTtlMs: number
   sessionTtlMs: number
@@ -280,6 +288,17 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
     )
   }
 
+  // The ticket is what proves a human is at the keyboard. Skipping it is a
+  // development convenience, so it is refused on anything but a loopback
+  // listener — a ticket-less session on a LAN bind would be an open door.
+  const devOpenSession = options.devOpenSession ?? false
+  if (devOpenSession && !bind.loopback) {
+    throw new ConfigError(
+      '--dev-open-session requires a loopback bind; a session without a pairing ticket must never ' +
+        'be reachable from another machine',
+    )
+  }
+
   const roots = [...(options.roots ?? [process.cwd()])].map((root) =>
     root.startsWith('/') ? root : `${process.cwd()}/${root}`,
   )
@@ -293,6 +312,7 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
     allowCleanup: options.allowCleanup ?? false,
     allowMemory,
     allowProcessControl,
+    devOpenSession,
     uiOrigins,
     ticketTtlMs: (options.ticketTtlSeconds ?? 60) * 1000,
     sessionTtlMs: (options.sessionTtlSeconds ?? 8 * 60 * 60) * 1000,

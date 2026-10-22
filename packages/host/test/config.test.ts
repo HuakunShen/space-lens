@@ -148,3 +148,18 @@ describe('memory and process-control config', () => {
     })
   })
 })
+
+describe('dev sessions config', () => {
+  it('is off unless asked for', () => {
+    expect(resolveServeConfig({})).toMatchObject({ devOpenSession: false })
+    expect(resolveServeConfig({ devOpenSession: true })).toMatchObject({ devOpenSession: true })
+  })
+
+  it('requires a loopback bind', () => {
+    // A ticket-less session on a LAN bind would be an open door.
+    expect(() => resolveServeConfig({ host: '0.0.0.0', allowLan: true, devOpenSession: true })).toThrow(ConfigError)
+    expect(() =>
+      resolveServeConfig({ host: '127.0.0.1', devOpenSession: true }),
+    ).not.toThrow()
+  })
+})

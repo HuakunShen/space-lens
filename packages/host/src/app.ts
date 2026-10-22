@@ -213,6 +213,27 @@ export function buildApp(deps: HostDeps): HonoApp {
     return c.json(session)
   })
 
+  // 3b. Development-only session: no ticket, no handshake. It exists only
+  // when the host was started with `--dev-open-session` (loopback bind only),
+  // so a dev server does not need a copied ticket on every reload. Without the
+  // flag the route is simply not there.
+  app.post('/api/v1/session/dev', (c) => {
+    if (!config.devOpenSession) {
+      throw Problems.unavailable(
+        'dev sessions are off; pair with the ticket printed by spacelens serve',
+      )
+    }
+    const minted = auth.mintSession()
+    const session: Session = {
+      token: minted.token,
+      sessionId: minted.sessionId,
+      expiresAt: new Date(minted.expiresAtMs).toISOString(),
+      scopes: [...minted.scopes] as Session['scopes'],
+    }
+    events.publish({ kind: 'session', expiresAt: session.expiresAt })
+    return c.json(session)
+  })
+
   // 4. Everything under /api from here on needs a bearer token.
   app.use('/api/*', async (c, next) => {
     const session = auth.authorize(c.req.header('authorization'))

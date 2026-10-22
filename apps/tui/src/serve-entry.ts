@@ -23,6 +23,7 @@ const FLAG_ALIASES: Record<string, string> = {
   'allow-cleanup': 'allowCleanup',
   'allow-memory': 'allowMemory',
   'allow-process-control': 'allowProcessControl',
+  'dev-open-session': 'devOpenSession',
   'ui-origin': 'uiOrigins',
   'ticket-ttl': 'ticketTtlSeconds',
   root: 'roots',
@@ -91,6 +92,7 @@ export function parseServeArgs(argv: readonly string[]): ParsedServeArgs {
       case 'allowCleanup':
       case 'allowMemory':
       case 'allowProcessControl':
+      case 'devOpenSession':
       case 'json':
       case 'machine':
       case 'trustProxy':
@@ -145,6 +147,10 @@ Memory view (optional):
   --allow-process-control
                       allow quitting processes from a loopback UI; requires --allow-memory and a
                       loopback bind with loopback-only --ui-origin values
+
+Development:
+  --dev-open-session  let a loopback client open a session without the pairing ticket
+                      (POST /api/v1/session/dev); loopback bind only, never for a shared host
 
 AI advisor (optional):
   --ai-base-url <url> OpenAI-compatible base URL (https; http only for loopback). Enables the advisor.
@@ -226,6 +232,9 @@ export async function runServe(argv: readonly string[]): Promise<void> {
               ? 'read-only'
               : 'disabled'
         }`,
+        server.config.devOpenSession
+          ? 'dev sessions: open (loopback clients need no pairing ticket)'
+          : '',
         args.ai ? `ai advisor: ${args.ai.model} at ${args.ai.baseUrl}` : '',
         args.uiOrigins?.length ? `cross-origin UIs: ${args.uiOrigins.join(', ')}` : '',
         `press p + Enter to reprint the pairing URL, Ctrl+C to stop`,
