@@ -6,6 +6,7 @@ pub mod engine;
 pub mod events;
 pub mod memory;
 mod native_material;
+pub mod permissions;
 pub mod reveal;
 
 use std::path::PathBuf;
@@ -57,12 +58,14 @@ pub fn run() {
       ai::ai_chat,
       ai::ai_chat_stream,
       ai::ai_chat_cancel,
+      permissions::fda_status,
+      permissions::fda_open_settings,
     ])
     .run(tauri::generate_context!())
     .expect("error while running Space Lens desktop");
 }
 
-fn dirs_home() -> PathBuf {
+pub(crate) fn dirs_home() -> PathBuf {
   std::env::var("HOME")
     .map(PathBuf::from)
     .unwrap_or_else(|_| PathBuf::from("/"))

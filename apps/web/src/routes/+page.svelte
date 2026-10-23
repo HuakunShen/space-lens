@@ -73,6 +73,8 @@
   } from '../lib/gates'
   import MemoryPage from '../lib/memory/MemoryPage.svelte'
   import AiPanel from '../lib/ai/panel.svelte'
+  import FullDiskAccessNotice from '../lib/FullDiskAccessNotice.svelte'
+  import { openFullDiskAccessSettings, readFullDiskAccess, type FullDiskAccess } from '../lib/permissions.ts'
   import { createAiChatPort, createServiceAiChatPort } from '../lib/ai/chat-port.ts'
   import type { AiChatPort } from '@space-lens/ai-advisor'
   import { shouldApplyAuditReport } from '../lib/app-storage'
@@ -271,6 +273,14 @@
   let appearance = $state(parseAppearance(null))
   let appVersion = $state<string | null>(null)
   let updateStatus = $state<UpdateStatus>({ state: 'idle' })
+  let fullDiskAccess = $state<FullDiskAccess>('unsupported')
+  $effect(() => {
+    if (!__SPACLENS_DESKTOP__) return
+    const refresh = () => void readFullDiskAccess().then((value) => (fullDiskAccess = value), () => {})
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  })
   if (__SPACLENS_DESKTOP__) void currentAppVersion().then((version) => (appVersion = version))
   let preferencesReady = $state(false)
   let view = $state<'browse' | DiscoveryKind | 'apps'>('browse')
@@ -1518,6 +1528,7 @@
     </main>
   {:else}
     <div class="relative">
+      {#if __SPACLENS_DESKTOP__}<FullDiskAccessNotice />{/if}
       <ScanPicker
         {targets}
         volumes={workbench.volumes}
@@ -1686,7 +1697,11 @@
             onIcon={appIcon}
           />
         {/if}
-        <ScanCoveragePanel status={workbench.status} />
+        <ScanCoveragePanel
+          status={workbench.status}
+          fullDiskAccess={fullDiskAccess}
+          onOpenFullDiskAccess={__SPACLENS_DESKTOP__ ? () => void openFullDiskAccessSettings() : undefined}
+        />
         {#if view === 'browse'}
           <div
             class="explorer-pathbar macos:min-h-10 macos:px-4 windows:mx-4 windows:border-b-0 windows:px-2 linux:min-h-12 linux:px-5"

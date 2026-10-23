@@ -8,7 +8,14 @@
   import { Progress } from '../ui/progress/index'
   import * as Sheet from '../ui/sheet/index'
 
-  let { status }: { status: ScanStatus } = $props()
+  interface Props {
+    status: ScanStatus
+    /** Desktop only: whether macOS Full Disk Access is in effect for this app. */
+    fullDiskAccess?: 'granted' | 'denied' | 'unknown' | 'unsupported'
+    /** Opens the system's Full Disk Access pane; absent where there is none. */
+    onOpenFullDiskAccess?: () => void
+  }
+  let { status, fullDiskAccess = 'unsupported', onOpenFullDiskAccess }: Props = $props()
   let open = $state(false)
   let coverage = $derived(status.coverage)
   let unmeasured = $derived(coverage ? unmeasuredSkipCount(coverage) : 0)
@@ -103,6 +110,16 @@
                 <span>{formatBytes(reconciliation.unseen.bytes)}</span>
               </li>
             </ul>
+            {#if fullDiskAccess === 'denied' && onOpenFullDiskAccess}
+              <div class="reconcile-fda" role="note">
+                <p>
+                  Some folders were not scanned because Space Lens does not have Full Disk Access. Turn it on under
+                  System Settings → Privacy &amp; Security → Full Disk Access, then restart Space Lens and scan again.
+                  Only file sizes and names are read, and iCloud and Photos originals are never downloaded.
+                </p>
+                <Button variant="outline" size="sm" onclick={onOpenFullDiskAccess}>Open “Full Disk Access”</Button>
+              </div>
+            {/if}
             {#if reconciliation.purgeableBytes}
               <p>
                 <strong>{formatBytes(reconciliation.purgeableBytes)} purgeable.</strong> macOS frees this on demand, mostly
