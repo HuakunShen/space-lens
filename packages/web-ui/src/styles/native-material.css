@@ -16,8 +16,6 @@
     --card: rgb(255 255 255 / calc(92% * var(--glass-strength)));
     --control: rgb(255 255 255 / calc(95% * var(--glass-strength)));
     --native-content: rgb(255 255 255 / calc(98% * var(--glass-strength)));
-    /* The window itself: what shows wherever no panel covers the material. */
-    --window-fill: rgb(246 246 246 / calc(84% * var(--glass-strength)));
   }
   :root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
     --glass-strength: 1;
@@ -28,7 +26,6 @@
     --native-content: rgb(18 18 18 / calc(97% * var(--glass-strength)));
     --muted: rgb(255 255 255 / calc(7% * var(--glass-strength)));
     --muted-foreground: #b0b0b0;
-    --window-fill: rgb(22 22 22 / calc(86% * var(--glass-strength)));
   }
 }
 @layer components {
@@ -85,4 +82,52 @@
 :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])
   :is([data-slot='sheet-content'], [data-slot='dialog-content'], [data-slot='alert-dialog-content']) {
   background: var(--sheet);
+}
+
+/* One transparency for the whole window. The Settings slider sets
+ * --glass-strength; the window, title bar, sidebar and content area all use
+ * the same alpha so they fade together, keeping only a slight tonal step
+ * between them. Every interface style (macOS, Windows, Linux) gets this when
+ * the native material is installed: their own surface tokens are opaque and
+ * would otherwise stay solid while only the window behind them faded.
+ * Unlayered on purpose, to beat the per-style `bg-*` utilities. */
+:root:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
+  --surface-alpha: min(1, calc(0.9 * var(--glass-strength)));
+  --glass-window: 242 242 242;
+  --glass-chrome: 246 246 246;
+  --glass-sidebar: 236 236 236;
+  --glass-content: 250 250 250;
+  background: rgb(var(--glass-window) / var(--surface-alpha));
+}
+:root.dark:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
+  --glass-window: 24 24 24;
+  --glass-chrome: 30 30 30;
+  --glass-sidebar: 28 28 28;
+  --glass-content: 20 20 20;
+}
+:root:is([data-backdrop='glass'], [data-backdrop='vibrancy'])
+  :is(body, main.scan-picker, .workbench-shell, .picker-layout, .explorer-chart) {
+  background: transparent;
+}
+:root:is([data-backdrop='glass'], [data-backdrop='vibrancy']) :is(.lens-toolbar, .workspace-status) {
+  background: rgb(var(--glass-chrome) / var(--surface-alpha));
+}
+:root:is([data-backdrop='glass'], [data-backdrop='vibrancy']) :is(.scan-sidebar, .scan-picker .picker-layout > aside) {
+  background: rgb(var(--glass-sidebar) / var(--surface-alpha));
+}
+:root:is([data-backdrop='glass'], [data-backdrop='vibrancy'])
+  :is(.workspace-content, .scan-picker .picker-layout > section, .memory-page) {
+  background: rgb(var(--glass-content) / var(--surface-alpha));
+}
+
+/* Linux centres the title in the header bar, where the Storage | Memory
+ * switch also sits; move the title to the start while the switch is shown. */
+:root[data-interface='linux']:has(.view-switch-pill) .lens-toolbar .toolbar-title {
+  position: static;
+  /* Tailwind v4 centres with the `translate` property; zero its variables
+     (a bare `translate: none` is dropped by the CSS minifier). */
+  --tw-translate-x: 0;
+  --tw-translate-y: 0;
+  transform: none;
+  align-items: flex-start;
 }

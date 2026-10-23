@@ -145,12 +145,6 @@
   :root:is([data-backdrop='glass'], [data-backdrop='vibrancy']) body {
     background: transparent;
   }
-  /* The material shows through, tinted by --window-fill (native-material.css),
-     which the transparency setting scales. It sits on the root because the
-     body carries a `bg-background` utility that would override it. */
-  :root:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
-    background: var(--window-fill, transparent);
-  }
   /* Native vibrancy (desktop shell, macOS): the window material shows
      through the base layer, so the body and chart canvas go transparent
      while sidebar/cards keep their own tint. The `data-backdrop` attribute

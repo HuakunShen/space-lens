@@ -1453,7 +1453,7 @@
 {#if workbench.phase === 'ready' && memoryAvailable && !memoryView}
   <!-- Storage view: the switch sits in the toolbar's empty middle. The memory
        view has its own header row, so the pill is not rendered there. -->
-  <div class="fixed top-1.5 left-1/2 z-50 -translate-x-1/2" role="group" aria-label="Storage or memory view">
+  <div class="view-switch-pill fixed top-1.5 left-1/2 z-50 -translate-x-1/2" role="group" aria-label="Storage or memory view">
     {@render viewSwitch()}
   </div>
 {/if}
