@@ -3179,6 +3179,10 @@ mod retention_tests {
     assert_eq!(store.status(&third.scan_id).unwrap().state, "scanning");
   }
 
+  // Needs a child of the fixture root to plan against; the protected local
+  // scanner lists none under a Windows temp dir (verbatim `\\?\` root), so
+  // this runs where that scanner enumerates (macOS, Linux).
+  #[cfg(not(windows))]
   #[test]
   fn small_scans_stay_within_the_node_budget_and_their_plans_go_with_them() {
     let fixture = Fixture::new();

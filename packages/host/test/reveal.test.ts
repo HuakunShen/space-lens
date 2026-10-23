@@ -115,7 +115,7 @@ describe('revealing a scanned path in the host file manager', () => {
     const { app, root, launched, token } = buildRevealApp()
     const folder = join(root, 'folder')
     mkdirSync(folder)
-    const response = await post(app, token, { path: folder })
+    const response = await post(app, token, { path: folder, action: 'open' })
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ revealed: true })
     expect(launched).toHaveLength(1)
@@ -129,9 +129,11 @@ describe('revealing a scanned path in the host file manager', () => {
     expect((await post(app, token, { path: folder })).status).toBe(200)
     expect((await post(app, token, { path: folder, action: 'open' })).status).toBe(200)
     expect(launched).toHaveLength(2)
-    // reveal: the parent folder with the item picked out; open: the folder.
-    expect(launched[0]?.args).toContain('-R')
-    expect(launched[1]?.args).not.toContain('-R')
+    // reveal: the item picked out in its parent (or the parent where the file
+    // manager cannot select); open: the folder itself. The command is the
+    // platform's, so compare against what this host would launch.
+    expect(launched[0]).toEqual(fileManagerTarget(hostPlatform(), folder, true, 'reveal'))
+    expect(launched[1]).toEqual(fileManagerTarget(hostPlatform(), folder, true, 'open'))
     expect(launched[1]?.args).toContain(folder)
   })
 

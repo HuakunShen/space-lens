@@ -707,18 +707,24 @@ mod tests {
 
   #[test]
   fn paths_rebuild_from_names_and_keep_odd_paths_verbatim() {
+    // Built with the platform separator: the rebuild joins with it.
+    let sep = MAIN_SEPARATOR;
+    let root_path = sep.to_string();
+    let users_path = format!("{sep}Users");
+    let me_path = format!("{sep}Users{sep}me");
+    let odd_path = format!("{sep}elsewhere{sep}x");
     let mut index = NodeIndex::default();
-    let root = index.push(facts("/", "/", NONE, None));
-    let users = index.push(facts("/Users", "Users", root, Some("/")));
-    let me = index.push(facts("/Users/me", "me", users, Some("/Users")));
+    let root = index.push(facts(&root_path, &root_path, NONE, None));
+    let users = index.push(facts(&users_path, "Users", root, Some(&root_path)));
+    let me = index.push(facts(&me_path, "me", users, Some(&users_path)));
     // Not parent + separator + name: stored as given.
-    let odd = index.push(facts("/elsewhere/x", "x", users, Some("/Users")));
+    let odd = index.push(facts(&odd_path, "x", users, Some(&users_path)));
     index.set_children(root, &[users]);
     index.set_children(users, &[me, odd, NONE]);
     index.seal();
-    assert_eq!(index.path(root), "/");
-    assert_eq!(index.path(me), "/Users/me");
-    assert_eq!(index.path(odd), "/elsewhere/x");
+    assert_eq!(index.path(root), root_path);
+    assert_eq!(index.path(me), me_path);
+    assert_eq!(index.path(odd), odd_path);
     for node in [root, users, me, odd] {
       assert_eq!(index.path_len(node), index.path(node).len());
     }
@@ -729,13 +735,13 @@ mod tests {
     assert_eq!(index.child_count(users), 3);
     assert_eq!(index.children(users).collect::<Vec<_>>(), vec![me, odd]);
     assert_eq!(
-      index.find(&NodeId::of_path("/Users/me").to_wire()),
+      index.find(&NodeId::of_path(&me_path).to_wire()),
       Some(me)
     );
     assert_eq!(index.len(), 4);
     let summary = index.summary(me);
     assert_eq!(summary.name, "me");
-    assert_eq!(summary.path, "/Users/me");
+    assert_eq!(summary.path, me_path);
     assert_eq!(summary.scan_state.as_deref(), Some("complete"));
   }
 
