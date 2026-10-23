@@ -808,6 +808,19 @@ impl EngineStore {
         "at most one native scan may run at once",
       ));
     }
+    // A localOnly request lands here only where the guarded scanner is
+    // unavailable; keep its rule that containment is decided on the path as
+    // written, so a path outside the roots is Forbidden before anything
+    // reveals whether it exists.
+    let served: Vec<PathBuf> = if request.local_only {
+      self
+        .roots
+        .iter()
+        .filter_map(|root| lexical_absolute(root).ok())
+        .collect()
+    } else {
+      Vec::new()
+    };
     let mut resolved = Vec::with_capacity(request.paths.len());
     for path in &request.paths {
       // Synthetic app identifiers name no filesystem path (A10): reject
@@ -817,6 +830,15 @@ impl EngineStore {
           "InvalidRequest",
           "synthetic app paths cannot be scanned as folders; start an app scan instead",
         ));
+      }
+      if request.local_only {
+        let written = lexical_absolute(Path::new(path))?;
+        if !served.iter().any(|served| written.starts_with(served)) {
+          return Err(problem(
+            "Forbidden",
+            "path is outside the roots this desktop session serves",
+          ));
+        }
       }
       let canonical = fs::canonicalize(path)
         .map_err(|_| problem("InvalidRequest", format!("path does not exist: {path}")))?;

@@ -402,6 +402,9 @@ fn protected_discovery_classifies_caches_gitignored_and_dedupes_children() {
   );
 }
 
+// Unix-only like the other guarded-scanner tests: elsewhere a localOnly
+// request runs the regular walker, whose discovery classifies gitignored files.
+#[cfg(unix)]
 #[test]
 fn protected_scan_without_gitignore_classification_rejects_gitignored_discovery() {
   let fixture = Fixture::new();
