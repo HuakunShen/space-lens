@@ -11,27 +11,21 @@
     --ring: var(--color-system-accent, #007aff);
     /* Light glass sits over a milky material; surfaces need enough body to
      * separate from it or every card melts into a washed-out white page. */
-    --sidebar: rgb(245 245 245 / calc(78% * var(--glass-strength)));
-    --chrome: rgb(250 250 250 / calc(76% * var(--glass-strength)));
-    --card: rgb(255 255 255 / calc(82% * var(--glass-strength)));
-    --control: rgb(255 255 255 / calc(88% * var(--glass-strength)));
-    --native-content: rgb(255 255 255 / calc(96% * var(--glass-strength)));
+    --sidebar: rgb(245 245 245 / calc(90% * var(--glass-strength)));
+    --chrome: rgb(250 250 250 / calc(90% * var(--glass-strength)));
+    --card: rgb(255 255 255 / calc(92% * var(--glass-strength)));
+    --control: rgb(255 255 255 / calc(95% * var(--glass-strength)));
+    --native-content: rgb(255 255 255 / calc(98% * var(--glass-strength)));
   }
   :root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
     --glass-strength: 1;
-    --sidebar: rgb(24 24 24 / calc(84% * var(--glass-strength)));
-    --chrome: rgb(20 20 20 / calc(86% * var(--glass-strength)));
-    --card: rgb(28 28 28 / calc(90% * var(--glass-strength)));
-    --control: rgb(50 50 50 / calc(93% * var(--glass-strength)));
-    --native-content: rgb(18 18 18 / calc(91% * var(--glass-strength)));
+    --sidebar: rgb(24 24 24 / calc(93% * var(--glass-strength)));
+    --chrome: rgb(20 20 20 / calc(94% * var(--glass-strength)));
+    --card: rgb(28 28 28 / calc(96% * var(--glass-strength)));
+    --control: rgb(50 50 50 / calc(97% * var(--glass-strength)));
+    --native-content: rgb(18 18 18 / calc(97% * var(--glass-strength)));
     --muted: rgb(255 255 255 / calc(7% * var(--glass-strength)));
     --muted-foreground: #b0b0b0;
-  }
-  :root[data-transparency='solid'] {
-    --glass-strength: 1.15;
-  }
-  :root[data-transparency='glassy'] {
-    --glass-strength: 0.7;
   }
 }
 @layer components {

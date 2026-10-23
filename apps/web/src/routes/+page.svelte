@@ -38,7 +38,7 @@
   import { addSelection, selectedAncestor } from '../lib/selection'
   import { canCollectNode } from '@space-lens/web-ui/lib/app-scan'
   import { ACTIVE_SCAN_KEY, parseActiveScan } from '../lib/resume'
-  import { APPEARANCE_KEY, parseAppearance, resolveStyle } from '../lib/appearance'
+  import { APPEARANCE_KEY, glassStrength, parseAppearance, resolveStyle } from '../lib/appearance'
   import { CHART_MODE_KEY, TREEMAP_DENSITY_KEY, parseChartMode, parseTreemapDensity } from '../lib/chart-mode'
   import { checkForAppUpdate, currentAppVersion, installAppUpdate } from '../lib/updater'
   import type { UpdateStatus } from '../lib/updater'
@@ -503,7 +503,7 @@
     const interfaceStyle = resolveStyle(appearance.style, __SPACLENS_DESKTOP__, navigator.userAgent)
     document.documentElement.dataset.interface = interfaceStyle
     document.documentElement.dataset.density = appearance.density
-    document.documentElement.dataset.transparency = appearance.transparency
+    document.documentElement.style.setProperty('--glass-strength', String(glassStrength(appearance.transparency)))
     // Material capability and native OS/accent attributes are supplied by the host.
     window.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance))
   })

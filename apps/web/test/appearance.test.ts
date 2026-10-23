@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { parseAppearance, resolveStyle } from '../src/lib/appearance.ts'
+import { glassStrength, parseAppearance, resolveStyle } from '../src/lib/appearance.ts'
 test('browser keeps web style while native hosts default to their platform', () => {
   assert.equal(resolveStyle('auto', false, 'Macintosh'), 'web')
   assert.equal(resolveStyle('auto', true, 'Macintosh'), 'macos')
@@ -11,13 +11,13 @@ test('corrupt or old stored preferences recover to defaults', () => {
   assert.deepEqual(parseAppearance('not json'), {
     style: 'auto',
     density: 'compact',
-    transparency: 'balanced',
+    transparency: 33,
     accent: 'system',
   })
   assert.deepEqual(parseAppearance('{"style":"broken","density":"broken","transparency":"broken","accent":"broken"}'), {
     style: 'auto',
     density: 'compact',
-    transparency: 'balanced',
+    transparency: 33,
     accent: 'system',
   })
   assert.deepEqual(
@@ -25,7 +25,7 @@ test('corrupt or old stored preferences recover to defaults', () => {
     {
       style: 'macos',
       density: 'comfortable',
-      transparency: 'glassy',
+      transparency: 60,
       accent: 'default',
     },
   )
@@ -41,23 +41,31 @@ test('GNOME preference survives a reload', () => {
   assert.deepEqual(parseAppearance('{"style":"linux","density":"comfortable"}'), {
     style: 'linux',
     density: 'comfortable',
-    transparency: 'balanced',
+    transparency: 33,
     accent: 'system',
   })
 })
 
-test('transparency parses strictly and defaults to balanced', () => {
-  assert.equal(parseAppearance('{"transparency":"solid"}').transparency, 'solid')
-  assert.equal(parseAppearance('{"transparency":"balanced"}').transparency, 'balanced')
-  assert.equal(parseAppearance('{"transparency":"glassy"}').transparency, 'glassy')
-  // unknown values and legacy payloads without the key fall back to balanced
-  assert.equal(parseAppearance('{"transparency":"frosted"}').transparency, 'balanced')
-  assert.equal(parseAppearance('{"style":"web","density":"compact"}').transparency, 'balanced')
-  assert.equal(parseAppearance(null).transparency, 'balanced')
+test('transparency parses to a clamped percentage; old names still load', () => {
+  assert.equal(parseAppearance('{"transparency":"solid"}').transparency, 0)
+  assert.equal(parseAppearance('{"transparency":"balanced"}').transparency, 33)
+  assert.equal(parseAppearance('{"transparency":"glassy"}').transparency, 60)
+  assert.equal(parseAppearance('{"transparency":72.4}').transparency, 72)
+  assert.equal(parseAppearance('{"transparency":250}').transparency, 100)
+  assert.equal(parseAppearance('{"transparency":-5}').transparency, 0)
+  assert.equal(parseAppearance('{"transparency":"frosted"}').transparency, 33)
+  assert.equal(parseAppearance('{"style":"web","density":"compact"}').transparency, 33)
+  assert.equal(parseAppearance(null).transparency, 33)
+})
+
+test('glass strength is about 1 at the default and opaque at 0', () => {
+  assert.equal(glassStrength(33), 1.003)
+  assert.ok(glassStrength(0) > 1.25)
+  assert.equal(glassStrength(100), 0.4)
 })
 
 test('a stored appearance round-trips through JSON', () => {
-  for (const transparency of ['solid', 'balanced', 'glassy'] as const) {
+  for (const transparency of [0, 33, 60, 100]) {
     const stored = JSON.stringify({ style: 'macos', density: 'comfortable', transparency })
     assert.deepEqual(parseAppearance(stored), {
       style: 'macos',

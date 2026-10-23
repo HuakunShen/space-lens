@@ -10,7 +10,8 @@
     style: 'auto' | 'web' | 'macos' | 'windows' | 'linux'
     density: 'compact' | 'comfortable'
     mode: 'system' | 'light' | 'dark'
-    transparency?: 'solid' | 'balanced' | 'glassy'
+    /** 0 (solid) to 100 (most transparent). */
+    transparency?: number
     glassAvailable?: boolean
     /** Where the accent color comes from; only meaningful with a native host. */
     accent?: 'system' | 'default'
@@ -22,7 +23,7 @@
     onStyle: (style: Props['style']) => void
     onDensity: (density: Props['density']) => void
     onMode: (mode: Props['mode']) => void
-    onTransparency?: (value: NonNullable<Props['transparency']>) => void
+    onTransparency?: (value: number) => void
     onAccent?: (value: NonNullable<Props['accent']>) => void
     onCheckUpdates?: () => void
     onInstallUpdate?: () => void
@@ -32,7 +33,7 @@
     style,
     density,
     mode,
-    transparency = 'balanced',
+    transparency = 33,
     glassAvailable = false,
     accent = 'system',
     systemAccentAvailable = false,
@@ -55,7 +56,6 @@
     { id: 'windows', label: 'Windows', detail: 'WinUI navigation · command bars', icon: AppWindow },
     { id: 'linux', label: 'Linux', detail: 'GNOME header bar · roomy controls', icon: Monitor },
   ]
-  const transparencyOptions: NonNullable<Props['transparency']>[] = ['solid', 'balanced', 'glassy']
   const accentOptions: NonNullable<Props['accent']>[] = ['system', 'default']
   const segmentClass =
     'macos:rounded-[5px] macos:border-0 macos:py-1 macos:text-[13px] macos:data-[selected=true]:bg-background macos:data-[selected=true]:shadow-sm windows:relative windows:min-h-9 windows:border-0 windows:data-[selected=true]:bg-card windows:data-[selected=true]:shadow-none windows:data-[selected=true]:after:absolute windows:data-[selected=true]:after:bottom-0 windows:data-[selected=true]:after:left-1/4 windows:data-[selected=true]:after:w-1/2 windows:data-[selected=true]:after:h-0.5 windows:data-[selected=true]:after:bg-primary linux:min-h-10 linux:rounded-lg linux:border-0 linux:text-sm linux:data-[selected=true]:bg-background linux:data-[selected=true]:shadow-sm focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-inset'
@@ -105,24 +105,26 @@
           {/each}
         </div>
         {#if glassAvailable}
-          <div
-            class="setting-options macos:overflow-visible macos:gap-0.5 macos:border-0 macos:bg-muted macos:p-0.5 windows:clear-both windows:rounded-[4px] windows:border-0 windows:bg-muted linux:clear-both linux:gap-1 linux:border-0 linux:bg-muted linux:p-1"
-            role="group"
-            aria-label="Transparency"
-          >
-            {#each transparencyOptions as option}
-              <button
-                class={segmentClass}
-                data-selected={transparency === option}
-                class:selected={transparency === option}
-                type="button"
-                aria-pressed={transparency === option}
-                onclick={() => onTransparency?.(option)}>{option}</button
-              >
-            {/each}
+          <div class="grid gap-1.5">
+            <label class="flex items-baseline justify-between text-sm" for="window-transparency">
+              <span>Window transparency</span>
+              <span class="tabular-nums text-muted-foreground">{transparency}%</span>
+            </label>
+            <input
+              id="window-transparency"
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={transparency}
+              class="w-full accent-[var(--primary)]"
+              aria-valuetext={`${transparency}% transparent`}
+              oninput={(event) => onTransparency?.(Number(event.currentTarget.value))}
+            />
+            <div class="flex justify-between text-[11px] text-muted-foreground"><span>Solid</span><span>Glassy</span></div>
           </div>
           <p class="mt-1.5 text-xs text-muted-foreground">
-            Applies to the workspace behind this panel.
+            Changes the window now; the blur behind it stays.
           </p>
         {/if}
         {#if systemAccentAvailable}
