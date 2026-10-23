@@ -1445,8 +1445,8 @@
        a disk scan, so the switch is available as soon as the host is paired —
        including on the "New scan" page, where people look for it first. -->
   <div class="flex items-center gap-0.5 rounded-full border bg-background/90 p-0.5 shadow-sm backdrop-blur">
-    <button type="button" class="rounded-full px-3 py-1 text-xs font-medium" aria-pressed={!memoryView} onclick={() => (memoryView = false)}>Storage</button>
-    <button type="button" class="rounded-full px-3 py-1 text-xs font-medium" aria-pressed={memoryView} onclick={() => (memoryView = true)}>Memory</button>
+    <button type="button" class="view-switch-button" aria-pressed={!memoryView} onclick={() => (memoryView = false)}>Storage</button>
+    <button type="button" class="view-switch-button" aria-pressed={memoryView} onclick={() => (memoryView = true)}>Memory</button>
   </div>
 {/snippet}
 
@@ -1476,7 +1476,9 @@
 {:else if memoryView && memoryAvailable}
   <div class="flex h-dvh min-h-0 flex-col bg-background text-foreground">
     <header class="grid h-10 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border/60 px-4">
-      <span class="text-[10px] font-medium tracking-[0.14em] text-muted-foreground uppercase">Memory</span>
+      <!-- The window's traffic lights sit in the first column; the switch's
+           highlight already says which view this is. -->
+      <span aria-hidden="true"></span>
       <div role="group" aria-label="Storage or memory view">{@render viewSwitch()}</div>
       <span aria-hidden="true"></span>
     </header>

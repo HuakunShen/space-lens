@@ -77,7 +77,13 @@
   )
 
   let collapsed = $state<Set<number>>(new Set())
-  let focusIndex = $state(0)
+  /**
+   * Focus follows a process, not a row number: the list re-sorts every
+   * refresh, and a row index would land on whatever moved into that slot.
+   */
+  let focusKey = $state<string | null>(null)
+  /** Where focus was last, for when its process exits. */
+  let focusFallback = 0
   let scrollTop = $state(0)
   let viewportHeight = $state(480)
   let viewportEl = $state<HTMLDivElement | null>(null)
@@ -126,8 +132,10 @@
   let matchPids = $derived(searchInfo.matchPids)
   let hiddenCount = $derived(snapshot.processes.length - rows.length)
 
-  $effect(() => {
-    if (rows.length > 0 && focusIndex >= rows.length) focusIndex = rows.length - 1
+  let focusIndex = $derived.by(() => {
+    if (rows.length === 0) return 0
+    const at = focusKey === null ? -1 : rows.findIndex((row) => processKey(row.node.pid, row.node.startTimeUs) === focusKey)
+    return at >= 0 ? at : Math.min(focusFallback, rows.length - 1)
   })
 
   let startIndex = $derived(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN))
@@ -201,10 +209,13 @@
 
   function focusRow(index: number): void {
     if (rows.length === 0) return
-    focusIndex = Math.min(Math.max(index, 0), rows.length - 1)
+    const next = Math.min(Math.max(index, 0), rows.length - 1)
+    const row = rows[next]
+    focusKey = row === undefined ? null : processKey(row.node.pid, row.node.startTimeUs)
+    focusFallback = next
     const element = viewportEl
     if (element === null) return
-    const top = focusIndex * ROW_HEIGHT
+    const top = next * ROW_HEIGHT
     const bottom = top + ROW_HEIGHT
     if (top < element.scrollTop) element.scrollTop = top
     else if (bottom > element.scrollTop + element.clientHeight) element.scrollTop = bottom - element.clientHeight
@@ -365,7 +376,7 @@
       if (group) onOpen(group)
     }}
   >
-    <div class="sticky top-0 z-10 border-b bg-background">
+    <div class="process-table-head sticky top-0 z-10 border-b">
       <div class="flex h-7 items-center text-xs text-muted-foreground" style:min-width={`${rowWidth}px`}>
         <div class="flex w-8 shrink-0 items-center justify-center">
           <span class="sr-only">Select</span>

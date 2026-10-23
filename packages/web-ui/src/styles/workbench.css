@@ -999,6 +999,33 @@
   .update-action:disabled {
     opacity: 0.6;
   }
+  /* Process list headers stay solid while rows scroll under them; the page
+     background is transparent in glass mode, so it cannot be used here. */
+  .process-table-head {
+    background: var(--card);
+  }
+  :root:is([data-backdrop='glass'], [data-backdrop='vibrancy']) .process-table-head {
+    background: rgb(var(--glass-chrome) / 1);
+  }
+  /* Storage | Memory: the current view is a filled pill, the other one plain. */
+  .view-switch-button {
+    border-radius: 9999px;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    transition:
+      background-color 120ms,
+      color 120ms;
+  }
+  .view-switch-button:hover {
+    color: var(--foreground);
+  }
+  .view-switch-button[aria-pressed='true'] {
+    background: var(--primary);
+    color: var(--primary-foreground);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  }
   .setting-options {
     display: flex;
     border: 1px solid var(--border);
