@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { ChevronRight, FolderOpen, Folder, File, Minus, Plus } from '@lucide/svelte'
+  import { ChevronRight, FolderOpen, Folder, File, Minus, Plus, ExternalLink } from '@lucide/svelte'
   import type { TreeNodeSummary } from '../../types'
   import { nodeColor, nodeMutedColor, sunburstColor } from '../../lib/colors'
   import { formatBytes } from '../../lib/format'
   import { formatNodeSize } from '../../lib/node-size'
-  import { canCollectNode, collectRefusalReason, isAccountingLeaf, isAppBundleNode } from '../../lib/app-scan'
+  import { canCollectNode, collectRefusalReason, isAccountingLeaf, isAppBundleNode, isVirtualAppPath } from '../../lib/app-scan'
   import * as ContextMenu from '../ui/context-menu/index'
   import { Button } from '../ui/button/index'
   import { Checkbox } from '../ui/checkbox/index'
@@ -22,6 +22,15 @@
     onOpen: (node: TreeNodeSummary) => void
     onCollect: (node: TreeNodeSummary) => void
     onRemove: (node: TreeNodeSummary) => void
+    /**
+     * Opens the row in the host's own file manager (Finder / Explorer / the
+     * Linux file manager). Absent when the host cannot do it — the menu items
+     * then never render.
+     */
+    onReveal?: (node: TreeNodeSummary, action: 'reveal' | 'open') => void
+    /** The labels for those actions, named after the host's platform. */
+    revealLabel?: string
+    openLabel?: string
   }
 
   let {
@@ -36,6 +45,9 @@
     onOpen,
     onCollect,
     onRemove,
+    onReveal,
+    revealLabel = 'Reveal in file manager',
+    openLabel = 'Open in file manager',
   }: Props = $props()
 
   function itemColor(item: TreeNodeSummary): string {
@@ -70,7 +82,13 @@
   function collectLabel(item: TreeNodeSummary): string {
     return isCollected(item) ? `Remove ${item.name} from review selection` : `Add ${item.name} to review selection`
   }
-</script>
+  /**
+   * A synthetic app-scan path names no real folder, so there is nothing to
+   * open in a file manager.
+   */
+  function revealDisabled(item: TreeNodeSummary): boolean {
+    return item.scanState === 'skipped' || isAccountingLeaf(item) || isVirtualAppPath(item.path)
+  }</script>
 
 <ScrollArea class="min-h-0 flex-1 pr-2" aria-label="Directory children">
   <div class="child-list" role="list">
@@ -178,6 +196,18 @@
             <FolderOpen />
             Open {item.name}
           </ContextMenu.Item>
+          {#if onReveal}
+            <ContextMenu.Item disabled={revealDisabled(item)} onclick={() => onReveal(item, 'reveal')}>
+              <ExternalLink />
+              {revealLabel}
+            </ContextMenu.Item>
+            {#if item.isDirectory}
+              <ContextMenu.Item disabled={revealDisabled(item)} onclick={() => onReveal(item, 'open')}>
+                <FolderOpen />
+                {openLabel}
+              </ContextMenu.Item>
+            {/if}
+          {/if}
         </ContextMenu.Content>
       </ContextMenu.Root>
     {:else}

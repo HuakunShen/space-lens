@@ -16,8 +16,12 @@ use space_lens::local_scan::{
   LocalScanReport, ScanCoverage, ScanVolume,
 };
 use space_lens::{scan_directory, IgnoredMode, ScanNode, ScanOptions};
+use spacelens_storage_usage::StorageBreakdown;
 
 use crate::app_cleanup_policy as policy;
+
+mod index;
+use index::{NodeFacts, NodeId, NodeIndex, NONE};
 
 // ---------------------------------------------------------------- wire types
 
@@ -96,6 +100,8 @@ pub struct ScanStatus {
   pub coverage: Option<ScanCoverage>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub volumes: Option<Vec<ScanVolume>>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub storage: Option<StorageBreakdown>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub app: Option<AppScanOrigin>,
 }
@@ -227,8 +233,48 @@ pub struct DiscoveryInput {
 }
 
 pub struct DiscoveryData {
-  index: HashMap<String, IndexEntry>,
-  items: HashMap<DiscoveryKind, Vec<DiscoveryItem>>,
+  /// Legacy walks only: the discovery-time index and the nodes that passed
+  /// the safety probe, merged into the scan's index at finish.
+  index: Box<NodeIndex>,
+  kept: HashSet<u32>,
+  items: HashMap<DiscoveryKind, DiscoveryRows>,
+}
+
+/// Cached discovery results. Protected scans keep only references into the
+/// scan's index (a full disk lists millions of files); legacy walks keep the
+/// discovery-time summaries, which can differ from the browse index.
+enum DiscoveryRows {
+  Items(Vec<DiscoveryItem>),
+  Nodes(Vec<DiscoveryRow>),
+}
+
+#[derive(Clone, Copy)]
+struct DiscoveryRow {
+  /// The node's size, kept in the row so rows sort without a key buffer.
+  size: u64,
+  node: u32,
+  category: u8,
+}
+
+const LARGE_FILE: u8 = 0;
+const GITIGNORED: u8 = 1;
+const CATEGORIES: [&str; 9] = [
+  "Large file",
+  "Gitignored",
+  "Python bytecode",
+  "pytest cache",
+  "mypy cache",
+  "Ruff cache",
+  "Node dependencies",
+  "Rust build output",
+  "JavaScript build cache",
+];
+
+fn category_code(label: &str) -> u8 {
+  CATEGORIES
+    .iter()
+    .position(|candidate| *candidate == label)
+    .expect("discovery category is catalogued") as u8
 }
 
 /// What a discovery request needs before any filesystem work. `Cached` means
@@ -413,17 +459,6 @@ fn now_iso() -> String {
   format!("{year:04}-{month:02}-{d:02}T{h:02}:{m:02}:{s:02}.{millis:03}Z")
 }
 
-fn node_id_of(path: &str) -> String {
-  let mut hasher = Sha1::new();
-  hasher.update(path.as_bytes());
-  let digest = hasher.finalize();
-  digest
-    .iter()
-    .take(12)
-    .map(|byte| format!("{byte:02x}"))
-    .collect()
-}
-
 fn new_id(prefix: &str) -> String {
   let nanos = SystemTime::now()
     .duration_since(UNIX_EPOCH)
@@ -444,25 +479,6 @@ fn new_id(prefix: &str) -> String {
 }
 
 #[derive(Clone)]
-struct IndexEntry {
-  id: String,
-  name: String,
-  path: String,
-  size: u64,
-  depth: u32,
-  ignored: bool,
-  collapsed: bool,
-  parent: Option<String>,
-  child_ids: Vec<String>,
-  fingerprint: Option<EntryFingerprint>,
-  cleanup: Option<CleanupSnapshot>,
-  logical_size: Option<u64>,
-  is_directory: Option<bool>,
-  scan_state: Option<String>,
-  skip_reason: Option<String>,
-}
-
-#[derive(Clone)]
 struct CleanupSnapshot {
   size: u64,
   ignored: bool,
@@ -470,31 +486,11 @@ struct CleanupSnapshot {
 }
 
 impl CleanupSnapshot {
-  fn from_entry(entry: &IndexEntry) -> Self {
+  fn from_node(index: &NodeIndex, node: u32) -> Self {
     Self {
-      size: entry.size,
-      ignored: entry.ignored,
-      fingerprint: entry.fingerprint.clone(),
-    }
-  }
-}
-
-impl IndexEntry {
-  fn summary(&self) -> TreeNodeSummary {
-    TreeNodeSummary {
-      id: self.id.clone(),
-      name: self.name.clone(),
-      path: self.path.clone(),
-      size: self.size,
-      depth: self.depth,
-      ignored: self.ignored,
-      collapsed: self.collapsed,
-      has_children: !self.child_ids.is_empty(),
-      child_count: self.child_ids.len(),
-      logical_size: self.logical_size,
-      is_directory: self.is_directory,
-      scan_state: self.scan_state.clone(),
-      skip_reason: self.skip_reason.clone(),
+      size: index.size(node),
+      ignored: index.ignored(node),
+      fingerprint: index.fingerprint(node),
     }
   }
 }
@@ -502,10 +498,10 @@ impl IndexEntry {
 struct ScanRecord {
   session: ScanSession,
   status: ScanStatus,
-  index: HashMap<String, IndexEntry>,
+  index: NodeIndex,
   root_ids: Vec<String>,
   ignore_hidden: bool,
-  discovery: HashMap<DiscoveryKind, Vec<DiscoveryItem>>,
+  discovery: HashMap<DiscoveryKind, DiscoveryRows>,
   local_only: bool,
   // Whether the protected scan read .gitignore content while indexing;
   // mirrors the host's gitignoreClassified flag for the discovery gate.
@@ -523,6 +519,8 @@ struct ScanRecord {
   /// Per location-root completeness evidence (A1/R2): canonical location
   /// path string -> whole-folder cleanable. Absent entries count as false.
   app_folder_cleanable: HashMap<String, bool>,
+  /// Engine clock tick of the last read; orders eviction (LRU).
+  last_used: std::cell::Cell<u64>,
 }
 
 /// Prepared under a short lock, executed with all filesystem work outside it.
@@ -582,6 +580,13 @@ impl AppScanContext {
 }
 
 /// The whole desktop engine behind one session.
+/// Finished scans other than the most recently used one are kept only while
+/// their indexes together stay within this many nodes: a few app or folder
+/// scans, never a second full disk (millions of nodes, hundreds of MB).
+const RETAINED_NODE_BUDGET: usize = 500_000;
+/// And never more than this many finished scans in all.
+const RETAINED_SCAN_LIMIT: usize = 16;
+
 pub struct EngineStore {
   roots: Vec<PathBuf>,
   scans: HashMap<String, ScanRecord>,
@@ -589,6 +594,9 @@ pub struct EngineStore {
   /// Private recursive manifests for app-scan plans (A4), keyed by plan id
   /// and consumed atomically with the plan.
   app_manifests: HashMap<String, HashMap<String, (u64, i64)>>,
+  /// Monotonic tick stamped on a scan whenever it is read.
+  clock: std::cell::Cell<u64>,
+  retained_node_budget: usize,
 }
 
 impl EngineStore {
@@ -598,7 +606,68 @@ impl EngineStore {
       scans: HashMap::new(),
       plans: HashMap::new(),
       app_manifests: HashMap::new(),
+      clock: std::cell::Cell::new(0),
+      retained_node_budget: RETAINED_NODE_BUDGET,
     }
+  }
+
+  fn tick(&self) -> u64 {
+    let next = self.clock.get() + 1;
+    self.clock.set(next);
+    next
+  }
+
+  /// Drops finished scans nobody is looking at, so memory stays bounded
+  /// across rescans. Running scans are never touched, and the most recently
+  /// used ready scan always stays (it is what the UI shows while a new scan
+  /// runs, or after one is cancelled). Other finished scans stay only within
+  /// the node budget, newest first. Plans for dropped scans go with them;
+  /// reads of a dropped scan answer NotFound.
+  fn evict_finished_scans(&mut self) {
+    let mut finished: Vec<(u64, String, usize, bool)> = self
+      .scans
+      .iter()
+      .filter(|(_, record)| record.active_worker.is_none() && record.status.state != "scanning")
+      .map(|(scan_id, record)| {
+        (
+          record.last_used.get(),
+          scan_id.clone(),
+          record.index.len(),
+          record.status.state == "ready",
+        )
+      })
+      .collect();
+    finished.sort_by_key(|(last_used, ..)| std::cmp::Reverse(*last_used));
+    let pinned = finished
+      .iter()
+      .find(|(_, _, _, ready)| *ready)
+      .map(|(_, scan_id, _, _)| scan_id.clone());
+    let mut budget = self.retained_node_budget;
+    let mut kept = 1;
+    let mut evicted = HashSet::new();
+    for (_, scan_id, nodes, _) in finished {
+      if Some(&scan_id) == pinned.as_ref() {
+        continue;
+      }
+      if kept < RETAINED_SCAN_LIMIT && nodes <= budget {
+        budget -= nodes;
+        kept += 1;
+        continue;
+      }
+      evicted.insert(scan_id);
+    }
+    if evicted.is_empty() {
+      return;
+    }
+    self.scans.retain(|scan_id, _| !evicted.contains(scan_id));
+    release_freed_memory();
+    self
+      .plans
+      .retain(|_, (plan, _)| !evicted.contains(&plan.scan_id));
+    let plans = &self.plans;
+    self
+      .app_manifests
+      .retain(|plan_id, _| plans.contains_key(plan_id));
   }
 
   pub fn roots(&self) -> Vec<ScanTarget> {
@@ -783,20 +852,17 @@ impl EngineStore {
       ));
     }
 
-    let mut index = HashMap::new();
-    let mut root_ids = Vec::new();
+    let mut index = NodeIndex::default();
+    let mut roots = Vec::new();
     let mut bytes = 0u64;
     let mut entries = 0usize;
     for root in &tree {
-      root_ids.push(walk_index(root, None, 0, &mut index));
+      roots.push(walk_index(root, NONE, None, &mut index));
       bytes += root.size;
       entries += count_nodes(root);
     }
-    for root_id in &root_ids {
-      index
-        .entry(root_id.clone())
-        .and_modify(|entry| entry.depth = 0);
-    }
+    index.seal();
+    let root_ids: Vec<String> = roots.iter().map(|root| index.wire_id(*root)).collect();
 
     let status = ScanStatus {
       scan_id: scan_id.clone(),
@@ -811,6 +877,7 @@ impl EngineStore {
       updated_at: now_iso(),
       coverage: None,
       volumes: None,
+      storage: None,
       app: None,
     };
     let session = ScanSession {
@@ -837,8 +904,10 @@ impl EngineStore {
         virtual_root_id: None,
         bundle_node_id: None,
         app_folder_cleanable: HashMap::new(),
+        last_used: std::cell::Cell::new(self.tick()),
       },
     );
+    self.evict_finished_scans();
     Ok(session)
   }
 
@@ -924,6 +993,7 @@ impl EngineStore {
       updated_at: now_iso(),
       coverage: None,
       volumes: None,
+      storage: None,
       app: None,
     };
     self.scans.insert(
@@ -931,7 +1001,7 @@ impl EngineStore {
       ScanRecord {
         session: session.clone(),
         status,
-        index: HashMap::new(),
+        index: NodeIndex::default(),
         root_ids: Vec::new(),
         ignore_hidden: request.ignore_hidden,
         discovery: HashMap::new(),
@@ -943,8 +1013,10 @@ impl EngineStore {
         virtual_root_id: None,
         bundle_node_id: None,
         app_folder_cleanable: HashMap::new(),
+        last_used: std::cell::Cell::new(self.tick()),
       },
     );
+    self.evict_finished_scans();
     Ok((
       session,
       LocalScanTask {
@@ -952,7 +1024,9 @@ impl EngineStore {
         options: ScanOptions {
           directories: resolved,
           ignore_hidden: request.ignore_hidden,
-          full_path: true,
+          // Indexing reads `path`, never `name`; a basename name keeps the
+          // walker's tree from holding every full path twice.
+          full_path: false,
           respect_gitignore: request.respect_gitignore,
           ignored_mode: match request.ignored_mode {
             WireIgnoredMode::Summarize => IgnoredMode::Summarize,
@@ -989,6 +1063,23 @@ impl EngineStore {
     Ok(record.status.clone())
   }
 
+  /// Attach APFS accounting to a finished scan. Read off the engine lock
+  /// (it spawns `diskutil`), so it lands only if the scan is still ready.
+  pub fn attach_storage(
+    &mut self,
+    scan_id: &str,
+    storage: Option<StorageBreakdown>,
+  ) -> EngineResult<ScanStatus> {
+    let record = self
+      .scans
+      .get_mut(scan_id)
+      .ok_or_else(|| problem("NotFound", "scan vanished"))?;
+    if record.status.state == "ready" && storage.is_some() {
+      record.status.storage = storage;
+    }
+    Ok(record.status.clone())
+  }
+
   pub fn finish_local_scan(
     &mut self,
     scan_id: &str,
@@ -1007,14 +1098,16 @@ impl EngineStore {
       return Ok(record.status.clone());
     }
     match result {
-      Ok(report) => {
-        let mut index = HashMap::new();
-        let root_ids: Vec<String> = report
-          .nodes
-          .iter()
-          .map(|node| walk_local_index(node, None, 0, &mut index))
-          .collect();
-        record.status.bytes_scanned = report.nodes.iter().map(|node| node.size).sum();
+      Ok(mut report) => {
+        // The walker's tree is consumed while indexing, so its memory is
+        // released subtree by subtree instead of after the whole index exists.
+        let nodes = std::mem::take(&mut report.nodes);
+        record.status.bytes_scanned = nodes.iter().map(|node| node.size).sum();
+        let mut index = NodeIndex::default();
+        let roots = index_local_nodes(&mut index, nodes, NONE);
+        index.seal();
+        let root_ids: Vec<String> = roots.iter().map(|root| index.wire_id(*root)).collect();
+        release_freed_memory();
         record.status.entries_scanned = index.len();
         record.status.state = "ready".into();
         record.status.message = format!(
@@ -1040,7 +1133,18 @@ impl EngineStore {
     }
     record.status.current_path = None;
     record.status.updated_at = now_iso();
-    Ok(record.status.clone())
+    let status = record.status.clone();
+    self.finished(scan_id);
+    Ok(status)
+  }
+
+  /// A scan just left `scanning`: it becomes the most recently used one,
+  /// and older finished scans beyond the retention budget are dropped.
+  fn finished(&mut self, scan_id: &str) {
+    if let Some(record) = self.scans.get(scan_id) {
+      record.last_used.set(self.tick());
+    }
+    self.evict_finished_scans();
   }
 
   /// Starts an app scan: validates the closed request against the pinned
@@ -1208,6 +1312,7 @@ impl EngineStore {
       updated_at: now_iso(),
       coverage: None,
       volumes: None,
+      storage: None,
       app: Some(origin),
     };
     self.scans.insert(
@@ -1215,7 +1320,7 @@ impl EngineStore {
       ScanRecord {
         session: session.clone(),
         status,
-        index: HashMap::new(),
+        index: NodeIndex::default(),
         root_ids: Vec::new(),
         ignore_hidden: false,
         discovery: HashMap::new(),
@@ -1227,8 +1332,10 @@ impl EngineStore {
         virtual_root_id: None,
         bundle_node_id: None,
         app_folder_cleanable: HashMap::new(),
+        last_used: std::cell::Cell::new(self.tick()),
       },
     );
+    self.evict_finished_scans();
     Ok((
       session,
       LocalScanTask {
@@ -1236,7 +1343,9 @@ impl EngineStore {
         options: ScanOptions {
           directories: dir_locations,
           ignore_hidden: false,
-          full_path: true,
+          // Indexing reads `path`, never `name`; a basename name keeps the
+          // walker's tree from holding every full path twice.
+          full_path: false,
           respect_gitignore: true,
           ignored_mode: IgnoredMode::Summarize,
           follow_symlinks: false,
@@ -1300,8 +1409,10 @@ impl EngineStore {
     record.active_worker = None;
     match result {
       Ok(report) => {
-        Self::index_app_report(record, &context, &report);
-        Ok(record.status.clone())
+        Self::index_app_report(record, &context, report);
+        let status = record.status.clone();
+        self.finished(scan_id);
+        Ok(status)
       }
       Err(error) => {
         record.status.state = if error.kind() == std::io::ErrorKind::Interrupted {
@@ -1321,7 +1432,11 @@ impl EngineStore {
   /// Index one finished walker report under the pinned context. Pure
   /// index surgery: virtual root + file/bundle leaves, depth shifts,
   /// evidence, totals.
-  fn index_app_report(record: &mut ScanRecord, context: &AppScanContext, report: &LocalScanReport) {
+  fn index_app_report(
+    record: &mut ScanRecord,
+    context: &AppScanContext,
+    mut report: LocalScanReport,
+  ) {
     let origin = record.app_origin.clone().unwrap_or(AppScanOrigin {
       app_id: context.app_id.clone(),
       app_name: context.app_name.clone(),
@@ -1330,16 +1445,33 @@ impl EngineStore {
     let (virtual_id, virtual_path) = app_virtual_ids(&context.audit_id, &context.app_id);
     let authorized: HashSet<PathBuf> = context.own_locations().into_iter().collect();
 
-    let mut index = HashMap::new();
-    let mut child_ids: Vec<String> = Vec::new();
+    let mut index = NodeIndex::default();
+    // The virtual root goes first so every location can name it as parent;
+    // its size is known only once the locations are measured.
+    let virtual_root = index.push(NodeFacts {
+      id: virtual_id,
+      name: &context.app_name,
+      path: &virtual_path,
+      parent: NONE,
+      parent_path: None,
+      size: 0,
+      logical_size: Some(0),
+      is_directory: Some(true),
+      ignored: false,
+      collapsed: false,
+      scan_state: Some("complete"),
+      skip_reason: None,
+      fingerprint: None,
+    });
+    let mut children: Vec<u32> = Vec::new();
     let mut evidence: HashMap<String, bool> = HashMap::new();
     let mut locations_size = 0u64;
 
     // Directory locations: the walker index, depth-shifted to 1.
-    for node in &report.nodes {
+    for node in std::mem::take(&mut report.nodes) {
       let path_string = node.path.to_string_lossy().into_owned();
-      let id = walk_local_index(node, Some(virtual_id.clone()), 1, &mut index);
-      child_ids.push(id);
+      let id = walk_local_index(node, virtual_root, None, &mut index);
+      children.push(id);
       let path = PathBuf::from(&path_string);
       let cleanable = if context.dir_locations.contains(&path) {
         policy::location_folder_cleanable(
@@ -1351,44 +1483,49 @@ impl EngineStore {
       } else {
         false
       };
-      evidence.insert(path_string.clone(), cleanable);
-      if let Some(entry) = index.values().find(|entry| entry.path == path_string) {
-        locations_size = locations_size.saturating_add(entry.size);
-      }
+      evidence.insert(path_string, cleanable);
+      locations_size = locations_size.saturating_add(index.size(id));
     }
+    index.seal();
+    let leaf =
+      |index: &mut NodeIndex, id: NodeId, path: &Path, size: u64, directory: bool, found: bool| {
+        let path_string = path.to_string_lossy().into_owned();
+        let name = path
+          .file_name()
+          .map(|name| name.to_string_lossy().into_owned())
+          .unwrap_or_else(|| path_string.clone());
+        index.push(NodeFacts {
+          id,
+          name: &name,
+          path: &path_string,
+          parent: virtual_root,
+          parent_path: None,
+          size,
+          logical_size: Some(size),
+          is_directory: Some(directory),
+          ignored: false,
+          collapsed: false,
+          scan_state: Some(if found { "complete" } else { "skipped" }),
+          skip_reason: (!found).then_some("not-found"),
+          fingerprint: None,
+        })
+      };
     // Directory locations the walker never returned (vanished between
     // prepare and walk): skipped placeholders so evidence-driven guards see
     // them as contents-only at best.
     for location in &context.dir_locations {
       let path_string = location.to_string_lossy().into_owned();
-      if index.values().any(|entry| entry.path == path_string) {
+      if index.get(NodeId::of_path(&path_string)).is_some() {
         continue;
       }
-      let id = node_id_of(&path_string);
-      index.insert(
-        id.clone(),
-        IndexEntry {
-          id: id.clone(),
-          name: location
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path_string.clone()),
-          path: path_string.clone(),
-          size: 0,
-          depth: 1,
-          ignored: false,
-          collapsed: false,
-          parent: Some(virtual_id.clone()),
-          child_ids: Vec::new(),
-          fingerprint: None,
-          cleanup: None,
-          logical_size: Some(0),
-          is_directory: Some(true),
-          scan_state: Some("skipped".into()),
-          skip_reason: Some("not-found".into()),
-        },
-      );
-      child_ids.push(id);
+      children.push(leaf(
+        &mut index,
+        NodeId::of_path(&path_string),
+        location,
+        0,
+        true,
+        false,
+      ));
       evidence.insert(path_string, false);
     }
 
@@ -1396,59 +1533,20 @@ impl EngineStore {
     // output. A stat failure becomes a skipped leaf (refused at plan).
     for location in &context.file_locations {
       let path_string = location.to_string_lossy().into_owned();
-      let id = node_id_of(&path_string);
-      let leaf = match fs::symlink_metadata(location) {
+      let id = NodeId::of_path(&path_string);
+      let node = match fs::symlink_metadata(location) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
           let size = metadata.len();
           locations_size = locations_size.saturating_add(size);
-          evidence.insert(path_string.clone(), true);
-          IndexEntry {
-            id: id.clone(),
-            name: location
-              .file_name()
-              .map(|name| name.to_string_lossy().into_owned())
-              .unwrap_or_else(|| path_string.clone()),
-            path: path_string,
-            size,
-            depth: 1,
-            ignored: false,
-            collapsed: false,
-            parent: Some(virtual_id.clone()),
-            child_ids: Vec::new(),
-            fingerprint: None,
-            cleanup: None,
-            logical_size: Some(size),
-            is_directory: Some(false),
-            scan_state: Some("complete".into()),
-            skip_reason: None,
-          }
+          evidence.insert(path_string, true);
+          leaf(&mut index, id, location, size, false, true)
         }
         _ => {
-          evidence.insert(path_string.clone(), false);
-          IndexEntry {
-            id: id.clone(),
-            name: location
-              .file_name()
-              .map(|name| name.to_string_lossy().into_owned())
-              .unwrap_or_else(|| path_string.clone()),
-            path: path_string,
-            size: 0,
-            depth: 1,
-            ignored: false,
-            collapsed: false,
-            parent: Some(virtual_id.clone()),
-            child_ids: Vec::new(),
-            fingerprint: None,
-            cleanup: None,
-            logical_size: Some(0),
-            is_directory: Some(false),
-            scan_state: Some("skipped".into()),
-            skip_reason: Some("not-found".into()),
-          }
+          evidence.insert(path_string, false);
+          leaf(&mut index, id, location, 0, false, false)
         }
       };
-      index.insert(id.clone(), leaf);
-      child_ids.push(id);
+      children.push(node);
     }
 
     // Bundle leaf (A3): audit-size, never scanned, never cleanable. When the
@@ -1463,60 +1561,27 @@ impl EngineStore {
         .iter()
         .any(|location| policy::bundle_overlap(location, bundle_path));
       if !overlaps {
-        let path_string = bundle_path.to_string_lossy().into_owned();
-        let id = app_bundle_id(&path_string);
-        index.insert(
-          id.clone(),
-          IndexEntry {
-            id: id.clone(),
-            name: bundle_path
-              .file_name()
-              .map(|name| name.to_string_lossy().into_owned())
-              .unwrap_or_else(|| path_string.clone()),
-            path: path_string,
-            size: *installed_size,
-            depth: 1,
-            ignored: false,
-            collapsed: false,
-            parent: Some(virtual_id.clone()),
-            child_ids: Vec::new(),
-            fingerprint: None,
-            cleanup: None,
-            logical_size: Some(*installed_size),
-            is_directory: Some(true),
-            scan_state: Some("complete".into()),
-            skip_reason: None,
-          },
-        );
-        child_ids.push(id.clone());
-        bundle_node_id = Some(id);
+        let id = NodeId::app_bundle(&bundle_path.to_string_lossy());
+        children.push(leaf(
+          &mut index,
+          id,
+          bundle_path,
+          *installed_size,
+          true,
+          true,
+        ));
+        bundle_node_id = Some(id.to_wire());
         bundle_size = *installed_size;
       }
     }
 
-    child_ids.sort();
-    child_ids.dedup();
+    children.sort_by_cached_key(|child| index.wire_id(*child));
+    children.dedup_by_key(|child| index.id(*child));
     let virtual_size = locations_size.saturating_add(bundle_size);
-    index.insert(
-      virtual_id.clone(),
-      IndexEntry {
-        id: virtual_id.clone(),
-        name: context.app_name.clone(),
-        path: virtual_path,
-        size: virtual_size,
-        depth: 0,
-        ignored: false,
-        collapsed: false,
-        parent: None,
-        child_ids,
-        fingerprint: None,
-        cleanup: None,
-        logical_size: Some(virtual_size),
-        is_directory: Some(true),
-        scan_state: Some("complete".into()),
-        skip_reason: None,
-      },
-    );
+    index.set_children(virtual_root, &children);
+    index.set_size(virtual_root, virtual_size, Some(virtual_size));
+    index.seal();
+    let virtual_id = virtual_id.to_wire();
 
     record.status.bytes_scanned = virtual_size;
     record.status.entries_scanned = index.len();
@@ -1525,8 +1590,8 @@ impl EngineStore {
       "App scan complete · {} skipped · {} denied",
       report.coverage.skipped_count, report.coverage.denied_count
     );
-    record.status.coverage = Some(report.coverage.clone());
-    record.status.volumes = Some(report.volumes.clone());
+    record.status.coverage = Some(report.coverage);
+    record.status.volumes = Some(report.volumes);
     record.status.app = Some(origin.clone());
     record.session.app = Some(origin);
     record.root_ids = vec![virtual_id.clone()];
@@ -1580,34 +1645,26 @@ impl EngineStore {
 
   pub fn slice(&self, request: &TreeSliceRequest) -> EngineResult<TreeSlice> {
     let record = self.ready(request.scan_id.as_str())?;
-    let focus = record.index.get(&request.node_id).ok_or_else(|| {
+    let index = &record.index;
+    let focus = index.find(&request.node_id).ok_or_else(|| {
       problem(
         "NotFound",
         format!("no node {} in scan {}", request.node_id, request.scan_id),
       )
     })?;
     let mut ancestors = Vec::new();
-    let mut cursor = focus.parent.clone();
-    while let Some(parent_id) = cursor {
-      let parent = record
-        .index
-        .get(&parent_id)
-        .ok_or_else(|| problem("InternalError", "index lost a parent"))?;
-      ancestors.insert(0, parent.summary());
-      cursor = parent.parent.clone();
+    let mut cursor = index.parent(focus);
+    while let Some(parent) = cursor {
+      ancestors.insert(0, index.summary(parent));
+      cursor = index.parent(parent);
     }
-    let built = build_slice_node(
-      &record.index,
-      focus,
-      request.depth,
-      request.max_children_per_node,
-    );
+    let built = build_slice_node(index, focus, request.depth, request.max_children_per_node);
     Ok(TreeSlice {
       scan_id: request.scan_id.clone(),
-      focus_node: focus.summary(),
+      focus_node: index.summary(focus),
       ancestors,
       tree: built.node,
-      total_size: focus.size,
+      total_size: index.size(focus),
       truncated: built.truncated,
       omitted_bytes: built.omitted_bytes,
       omitted_count: built.omitted_count,
@@ -1617,17 +1674,16 @@ impl EngineStore {
 
   pub fn children(&self, request: &ChildrenPageRequest) -> EngineResult<ChildrenPage> {
     let record = self.ready(request.scan_id.as_str())?;
-    let entry = record.index.get(&request.node_id).ok_or_else(|| {
+    let index = &record.index;
+    let node = index.find(&request.node_id).ok_or_else(|| {
       problem(
         "NotFound",
         format!("no node {} in scan {}", request.node_id, request.scan_id),
       )
     })?;
-    let mut children: Vec<TreeNodeSummary> = entry
-      .child_ids
-      .iter()
-      .filter_map(|id| record.index.get(id))
-      .map(|child| child.summary())
+    let mut children: Vec<TreeNodeSummary> = index
+      .children(node)
+      .map(|child| index.summary(child))
       .collect();
     match request.sort.as_str() {
       "name" => children.sort_by(|a, b| a.name.cmp(&b.name)),
@@ -1672,11 +1728,11 @@ impl EngineStore {
       // items add no index entries, so browse topology stays untouched.
       // App scans additionally drop the audit-size bundle leaf: it is display
       // metadata, never a cleanup candidate.
-      let mut items = protected_discovery_items(&record.index);
-      if let Some(bundle_id) = record.bundle_node_id.clone() {
-        for rows in items.values_mut() {
-          rows.retain(|item| item.node.id != bundle_id);
-        }
+      let mut rows = protected_discovery_rows(&record.index);
+      // Rows naming the bundle by its leaf id or by its path.
+      let mut bundle_nodes = HashSet::new();
+      if let Some(bundle_id) = &record.bundle_node_id {
+        bundle_nodes.extend(record.index.find(bundle_id));
       }
       if let Some(bundle) = record
         .app_context
@@ -1684,13 +1740,20 @@ impl EngineStore {
         .and_then(|context| context.bundle.clone().map(|(path, _)| path))
       {
         let bundle_string = bundle.to_string_lossy().into_owned();
-        for rows in items.values_mut() {
-          rows.retain(|item| item.node.path != bundle_string);
+        bundle_nodes.extend(record.index.get(NodeId::of_path(&bundle_string)));
+      }
+      if !bundle_nodes.is_empty() {
+        for kind_rows in rows.values_mut() {
+          kind_rows.retain(|row| !bundle_nodes.contains(&row.node));
         }
       }
       return Ok(PreparedDiscovery::Ready(DiscoveryData {
-        index: HashMap::new(),
-        items,
+        index: Box::default(),
+        kept: HashSet::new(),
+        items: rows
+          .into_iter()
+          .map(|(kind, rows)| (kind, DiscoveryRows::Nodes(rows)))
+          .collect(),
       }));
     }
     if record.discovery.contains_key(&request.kind) {
@@ -1713,15 +1776,18 @@ impl EngineStore {
       // Existing browse topology stays unchanged, including summarized
       // directories. New nodes/ancestors make discovery IDs usable by
       // slice and cleanup without expanding the ordinary browse view.
-      for (id, entry) in data.index {
-        let snapshot = CleanupSnapshot::from_entry(&entry);
-        record
+      if data.index.len() > 0 {
+        let existing = record
           .index
-          .entry(id)
-          // Keep original browse sizes/flags/topology intact; cleanup uses
-          // the later discovery snapshot shown in discovery results.
-          .and_modify(|old| old.cleanup = Some(snapshot))
-          .or_insert(entry);
+          .merge(&data.index, |node| data.kept.contains(&node));
+        // Keep original browse sizes/flags/topology intact; cleanup uses
+        // the later discovery snapshot shown in discovery results.
+        for (node, source) in existing {
+          record
+            .index
+            .cleanup
+            .insert(node, CleanupSnapshot::from_node(&data.index, source));
+        }
       }
       for (kind, items) in data.items {
         record.discovery.entry(kind).or_insert(items);
@@ -1731,21 +1797,43 @@ impl EngineStore {
       .discovery
       .get(&request.kind)
       .ok_or_else(|| problem("InternalError", "discovery results were not computed"))?;
-    let filtered: Vec<_> = rows
-      .iter()
-      .filter(|item| item.node.size >= request.min_size)
-      .collect();
+    let mut total = 0usize;
+    let mut total_size = 0u64;
+    let mut items = Vec::new();
+    let mut take = |size: u64, item: &dyn Fn() -> DiscoveryItem| {
+      if size < request.min_size {
+        return;
+      }
+      if total >= request.offset && items.len() < request.limit {
+        items.push(item());
+      }
+      total += 1;
+      total_size += size;
+    };
+    match rows {
+      DiscoveryRows::Items(rows) => {
+        for row in rows {
+          take(row.node.size, &|| row.clone());
+        }
+      }
+      DiscoveryRows::Nodes(rows) => {
+        let index = &record.index;
+        for row in rows {
+          take(row.size, &|| DiscoveryItem {
+            node: index.summary(row.node),
+            parent_id: index.parent(row.node).map(|parent| index.wire_id(parent)),
+            category: CATEGORIES[row.category as usize].into(),
+            is_directory: index.is_directory(row.node) == Some(true),
+          });
+        }
+      }
+    }
     Ok(DiscoveryPage {
       scan_id: request.scan_id.clone(),
       kind: request.kind,
-      total: filtered.len(),
-      total_size: filtered.iter().map(|item| item.node.size).sum(),
-      items: filtered
-        .into_iter()
-        .skip(request.offset)
-        .take(request.limit)
-        .cloned()
-        .collect(),
+      total,
+      total_size,
+      items,
       offset: request.offset,
       limit: request.limit,
     })
@@ -1762,44 +1850,36 @@ impl EngineStore {
       return self.plan_app_scan(request);
     }
     let record = self.ready(request.scan_id.as_str())?;
-    let scan_roots: Vec<PathBuf> = record
-      .root_ids
-      .iter()
-      .filter_map(|id| record.index.get(id))
-      .map(|entry| PathBuf::from(&entry.path))
-      .collect();
+    let scan_roots = scan_root_paths(record);
     let mut selected = Vec::new();
     for node_id in &request.node_ids {
-      let entry = record.index.get(node_id).ok_or_else(|| {
+      let node = record.index.find(node_id).ok_or_else(|| {
         problem(
           "InvalidRequest",
           format!("plan references unknown node {node_id}"),
         )
       })?;
+      let path = record.index.path(node);
       // A skipped or partial entry was never fully measured, no matter what
       // the path looks like now — mirror the UI selection rules and reject
       // before any metadata probe (which could touch a replaced path).
-      if matches!(entry.scan_state.as_deref(), Some("skipped" | "partial")) {
+      if matches!(record.index.scan_state(node), Some("skipped" | "partial")) {
         return Err(problem(
           "InvalidRequest",
-          format!(
-            "path was skipped or partially scanned; cleanup needs a complete entry: {}",
-            entry.path
-          ),
+          format!("path was skipped or partially scanned; cleanup needs a complete entry: {path}"),
         ));
       }
-      guard_cleanup_roots(Path::new(&entry.path), &scan_roots, &self.roots)?;
-      let snapshot = entry
+      guard_cleanup_roots(Path::new(&path), &scan_roots, &self.roots)?;
+      let snapshot = record
+        .index
         .cleanup
-        .clone()
-        .unwrap_or_else(|| CleanupSnapshot::from_entry(entry));
-      let metadata = safe_metadata(Path::new(&entry.path), &scan_roots).ok_or_else(|| {
+        .get(&node)
+        .cloned()
+        .unwrap_or_else(|| CleanupSnapshot::from_node(&record.index, node));
+      let metadata = safe_metadata(Path::new(&path), &scan_roots).ok_or_else(|| {
         problem(
           "StalePlan",
-          format!(
-            "path is missing, outside the scan roots, or traverses a symbolic link: {}",
-            entry.path
-          ),
+          format!("path is missing, outside the scan roots, or traverses a symbolic link: {path}"),
         )
       })?;
       let current = fingerprint_of(&metadata);
@@ -1812,31 +1892,31 @@ impl EngineStore {
         Some(fingerprint) if fingerprint != current => {
           return Err(problem(
             "StaleSnapshot",
-            format!("path changed since scanning: {}; scan again", entry.path),
+            format!("path changed since scanning: {path}; scan again"),
           ));
         }
         Some(fingerprint) => fingerprint,
         None => current,
       };
-      selected.push((entry, snapshot, baseline));
+      selected.push((path, snapshot, baseline));
     }
     selected.sort_by(|a, b| {
-      Path::new(&a.0.path)
+      Path::new(&a.0)
         .components()
         .count()
-        .cmp(&Path::new(&b.0.path).components().count())
-        .then_with(|| a.0.path.cmp(&b.0.path))
+        .cmp(&Path::new(&b.0).components().count())
+        .then_with(|| a.0.cmp(&b.0))
     });
     let mut entries: Vec<PlanEntry> = Vec::new();
-    for (entry, snapshot, fingerprint) in selected {
+    for (path, snapshot, fingerprint) in selected {
       if entries
         .iter()
-        .any(|planned| Path::new(&entry.path).starts_with(&planned.path))
+        .any(|planned| Path::new(&path).starts_with(&planned.path))
       {
         continue;
       }
       entries.push(PlanEntry {
-        path: entry.path.clone(),
+        path,
         size: snapshot.size,
         reason: if snapshot.ignored {
           "ignored"
@@ -1879,14 +1959,20 @@ impl EngineStore {
       .clone()
       .ok_or_else(|| problem("InternalError", "app scan lost its context"))?;
     let own = context.own_locations();
-    let mut selected: Vec<(IndexEntry, EntryFingerprint)> = Vec::new();
+    let mut selected: Vec<(PlannedNode, EntryFingerprint)> = Vec::new();
     for node_id in &request.node_ids {
-      let entry = record.index.get(node_id).ok_or_else(|| {
+      let node = record.index.find(node_id).ok_or_else(|| {
         problem(
           "InvalidRequest",
           format!("plan references unknown node {node_id}"),
         )
       })?;
+      let entry = PlannedNode {
+        path: record.index.path(node),
+        size: record.index.size(node),
+        ignored: record.index.ignored(node),
+      };
+      let scan_state = record.index.scan_state(node);
       let path = PathBuf::from(&entry.path);
       // Shared-policy authorization (A3/A5), synthetic identifiers first.
       guard_app_cleanup(&path, record, &self.roots)?;
@@ -1895,7 +1981,7 @@ impl EngineStore {
       // (nested `separate-root` partitions accepted); `skipped` is refused
       // everywhere and `partial` below depth 1 stays refused.
       let is_location_root = own.iter().any(|location| location == &path);
-      if matches!(entry.scan_state.as_deref(), Some("skipped")) {
+      if matches!(scan_state, Some("skipped")) {
         return Err(problem(
           "InvalidRequest",
           format!(
@@ -1919,7 +2005,7 @@ impl EngineStore {
             ),
           ));
         }
-      } else if matches!(entry.scan_state.as_deref(), Some("partial")) {
+      } else if matches!(scan_state, Some("partial")) {
         return Err(problem(
           "InvalidRequest",
           format!(
@@ -1942,7 +2028,7 @@ impl EngineStore {
       let current = fingerprint_of(&metadata);
       // Protected index entries carry no scan-time fingerprint, so the fresh
       // measurement becomes the plan baseline and execute re-verifies it.
-      let baseline = match entry.fingerprint.clone() {
+      let baseline = match record.index.fingerprint(node) {
         Some(fingerprint) if fingerprint != current => {
           return Err(problem(
             "StaleSnapshot",
@@ -1952,7 +2038,7 @@ impl EngineStore {
         Some(fingerprint) => fingerprint,
         None => current,
       };
-      selected.push((entry.clone(), baseline));
+      selected.push((entry, baseline));
     }
     // Prune staged targets to top-most ancestors (mirror the path-scan drop).
     selected.sort_by(|a, b| {
@@ -1962,7 +2048,7 @@ impl EngineStore {
         .cmp(&Path::new(&b.0.path).components().count())
         .then_with(|| a.0.path.cmp(&b.0.path))
     });
-    let mut retained: Vec<(IndexEntry, EntryFingerprint)> = Vec::new();
+    let mut retained: Vec<(PlannedNode, EntryFingerprint)> = Vec::new();
     for candidate in selected {
       if retained
         .iter()
@@ -2071,12 +2157,7 @@ impl EngineStore {
     }
     let mut changed = 0usize;
     let record = self.ready(&plan.scan_id)?;
-    let scan_roots: Vec<PathBuf> = record
-      .root_ids
-      .iter()
-      .filter_map(|id| record.index.get(id))
-      .map(|entry| PathBuf::from(&entry.path))
-      .collect();
+    let scan_roots = scan_root_paths(record);
     for entry in &plan.entries {
       guard_cleanup_roots(Path::new(&entry.path), &scan_roots, &self.roots)?;
       let matches = safe_metadata(Path::new(&entry.path), &scan_roots)
@@ -2241,10 +2322,12 @@ impl EngineStore {
   }
 
   fn record(&self, scan_id: &str) -> EngineResult<&ScanRecord> {
-    self
+    let record = self
       .scans
       .get(scan_id)
-      .ok_or_else(|| problem("NotFound", format!("no scan {scan_id}")))
+      .ok_or_else(|| problem("NotFound", format!("no scan {scan_id}")))?;
+    record.last_used.set(self.tick());
+    Ok(record)
   }
 
   fn ready(&self, scan_id: &str) -> EngineResult<&ScanRecord> {
@@ -2371,30 +2454,12 @@ fn is_virtual_app_path(path: &Path) -> bool {
 }
 
 /// Pinned virtual conventions (§3.2): `approot_` + sha1 hex[..24] id and the
-/// matching `app-storage:` path for one audit generation + app id.
-fn app_virtual_ids(audit_id: &str, app_id: &str) -> (String, String) {
-  let mut hasher = Sha1::new();
-  hasher.update(format!("app-scan:{audit_id}:{app_id}").as_bytes());
-  let hex: String = hasher
-    .finalize()
-    .iter()
-    .take(12)
-    .map(|byte| format!("{byte:02x}"))
-    .collect();
-  (format!("approot_{hex}"), format!("app-storage:{hex}"))
-}
-
-/// Pinned bundle-leaf convention (§3.2): `appbundle_` + sha1(bundlePath)[..24].
-fn app_bundle_id(bundle_path: &str) -> String {
-  let mut hasher = Sha1::new();
-  hasher.update(bundle_path.as_bytes());
-  let hex: String = hasher
-    .finalize()
-    .iter()
-    .take(12)
-    .map(|byte| format!("{byte:02x}"))
-    .collect();
-  format!("appbundle_{hex}")
+/// matching `app-storage:` path for one audit generation + app id. The
+/// bundle leaf is `appbundle_` + sha1(bundlePath)[..24] (`NodeId::app_bundle`).
+fn app_virtual_ids(audit_id: &str, app_id: &str) -> (NodeId, String) {
+  let id = NodeId::app_root(&format!("app-scan:{audit_id}:{app_id}"));
+  let path = format!("app-storage:{}", id.hex());
+  (id, path)
 }
 
 fn fingerprint_of(metadata: &fs::Metadata) -> EntryFingerprint {
@@ -2410,15 +2475,27 @@ fn fingerprint_of(metadata: &fs::Metadata) -> EntryFingerprint {
   }
 }
 
+/// What an app-scan plan keeps of each staged node.
+struct PlannedNode {
+  path: String,
+  size: u64,
+  ignored: bool,
+}
+
+/// The scan's root paths, in root order.
+fn scan_root_paths(record: &ScanRecord) -> Vec<PathBuf> {
+  record
+    .root_ids
+    .iter()
+    .filter_map(|id| record.index.find(id))
+    .map(|root| PathBuf::from(record.index.path(root)))
+    .collect()
+}
+
 /// Snapshots the legacy walk inputs for a ready scan; the caller runs the
 /// actual filesystem walk outside the engine lock.
 fn discovery_walk_input(record: &ScanRecord) -> DiscoveryInput {
-  let mut roots: Vec<PathBuf> = record
-    .root_ids
-    .iter()
-    .filter_map(|id| record.index.get(id))
-    .map(|entry| PathBuf::from(&entry.path))
-    .collect();
+  let mut roots = scan_root_paths(record);
   roots.sort_by_key(|root| root.components().count());
   let mut outer = Vec::<PathBuf>::new();
   for root in roots {
@@ -2437,19 +2514,14 @@ fn discovery_walk_input(record: &ScanRecord) -> DiscoveryInput {
 /// `protectedDiscovery` (packages/host/src/protected-discovery.ts). Derived
 /// results are sorted by the desktop engine's byte order (size descending,
 /// path ascending), unlike the host's localeCompare, to match the legacy
-/// discovery sort used elsewhere in this engine.
-fn protected_discovery_items(
-  index: &HashMap<String, IndexEntry>,
-) -> HashMap<DiscoveryKind, Vec<DiscoveryItem>> {
-  let by_path: HashMap<&str, &IndexEntry> = index
-    .values()
-    .map(|entry| (entry.path.as_str(), entry))
-    .collect();
+/// discovery sort used elsewhere in this engine. Rows reference index nodes;
+/// paths are built only for cache candidates and for size ties.
+fn protected_discovery_rows(index: &NodeIndex) -> HashMap<DiscoveryKind, Vec<DiscoveryRow>> {
   // A marker file counts only when the report measured it as a complete
   // regular file — the report, never the live filesystem, is the source.
   let is_local_file = |path: &str| {
-    by_path.get(path).is_some_and(|entry| {
-      entry.is_directory == Some(false) && entry.scan_state.as_deref() == Some("complete")
+    index.get(NodeId::of_path(path)).is_some_and(|node| {
+      index.is_directory(node) == Some(false) && index.scan_state(node) == Some("complete")
     })
   };
   let in_environment = |path: &str| -> bool {
@@ -2479,42 +2551,52 @@ fn protected_discovery_items(
     (".ruff_cache", "Ruff cache"),
   ];
   let js = [".next", ".nuxt", ".turbo", ".parcel-cache", ".svelte-kit"];
-  let mut items: HashMap<DiscoveryKind, Vec<DiscoveryItem>> = [
-    DiscoveryKind::LargeFiles,
-    DiscoveryKind::Caches,
-    DiscoveryKind::Gitignored,
-  ]
-  .into_iter()
-  .map(|kind| (kind, Vec::new()))
-  .collect();
-  for entry in index.values() {
-    // Roots (no parent) and entries the scanner skipped never qualify.
-    if entry.scan_state.as_deref() == Some("skipped") || entry.parent.is_none() {
+  // Roots (no parent) and entries the scanner skipped never qualify.
+  let listed =
+    |node: u32| index.scan_state(node) != Some("skipped") && index.parent(node).is_some();
+  // Sized up front: a full disk lists millions of files, and every regrown
+  // buffer would stay resident in the allocator's large-block cache.
+  let files = index
+    .iter()
+    .filter(|node| listed(*node) && index.is_directory(*node) == Some(false))
+    .count();
+  let mut large_files = Vec::with_capacity(files);
+  let mut caches = Vec::new();
+  let mut gitignored = Vec::new();
+  let row = |node: u32, category: u8| DiscoveryRow {
+    size: index.size(node),
+    node,
+    category,
+  };
+  for node in index.iter() {
+    if !listed(node) {
       continue;
     }
-    let item = |category: &str| DiscoveryItem {
-      node: entry.summary(),
-      parent_id: entry.parent.clone(),
-      category: category.into(),
-      is_directory: entry.is_directory == Some(true),
+    if index.ignored(node) {
+      gitignored.push(row(node, GITIGNORED));
+    }
+    if index.is_directory(node) == Some(false) {
+      large_files.push(row(node, LARGE_FILE));
+      continue;
+    }
+    // A derived node's name is its path's file name; only nodes holding
+    // their path verbatim need the path to say.
+    let explicit_path = index.has_explicit_path(node).then(|| index.path(node));
+    let name = match &explicit_path {
+      Some(path) => Path::new(path).file_name().and_then(|name| name.to_str()),
+      None => Some(index.name(node)),
     };
-    if entry.ignored {
-      items
-        .get_mut(&DiscoveryKind::Gitignored)
-        .unwrap()
-        .push(item("Gitignored"));
-    }
-    if entry.is_directory == Some(false) {
-      items
-        .get_mut(&DiscoveryKind::LargeFiles)
-        .unwrap()
-        .push(item("Large file"));
+    let is_candidate = name.is_some_and(|name| {
+      python.iter().any(|(candidate, _)| *candidate == name)
+        || name == "node_modules"
+        || name == "target"
+        || js.contains(&name)
+    });
+    if !is_candidate {
       continue;
     }
-    let name = Path::new(&entry.path)
-      .file_name()
-      .and_then(|name| name.to_str());
-    let parent = Path::new(&entry.path).parent().map(Path::to_path_buf);
+    let path = explicit_path.clone().unwrap_or_else(|| index.path(node));
+    let parent = Path::new(&path).parent().map(Path::to_path_buf);
     let marker = |file: &str| {
       parent
         .as_ref()
@@ -2537,47 +2619,177 @@ fn protected_discovery_items(
       category = Some("JavaScript build cache");
     }
     if let Some(category) = category {
-      if !in_environment(&entry.path) {
-        items
-          .get_mut(&DiscoveryKind::Caches)
-          .unwrap()
-          .push(item(category));
+      if !in_environment(&path) {
+        caches.push(row(node, category_code(category)));
       }
     }
   }
   // A nested candidate inside an already-listed directory of the same kind
   // is redundant; keep only the outermost rows.
-  for kind in [DiscoveryKind::Caches, DiscoveryKind::Gitignored] {
-    let directories: HashSet<String> = items[&kind]
+  for rows in [&mut caches, &mut gitignored] {
+    let directories: HashSet<u32> = rows
       .iter()
-      .filter(|item| item.is_directory)
-      .map(|item| item.node.path.clone())
+      .filter(|row| index.is_directory(row.node) == Some(true))
+      .map(|row| row.node)
       .collect();
-    items.get_mut(&kind).unwrap().retain(|item| {
-      let mut cursor: &Path = Path::new(&item.node.path);
-      loop {
-        let Some(parent) = cursor.parent() else {
-          return true;
-        };
-        if parent
-          .to_str()
-          .is_some_and(|text| directories.contains(text))
-        {
-          return false;
-        }
-        cursor = parent;
+    let mut beyond_chain: HashMap<u32, bool> = HashMap::new();
+    rows.retain(|row| !inside_listed_directory(index, row.node, &directories, &mut beyond_chain));
+  }
+  for rows in [&mut large_files, &mut caches, &mut gitignored] {
+    sort_rows_by_size_then_path(index, rows);
+  }
+  [
+    (DiscoveryKind::LargeFiles, large_files),
+    (DiscoveryKind::Caches, caches),
+    (DiscoveryKind::Gitignored, gitignored),
+  ]
+  .into_iter()
+  .collect()
+}
+
+/// Whether any proper path ancestor of `node` is one of `directories`.
+/// Inside a scan the ancestors are the parent chain; above the first node
+/// holding its path verbatim (a root or app location) they are looked up by
+/// path, memoized per such node in `beyond_chain`.
+fn inside_listed_directory(
+  index: &NodeIndex,
+  node: u32,
+  directories: &HashSet<u32>,
+  beyond_chain: &mut HashMap<u32, bool>,
+) -> bool {
+  let mut cursor = node;
+  while !index.has_explicit_path(cursor) {
+    let Some(parent) = index.parent(cursor) else {
+      break;
+    };
+    if directories.contains(&parent) {
+      return true;
+    }
+    cursor = parent;
+  }
+  *beyond_chain.entry(cursor).or_insert_with(|| {
+    let path = index.path(cursor);
+    Path::new(&path).ancestors().skip(1).any(|ancestor| {
+      ancestor
+        .to_str()
+        .and_then(|ancestor| index.get(NodeId::of_path(ancestor)))
+        .is_some_and(|ancestor| directories.contains(&ancestor))
+    })
+  })
+}
+
+/// Size descending, then path ascending (byte order). Paths are built only
+/// for runs of equal size, into scratch memory mapped for that run.
+fn sort_rows_by_size_then_path(index: &NodeIndex, rows: &mut [DiscoveryRow]) {
+  rows.sort_unstable_by_key(|row| std::cmp::Reverse(row.size));
+  let mut path = String::new();
+  let mut start = 0;
+  while start < rows.len() {
+    let size = rows[start].size;
+    let end = start
+      + rows[start..]
+        .iter()
+        .take_while(|row| row.size == size)
+        .count();
+    if end - start > 1 {
+      let run = &mut rows[start..end];
+      let total = run.iter().map(|row| index.path_len(row.node)).sum();
+      let mut text = ScratchBytes::new(total);
+      let bytes = text.bytes();
+      let mut offset = 0;
+      for row in run.iter_mut() {
+        path.clear();
+        index.push_path(row.node, &mut path);
+        bytes[offset..offset + path.len()].copy_from_slice(path.as_bytes());
+        // Every row in the run has the same size, so the field holds the
+        // path's place while sorting: offset in the high 40 bits, length in
+        // the low 24 (paths are far shorter than 16 MiB).
+        row.size = ((offset as u64) << 24) | path.len() as u64;
+        offset += path.len();
       }
-    });
+      let bytes = &*bytes;
+      let text_of = |packed: u64| {
+        let from = (packed >> 24) as usize;
+        &bytes[from..from + (packed & 0xff_ffff) as usize]
+      };
+      run.sort_unstable_by(|a, b| text_of(a.size).cmp(text_of(b.size)));
+      for row in run.iter_mut() {
+        row.size = size;
+      }
+    }
+    start = end;
   }
-  for rows in items.values_mut() {
-    rows.sort_by(|a, b| {
-      b.node
-        .size
-        .cmp(&a.node.size)
-        .then_with(|| a.node.path.cmp(&b.node.path))
-    });
+}
+
+/// Zeroed scratch bytes for one sort. On unix they are mapped straight from
+/// the OS and unmapped on drop: a freed allocation this large stays resident
+/// in the macOS allocator's large-block cache, which Activity Monitor keeps
+/// counting long after discovery finished.
+struct ScratchBytes {
+  #[cfg(unix)]
+  mapped: Option<(std::ptr::NonNull<u8>, usize)>,
+  fallback: Vec<u8>,
+}
+
+impl ScratchBytes {
+  fn new(len: usize) -> Self {
+    #[cfg(unix)]
+    {
+      if len > 0 {
+        // SAFETY: a fresh private anonymous mapping; no existing memory is
+        // touched, and the result is checked before use.
+        let pointer = unsafe {
+          libc::mmap(
+            std::ptr::null_mut(),
+            len,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANON,
+            -1,
+            0,
+          )
+        };
+        if pointer != libc::MAP_FAILED {
+          if let Some(pointer) = std::ptr::NonNull::new(pointer.cast::<u8>()) {
+            return Self {
+              mapped: Some((pointer, len)),
+              fallback: Vec::new(),
+            };
+          }
+        }
+      }
+      Self {
+        mapped: None,
+        fallback: vec![0; len],
+      }
+    }
+    #[cfg(not(unix))]
+    Self {
+      fallback: vec![0; len],
+    }
   }
-  items
+
+  fn bytes(&mut self) -> &mut [u8] {
+    #[cfg(unix)]
+    if let Some((pointer, len)) = self.mapped {
+      // SAFETY: the mapping is `len` readable, writable, zero-filled bytes
+      // owned by `self` until drop, and the borrow is tied to `&mut self`.
+      return unsafe { std::slice::from_raw_parts_mut(pointer.as_ptr(), len) };
+    }
+    &mut self.fallback
+  }
+}
+
+#[cfg(unix)]
+impl Drop for ScratchBytes {
+  fn drop(&mut self) {
+    if let Some((pointer, len)) = self.mapped.take() {
+      // SAFETY: unmaps exactly the mapping `new` created; no slice of it
+      // outlives `self`.
+      unsafe {
+        libc::munmap(pointer.as_ptr().cast(), len);
+      }
+    }
+  }
 }
 
 /// Build once per scan: a fully enumerated tree for files/cache sizes and
@@ -2602,18 +2814,20 @@ pub fn run_discovery(input: DiscoveryInput) -> EngineResult<DiscoveryData> {
   };
   let full = scan_directory(options(false));
   let summarized = scan_directory(options(true));
-  let mut index = HashMap::new();
+  let mut index = NodeIndex::default();
   for root in &full {
-    walk_index(root, None, 0, &mut index);
+    walk_index(root, NONE, None, &mut index);
   }
-  let mut ignored_index = HashMap::new();
+  index.seal();
+  let mut ignored_index = NodeIndex::default();
   for root in &summarized {
-    walk_index(root, None, 0, &mut ignored_index);
+    walk_index(root, NONE, None, &mut ignored_index);
   }
+  ignored_index.seal();
   let ignored_paths: HashSet<PathBuf> = ignored_index
-    .values()
-    .filter(|entry| entry.ignored)
-    .map(|entry| PathBuf::from(&entry.path))
+    .iter()
+    .filter(|node| ignored_index.ignored(*node))
+    .map(|node| PathBuf::from(ignored_index.path(node)))
     .collect();
   let mut items: HashMap<DiscoveryKind, Vec<DiscoveryItem>> = [
     DiscoveryKind::LargeFiles,
@@ -2623,19 +2837,24 @@ pub fn run_discovery(input: DiscoveryInput) -> EngineResult<DiscoveryData> {
   .into_iter()
   .map(|kind| (kind, Vec::new()))
   .collect();
-  let mut safe_index = HashMap::new();
-  for (_, mut entry) in index {
-    let path = Path::new(&entry.path);
+  let mut kept = HashSet::new();
+  let nodes: Vec<u32> = index.iter().collect();
+  for node in nodes {
+    let path_string = index.path(node);
+    let path = Path::new(&path_string);
     let Some(metadata) = safe_metadata(path, &input.roots) else {
       continue;
     };
-    entry.ignored = path
-      .ancestors()
-      .any(|ancestor| ignored_paths.contains(ancestor));
+    index.set_ignored(
+      node,
+      path
+        .ancestors()
+        .any(|ancestor| ignored_paths.contains(ancestor)),
+    );
     let is_directory = metadata.is_dir();
     let item = |category: &str| DiscoveryItem {
-      node: entry.summary(),
-      parent_id: entry.parent.clone(),
+      node: index.summary(node),
+      parent_id: index.parent(node).map(|parent| index.wire_id(parent)),
       category: category.into(),
       is_directory,
     };
@@ -2654,15 +2873,15 @@ pub fn run_discovery(input: DiscoveryInput) -> EngineResult<DiscoveryData> {
       }
     }
     if ignored_index
-      .get(&entry.id)
-      .is_some_and(|ignored| ignored.ignored)
+      .get(index.id(node))
+      .is_some_and(|ignored| ignored_index.ignored(ignored))
     {
       items
         .get_mut(&DiscoveryKind::Gitignored)
         .unwrap()
         .push(item("Gitignored"));
     }
-    safe_index.insert(entry.id.clone(), entry);
+    kept.insert(node);
   }
   for (kind, rows) in &mut items {
     if *kind != DiscoveryKind::LargeFiles {
@@ -2676,8 +2895,12 @@ pub fn run_discovery(input: DiscoveryInput) -> EngineResult<DiscoveryData> {
     });
   }
   Ok(DiscoveryData {
-    index: safe_index,
-    items,
+    index: Box::new(index),
+    kept,
+    items: items
+      .into_iter()
+      .map(|(kind, rows)| (kind, DiscoveryRows::Items(rows)))
+      .collect(),
   })
 }
 
@@ -2709,84 +2932,105 @@ fn prune_discovery_overlap(rows: &mut Vec<DiscoveryItem>) {
 
 fn walk_index(
   node: &ScanNode,
-  parent: Option<String>,
-  depth: u32,
-  index: &mut HashMap<String, IndexEntry>,
-) -> String {
-  let path_string = node.path.to_string_lossy().to_string();
-  let id = node_id_of(&path_string);
-  let child_ids: Vec<String> = node
+  parent: u32,
+  parent_path: Option<&str>,
+  index: &mut NodeIndex,
+) -> u32 {
+  let path = node.path.to_string_lossy();
+  let name = Path::new(&*path)
+    .file_name()
+    .map(|name| name.to_string_lossy())
+    .unwrap_or_else(|| path.clone());
+  let id = index.push(NodeFacts {
+    id: NodeId::of_path(&path),
+    name: &name,
+    path: &path,
+    parent,
+    parent_path,
+    size: node.size,
+    logical_size: None,
+    is_directory: None,
+    ignored: node.ignored,
+    collapsed: node.collapsed,
+    scan_state: None,
+    skip_reason: None,
+    fingerprint: fs::symlink_metadata(&node.path)
+      .ok()
+      .map(|metadata| fingerprint_of(&metadata)),
+  });
+  let children: Vec<u32> = node
     .children
     .iter()
-    .map(|child| walk_index(child, Some(id.clone()), depth + 1, index))
+    .map(|child| walk_index(child, id, Some(&path), index))
     .collect();
-  index.insert(
-    id.clone(),
-    IndexEntry {
-      id: id.clone(),
-      name: Path::new(&path_string)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| path_string.clone()),
-      path: path_string,
-      size: node.size,
-      depth,
-      ignored: node.ignored,
-      collapsed: node.collapsed,
-      parent,
-      child_ids,
-      fingerprint: fs::symlink_metadata(&node.path)
-        .ok()
-        .map(|metadata| fingerprint_of(&metadata)),
-      cleanup: None,
-      logical_size: None,
-      is_directory: None,
-      scan_state: None,
-      skip_reason: None,
-    },
-  );
+  index.set_children(id, &children);
   id
 }
 
+/// Indexes a protected report's root nodes under `parent`, consuming the
+/// walker's tree as it goes. The caller seals the index.
+fn index_local_nodes(index: &mut NodeIndex, nodes: Vec<LocalScanNode>, parent: u32) -> Vec<u32> {
+  fn measure(node: &LocalScanNode, totals: &mut (usize, usize)) {
+    totals.0 += 1;
+    totals.1 += node.path.file_name().map_or(0, |name| name.len()) + 2;
+    for child in &node.children {
+      measure(child, totals);
+    }
+  }
+  let mut totals = (0, 0);
+  for node in &nodes {
+    measure(node, &mut totals);
+  }
+  index.reserve(totals.0, totals.1);
+  nodes
+    .into_iter()
+    .map(|node| walk_local_index(node, parent, None, index))
+    .collect()
+}
+
 fn walk_local_index(
-  node: &LocalScanNode,
-  parent: Option<String>,
-  depth: u32,
-  index: &mut HashMap<String, IndexEntry>,
-) -> String {
-  let path = node.path.to_string_lossy().into_owned();
-  let id = node_id_of(&path);
-  let child_ids = node
-    .children
-    .iter()
-    .map(|child| walk_local_index(child, Some(id.clone()), depth + 1, index))
+  mut node: LocalScanNode,
+  parent: u32,
+  parent_path: Option<&str>,
+  index: &mut NodeIndex,
+) -> u32 {
+  let children = std::mem::take(&mut node.children);
+  let path = node.path.to_string_lossy();
+  let name = node
+    .path
+    .file_name()
+    .map(|name| name.to_string_lossy())
+    .unwrap_or_else(|| path.clone());
+  let id = index.push(NodeFacts {
+    id: NodeId::of_path(&path),
+    name: &name,
+    path: &path,
+    parent,
+    parent_path,
+    size: node.size,
+    logical_size: Some(node.logical_size),
+    is_directory: Some(node.is_directory),
+    ignored: node.ignored,
+    collapsed: node.collapsed,
+    // Read-only snapshot: never probe filesystem metadata while indexing.
+    scan_state: Some(&node.scan_state),
+    skip_reason: node.skip_reason.as_deref(),
+    fingerprint: None,
+  });
+  // Each child subtree is dropped as soon as it is indexed.
+  let children: Vec<u32> = children
+    .into_iter()
+    .map(|child| walk_local_index(child, id, Some(&path), index))
     .collect();
-  index.insert(
-    id.clone(),
-    IndexEntry {
-      id: id.clone(),
-      name: node
-        .path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.clone()),
-      path,
-      size: node.size,
-      depth,
-      ignored: node.ignored,
-      collapsed: node.collapsed,
-      parent,
-      child_ids,
-      // Read-only snapshot: never probe filesystem metadata while indexing.
-      fingerprint: None,
-      cleanup: None,
-      logical_size: Some(node.logical_size),
-      is_directory: Some(node.is_directory),
-      scan_state: Some(node.scan_state.clone()),
-      skip_reason: node.skip_reason.clone(),
-    },
-  );
+  index.set_children(id, &children);
   id
+}
+
+/// Returns memory freed by a finished walk or a dropped scan to the OS now,
+/// instead of whenever the allocator next purges on its own.
+fn release_freed_memory() {
+  // SAFETY: `mi_collect` only walks the allocator's own free lists.
+  unsafe { libmimalloc_sys::mi_collect(true) };
 }
 
 fn count_nodes(node: &ScanNode) -> usize {
@@ -2801,8 +3045,8 @@ struct BuiltSliceNode {
 }
 
 fn build_slice_node(
-  index: &HashMap<String, IndexEntry>,
-  entry: &IndexEntry,
+  index: &NodeIndex,
+  node: u32,
   remaining_depth: u32,
   max_children: usize,
 ) -> BuiltSliceNode {
@@ -2810,18 +3054,19 @@ fn build_slice_node(
   let mut omitted_count = 0usize;
   let mut truncated = false;
 
-  let mut children_sorted: Vec<&IndexEntry> = entry
-    .child_ids
-    .iter()
-    .filter_map(|id| index.get(id))
-    .collect();
-  children_sorted.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
+  let mut children_sorted: Vec<u32> = index.children(node).collect();
+  children_sorted.sort_by(|a, b| {
+    index
+      .size(*b)
+      .cmp(&index.size(*a))
+      .then_with(|| index.name(*a).cmp(index.name(*b)))
+  });
 
   let mut slice_children = Vec::new();
   if remaining_depth > 0 {
     for (position, child) in children_sorted.into_iter().enumerate() {
       if position >= max_children {
-        omitted_bytes += child.size;
+        omitted_bytes += index.size(child);
         omitted_count += 1;
         truncated = true;
         continue;
@@ -2834,7 +3079,7 @@ fn build_slice_node(
     }
   } else {
     for child in children_sorted {
-      omitted_bytes += child.size;
+      omitted_bytes += index.size(child);
       omitted_count += 1;
       truncated = true;
     }
@@ -2842,7 +3087,7 @@ fn build_slice_node(
 
   BuiltSliceNode {
     node: TreeSliceNode {
-      summary: entry.summary(),
+      summary: index.summary(node),
       children: slice_children,
       omitted_bytes,
       omitted_count,
@@ -2850,5 +3095,129 @@ fn build_slice_node(
     truncated,
     omitted_bytes,
     omitted_count,
+  }
+}
+
+#[cfg(test)]
+mod retention_tests {
+  use super::*;
+
+  struct Fixture(PathBuf);
+  impl Fixture {
+    fn new() -> Self {
+      static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+      let path = std::env::temp_dir().join(format!(
+        "sl-retention-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+      ));
+      fs::create_dir_all(path.join("data")).unwrap();
+      fs::write(path.join("data/file"), vec![b'x'; 8192]).unwrap();
+      Self(fs::canonicalize(path).unwrap())
+    }
+    fn request(&self) -> ScanStartRequest {
+      ScanStartRequest {
+        paths: vec![self.0.to_string_lossy().into_owned()],
+        local_only: true,
+        ignore_hidden: false,
+        respect_gitignore: true,
+        ignored_mode: WireIgnoredMode::Summarize,
+        label: None,
+      }
+    }
+  }
+  impl Drop for Fixture {
+    fn drop(&mut self) {
+      let _ = fs::remove_dir_all(&self.0);
+    }
+  }
+
+  fn store(fixture: &Fixture, budget: usize) -> EngineStore {
+    let mut store = EngineStore::new(vec![fixture.0.clone()]);
+    store.retained_node_budget = budget;
+    store
+  }
+
+  fn scan(store: &mut EngineStore, fixture: &Fixture) -> String {
+    store.start_scan(fixture.request()).unwrap().scan_id
+  }
+
+  #[test]
+  fn a_rescan_keeps_the_previous_scan_until_it_finishes_then_drops_it() {
+    let fixture = Fixture::new();
+    let mut store = store(&fixture, 0);
+    let first = scan(&mut store, &fixture);
+    let (second, task) = store.prepare_local_scan(fixture.request()).unwrap();
+    // While the rescan runs, the UI can still browse the previous result.
+    assert_eq!(store.status(&first).unwrap().state, "ready");
+    let report = scan_local_directory_with_progress(task.options, task.cancellation, |_| {});
+    store.finish_local_scan(&second.scan_id, report).unwrap();
+    assert_eq!(store.status(&second.scan_id).unwrap().state, "ready");
+    assert_eq!(store.status(&first).unwrap_err().code, "NotFound");
+  }
+
+  #[test]
+  fn a_cancelled_rescan_does_not_push_out_the_scan_on_screen() {
+    let fixture = Fixture::new();
+    let mut store = store(&fixture, 0);
+    let first = scan(&mut store, &fixture);
+    let (second, _task) = store.prepare_local_scan(fixture.request()).unwrap();
+    store.cancel_scan(&second.scan_id).unwrap();
+    store
+      .finish_local_scan(
+        &second.scan_id,
+        Err(std::io::Error::new(
+          std::io::ErrorKind::Interrupted,
+          "cancelled",
+        )),
+      )
+      .unwrap();
+    // The cancelled scan is read last, yet the ready one stays pinned.
+    assert_eq!(store.status(&second.scan_id).unwrap().state, "cancelled");
+    let third = store.prepare_local_scan(fixture.request()).unwrap().0;
+    assert_eq!(store.status(&first).unwrap().state, "ready");
+    assert_eq!(store.status(&third.scan_id).unwrap().state, "scanning");
+  }
+
+  // Needs a child of the fixture root to plan against; the protected local
+  // scanner lists none under a Windows temp dir (verbatim `\\?\` root), so
+  // this runs where that scanner enumerates (macOS, Linux).
+  #[cfg(not(windows))]
+  #[test]
+  fn small_scans_stay_within_the_node_budget_and_their_plans_go_with_them() {
+    let fixture = Fixture::new();
+    let mut store = store(&fixture, RETAINED_NODE_BUDGET);
+    let scans: Vec<String> = (0..3).map(|_| scan(&mut store, &fixture)).collect();
+    for scan_id in &scans {
+      assert_eq!(store.status(scan_id).unwrap().state, "ready");
+    }
+    // Shrinking the budget drops all but the most recently used ready scan.
+    let root = store.status(&scans[0]).unwrap().root_ids[0].clone();
+    let data = store
+      .children(&ChildrenPageRequest {
+        scan_id: scans[0].clone(),
+        node_id: root,
+        offset: 0,
+        limit: 10,
+        sort: "size".into(),
+      })
+      .unwrap()
+      .items[0]
+      .id
+      .clone();
+    store
+      .plan(&CleanupPlanRequest {
+        scan_id: scans[0].clone(),
+        node_ids: vec![data],
+      })
+      .unwrap();
+    assert_eq!(store.plans.len(), 1);
+    store.status(&scans[2]).unwrap();
+    store.retained_node_budget = 0;
+    store.evict_finished_scans();
+    assert_eq!(store.status(&scans[0]).unwrap_err().code, "NotFound");
+    assert_eq!(store.status(&scans[1]).unwrap_err().code, "NotFound");
+    assert_eq!(store.status(&scans[2]).unwrap().state, "ready");
+    assert!(store.plans.is_empty());
   }
 }

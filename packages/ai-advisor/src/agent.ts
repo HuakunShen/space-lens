@@ -1,5 +1,7 @@
 import type { CollectorEntry } from '@space-lens/contract'
-import { SYSTEM_PROMPT } from './prompts.ts'
+import { MEMORY_PROMPT, SYSTEM_PROMPT } from './prompts.ts'
+import { buildMemoryInitialContext, MEMORY_TOOLS, executeAdvisorTool, rememberGroups } from './memory-tools.ts'
+import type { MemoryPort } from './memory-types.ts'
 import {
   AGENT_LIMITS,
   AI_TOOLS,
@@ -7,21 +9,22 @@ import {
   budgetStopNotice,
   byteLength,
   createToolRuntime,
-  executeTool,
   rememberNodes,
+  resetRunBudget,
   truncateUtf8,
   type InitialContext,
+  type ToolRuntime,
 } from './tools.ts'
-import type { ChatMessage, ChatPort, ChatResponse, ChatToolCall, LensPort } from './types.ts'
+import type { ChatMessage, ChatPort, ChatResponse, ChatTool, ChatToolCall, LensPort } from './types.ts'
 
 /**
- * Slice A agent loop for whole-disk scans.
+ * Slice A agent loop for whole-disk scans, and (T21) for the memory view.
  *
  * Context is a budget, not an archive: before every round, tool results older
  * than the last 2 rounds are replaced by a one-line summary (their ids stay in
  * the seen set), and the whole context is held under `maxContextTokens`. The
  * conversation itself carries the initial window and the model navigates by
- * `nodeId` from there.
+ * `nodeId` or `groupId` from there.
  */
 
 export type AgentEndReason = 'final' | 'rounds' | 'budget' | 'error'
@@ -42,17 +45,31 @@ export interface AgentStats {
   approxTokensSent: number
 }
 
-export interface RunAgentOptions {
+export interface RunAgentSharedOptions {
   chat: ChatPort
-  lens: LensPort
   userMessage: string
-  /** The user's open folder; omitted means the scan root. */
+  /** The user's open folder; omitted means the scan root. Only a lens run reads it. */
   focusNodeId?: string
   /** Earlier turns, oldest first, without the system prompt. */
   history?: ChatMessage[]
+  /**
+   * A runtime kept for the whole conversation, so ids seen in earlier turns
+   * still resolve. Its budgets are reset at the start of this run; omitted
+   * means a fresh runtime (a one-shot run).
+   */
+  runtime?: ToolRuntime
   onEvent?: (event: AgentEvent) => void
   signal?: AbortSignal
 }
+
+/**
+ * A run reads the disk (`lens`), the memory view (`memory`), or both. The union
+ * says at least one port was given, and which one: a memory-only run has no
+ * `lens` at all. Tools sent are the disk tools when `lens` is present, plus the
+ * memory tools when `memory` is (`tools.ts` / `memory-tools.ts`).
+ */
+export type RunAgentOptions = RunAgentSharedOptions &
+  ({ lens: LensPort; memory?: MemoryPort } | { lens?: undefined; memory: MemoryPort })
 
 export interface AgentResult {
   text: string
@@ -64,10 +81,18 @@ export interface AgentResult {
 
 /** Assistant prose is not otherwise budgeted; cap it so one reply cannot blow the window. */
 const ASSISTANT_MAX_BYTES = 2 * 1024
+/**
+ * The disk-only tool schema. It is the default so a caller that does not
+ * compose a tool list estimates exactly as it always has; a run passes the
+ * byte length of the tools it actually sends.
+ */
 const TOOL_SCHEMA_BYTES = byteLength(JSON.stringify(AI_TOOLS))
 
-export function estimateContextTokens(messages: readonly ChatMessage[]): number {
-  let bytes = TOOL_SCHEMA_BYTES
+export function estimateContextTokens(
+  messages: readonly ChatMessage[],
+  toolSchemaBytes: number = TOOL_SCHEMA_BYTES,
+): number {
+  let bytes = toolSchemaBytes
   for (const message of messages) {
     if (message.content !== null) bytes += byteLength(message.content)
     if (message.name !== undefined) bytes += byteLength(message.name)
@@ -86,27 +111,47 @@ interface ToolMeta {
 }
 
 export async function runAgent(options: RunAgentOptions): Promise<AgentResult> {
-  const runtime = createToolRuntime()
+  const runtime = options.runtime ?? createToolRuntime()
+  resetRunBudget(runtime)
+  const lens = options.lens
+  const memory = options.memory
+  const tools: readonly ChatTool[] = [
+    ...(lens !== undefined ? AI_TOOLS : []),
+    ...(memory !== undefined ? MEMORY_TOOLS : []),
+  ]
+  const toolSchemaBytes = byteLength(JSON.stringify(tools))
+  // The disk prompt's tree and nodeId rules would be wrong for a memory-only
+  // run, so the memory prompt is an addition, not a replacement.
+  const systemPrompt =
+    lens === undefined ? MEMORY_PROMPT : memory === undefined ? SYSTEM_PROMPT : `${SYSTEM_PROMPT}\n\n${MEMORY_PROMPT}`
 
-  let context: InitialContext
+  let contextText: string
   try {
-    context = await buildInitialContext(options.lens, options.focusNodeId)
+    if (options.lens !== undefined) {
+      const window: InitialContext = await buildInitialContext(options.lens, options.focusNodeId)
+      rememberNodes(runtime, window.nodes)
+      contextText = window.text
+    } else {
+      const window = await buildMemoryInitialContext(options.memory)
+      rememberGroups(runtime, window.groups)
+      contextText = window.text
+    }
   } catch (error) {
+    const view = lens === undefined ? 'memory' : 'scan'
     return {
-      text: `Could not read the scan view: ${describe(error)}`,
+      text: `Could not read the ${view} view: ${describe(error)}`,
       messages: [],
       stats: { rounds: 0, toolCalls: 0, bytesSent: 0, approxTokensSent: 0 },
       staged: [],
       endReason: 'error',
     }
   }
-  rememberNodes(runtime, context.nodes)
 
   const history = options.history ?? []
   // The initial window rides in this run's first user message.
-  const firstUser: ChatMessage = { role: 'user', content: `${context.text}\n\n${options.userMessage}` }
-  const messages: ChatMessage[] = [{ role: 'system', content: SYSTEM_PROMPT }, ...history, firstUser]
-  const initial = { message: firstUser, text: context.text, userMessage: options.userMessage }
+  const firstUser: ChatMessage = { role: 'user', content: `${contextText}\n\n${options.userMessage}` }
+  const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt }, ...history, firstUser]
+  const initial = { message: firstUser, text: contextText, userMessage: options.userMessage }
 
   const meta: ToolMeta[] = []
   let rounds = 0
@@ -121,9 +166,9 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResult> {
       break
     }
     rounds += 1
-    compact(messages, meta, rounds - 1, initial)
+    compact(messages, meta, rounds - 1, initial, toolSchemaBytes)
 
-    const sent = estimateContextTokens(messages)
+    const sent = estimateContextTokens(messages, toolSchemaBytes)
     if (sent > AGENT_LIMITS.maxContextTokens) {
       endReason = 'budget'
       text = `Stopped early: context budget of ${AGENT_LIMITS.maxContextTokens} tokens reached.`
@@ -135,7 +180,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResult> {
     try {
       response = await options.chat({
         messages,
-        tools: [...AI_TOOLS],
+        tools: [...tools],
         signal: options.signal,
         onText: (text) => options.onEvent?.({ type: 'text-delta', round: rounds, text }),
       })
@@ -172,7 +217,7 @@ export async function runAgent(options: RunAgentOptions): Promise<AgentResult> {
       // consistent, then stop: the model gets no further round.
       const outcome =
         runtime.stopReason === null
-          ? await executeTool(runtime, options.lens, call.function.name, call.function.arguments)
+          ? await executeAdvisorTool(runtime, options, call.function.name, call.function.arguments)
           : { content: budgetStopNotice(runtime.stopReason), summary: `budget: ${runtime.stopReason}` }
       const message: ChatMessage = {
         role: 'tool',
@@ -226,8 +271,9 @@ function compact(
   meta: ToolMeta[],
   completedRounds: number,
   initial: { message: ChatMessage; text: string; userMessage: string },
+  toolSchemaBytes: number,
 ): void {
-  const under = (): boolean => estimateContextTokens(messages) <= AGENT_LIMITS.maxContextTokens
+  const under = (): boolean => estimateContextTokens(messages, toolSchemaBytes) <= AGENT_LIMITS.maxContextTokens
   for (const item of meta) {
     if (!item.compacted && item.round <= completedRounds - 2) summarize(item)
   }

@@ -12,6 +12,7 @@
     Settings,
     RefreshCw,
   } from '@lucide/svelte'
+  import type { Snippet } from 'svelte'
   import type { ScanStatus, ScanTarget, ScanVolume } from '../../types'
   import type { RecentAppEntry } from '../../lib/app-scan'
   import { formatBytes } from '../../lib/format'
@@ -54,6 +55,8 @@
     scanLabel?: string | null
     rescanning?: boolean
     onRescan?: () => void
+    /** Host-supplied notices that sit above the footnote, e.g. a permission hint. */
+    footer?: Snippet
   }
 
   let {
@@ -86,6 +89,7 @@
     scanLabel = null,
     rescanning = false,
     onRescan,
+    footer,
   }: Props = $props()
 
   let capacity = $derived(volumeCapacity(volume))
@@ -328,5 +332,6 @@
       {/if}
     </section>
   {/if}
+  {#if footer}<div class="sidebar-notice">{@render footer()}</div>{/if}
   <span class="sidebar-footnote windows:hidden linux:hidden">Explore. Select. Review.</span>
 </aside>

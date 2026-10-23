@@ -505,6 +505,7 @@ fn synthetic_report(
       files: 0,
       directories: 0,
       skipped_count: 0,
+      skipped_by_reason: Default::default(),
       denied_count: 0,
       issue_count: issues.len() as u64,
       issues_truncated,

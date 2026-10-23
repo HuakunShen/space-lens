@@ -91,6 +91,12 @@ export interface ScanSummary {
   notes: string[]
   root: TreeNodeSummary
   topChildren: TreeNodeSummary[]
+  /**
+   * Set when the summary describes the folder the user has open rather than
+   * the scan root: its path. `totalBytes` and `topChildren` are then that
+   * folder's; `entryCount` stays the whole scan's.
+   */
+  scope?: string
 }
 
 /** Cache discovery rows (`find_cache_candidates`), derived from `DiscoveryPage`. */
@@ -113,6 +119,22 @@ export interface StageRequestItem {
 export interface StageRejection {
   nodeId: string
   reason: string
+}
+
+/** One row of the live cleanup selection (`list_proposal`). */
+export interface ProposalRow {
+  nodeId: string
+  name: string
+  size: number
+  /** The AI's risk and reason when it staged the row; `null` for the user's own picks. */
+  risk: CleanupRisk | null
+  reason: string | null
+}
+
+export interface UnstageOutcome {
+  removed: ProposalRow[]
+  /** Ids that were not in the selection. */
+  missing: string[]
 }
 
 /** What the caller's collector accepted, and why it refused the rest. */
@@ -148,4 +170,8 @@ export interface LensPort {
   children(nodeId: string, limit: number, offset: number): Promise<ChildrenPage>
   cacheCandidates(limit: number): Promise<CacheCandidatePage>
   stage(items: StageRequestItem[]): Promise<StageOutcome>
+  /** The live selection for this scan, including the user's own picks and removals. */
+  proposal?(): Promise<ProposalRow[]>
+  /** Drops these nodes from the selection. It only ever shrinks what would be deleted. */
+  unstage?(nodeIds: string[]): Promise<UnstageOutcome>
 }

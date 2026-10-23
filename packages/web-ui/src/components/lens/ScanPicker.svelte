@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte'
   import { ArrowRight, FolderSearch, FolderOpen, LoaderCircle, RefreshCw, Search } from '@lucide/svelte'
   import type { AppAuditReport } from '@space-lens/contract'
   import type { ScanStatus, ScanTarget, ScanVolume } from '../../types'
@@ -8,6 +9,7 @@
   import { initialsFor } from '../../lib/app-audit'
   import { ensureIcon, readIcon, subscribeIcons } from '../../lib/app-icon-cache'
   import { scanTargetPaths } from '../../lib/scan-targets'
+  import { estimateScanProgress, formatDuration, type ScanBaseline } from '../../lib/scan-progress'
   import { Button } from '../ui/button/index'
   import LensToolbar from './LensToolbar.svelte'
   import ScanSidebar from './ScanSidebar.svelte'
@@ -54,6 +56,10 @@
     onScanApp?: (appId: string) => void
     onForgetApp?: (appId: string) => Promise<void> | void
     onIcon?: (appPath: string) => Promise<string | null>
+    /** Expected size of the running scan, for a determinate bar and ETA. */
+    progressBaseline?: ScanBaseline | null
+    /** Notices shown at the bottom of the sidebar. */
+    sidebarFooter?: Snippet
   }
 
   let {
@@ -84,7 +90,54 @@
     onScanApp,
     onForgetApp,
     onIcon = undefined,
+    progressBaseline = null,
+    sidebarFooter,
   }: Props = $props()
+
+  // The host reports measured bytes, not elapsed time, so the clock is kept
+  // here: it starts when a scan id is first seen scanning and ticks once a
+  // second for the ETA.
+  let scanStartedAt = $state<{ scanId: string; at: number } | null>(null)
+  let now = $state(Date.now())
+  let scanningId = $derived(status?.state === 'scanning' ? status.scanId : null)
+  $effect(() => {
+    if (scanningId === null) return
+    if (scanStartedAt?.scanId !== scanningId) scanStartedAt = { scanId: scanningId, at: Date.now() }
+    // Keyed on the scan id only: progress updates arrive every 250 ms and
+    // must not restart the clock.
+    now = Date.now()
+    const timer = setInterval(() => (now = Date.now()), 1000)
+    return () => clearInterval(timer)
+  })
+  let estimate = $derived(
+    status?.state === 'scanning'
+      ? estimateScanProgress({
+          bytesScanned: status.bytesScanned,
+          entriesScanned: status.entriesScanned,
+          elapsedMs: scanStartedAt ? Math.max(0, now - scanStartedAt.at) : 0,
+          baseline: progressBaseline,
+        })
+      : null,
+  )
+  let progressFraction = $derived(status?.progress ?? estimate?.fraction ?? null)
+  let elapsedMs = $derived(scanStartedAt ? Math.max(0, now - scanStartedAt.at) : 0)
+  /** "18.1 GiB of ≈ 19.4 GiB · 300,781 items" */
+  let progressHeadline = $derived.by(() => {
+    if (!status || status.bytesScanned <= 0) return 'Measuring files and folders…'
+    const total = progressBaseline ? ` of ≈ ${formatBytes(progressBaseline.bytes)}` : ''
+    return `${formatBytes(status.bytesScanned)}${total} · ${status.entriesScanned.toLocaleString()} items`
+  })
+  /** "54% · About 2 min left · 1 min elapsed", or speed when there is no baseline. */
+  let progressDetail = $derived.by(() => {
+    const parts: string[] = []
+    if (progressFraction !== null) parts.push(`${Math.round(progressFraction * 100)}%`)
+    if (estimate?.finishing) parts.push('Finishing up…')
+    else if (estimate?.etaMs != null) parts.push(`About ${formatDuration(estimate.etaMs)} left`)
+    else if (progressFraction !== null) parts.push('Estimating time left…')
+    else if (estimate?.bytesPerSecond) parts.push(`${formatBytes(estimate.bytesPerSecond)}/s`)
+    if (elapsedMs >= 1000) parts.push(`${formatDuration(elapsedMs)} elapsed`)
+    return parts.join(' · ')
+  })
   let selectedId = $state('')
   let customPath = $state('')
   let query = $state('')
@@ -186,6 +239,7 @@
         onForgetApp={onForgetApp}
         onSelect={(target) => (selectedId = target.id)}
         onCustom={() => (selectedId = 'custom')}
+        footer={sidebarFooter}
       />
     {/if}
     <section
@@ -384,15 +438,23 @@
         {#if status?.state === 'scanning'}
           <section class="mt-6 grid gap-3 rounded-lg border bg-card p-5" aria-label="Scan progress" role="status">
             <div class="flex items-center justify-between gap-3">
-              <span class="text-sm text-muted-foreground"
-                >{#if status.bytesScanned > 0}{formatBytes(status.bytesScanned)} scanned · {status.entriesScanned.toLocaleString()}
-                  entries{:else}Measuring files and folders…{/if}</span
-              ><Button size="sm" variant="outline" onclick={onCancel}>Stop</Button>
+              <div class="grid gap-0.5">
+                <span class="text-sm">{progressHeadline}</span>
+                {#if progressDetail}<span class="text-xs text-muted-foreground tabular-nums">{progressDetail}</span>{/if}
+              </div>
+              <Button size="sm" variant="outline" onclick={onCancel}>Stop</Button>
             </div>
             <Progress
-              indeterminate={status.progress === null}
-              value={status.progress === null ? undefined : Math.round(status.progress * 100)}
+              indeterminate={progressFraction === null}
+              value={progressFraction === null ? undefined : Math.round(progressFraction * 100)}
             />
+            {#if progressBaseline}
+              <p class="text-xs text-muted-foreground">
+                {progressBaseline.source === 'last-scan'
+                  ? 'Estimated from your last scan of this location.'
+                  : 'Estimated from the disk’s used space. Snapshots and system volumes make the scanned total smaller, so it may finish early.'}
+              </p>
+            {/if}
             <p class="truncate font-mono text-xs text-muted-foreground">
               {status.currentPath ?? status.label ?? 'Scanning local files…'}
             </p>

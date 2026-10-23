@@ -20,6 +20,7 @@ export {
 export { EventRing } from './events.ts'
 export { authoritiesFor, originsForAuthorities, checkOrigin } from './origins.ts'
 export { ProblemError, Problems } from './problems.ts'
+export { fileManagerTarget, hostPlatform, revealPath, type FileManagerTarget, type HostPlatform } from './reveal.ts'
 export { ScanManager } from './scan-store.ts'
 export { LOCAL_SCAN_BIN_ENV, resolveLocalScanBin } from './local-process.ts'
 export { appAuditArgs, runAppAuditCli, runAppIconCli } from './app-audit.ts'

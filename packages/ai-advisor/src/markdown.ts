@@ -10,13 +10,18 @@ function escapeHtml(text: string): string {
 }
 
 function inline(raw: string): string {
-  const parts = escapeHtml(raw).split(/(`[^`]+`)/g)
-  return parts
-    .map((part) => {
-      if (part.length > 1 && part.startsWith('`') && part.endsWith('`')) return `<code>${part.slice(1, -1)}</code>`
-      return part.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>').replace(/(^|[^*])\*([^*\s][^*]*)\*(?!\*)/g, '$1<em>$2</em>')
-    })
-    .join('')
+  // Code spans become placeholders first, so bold may wrap a code span (the
+  // model writes "**`/Users/me` = 160 GB**") and code is never re-formatted.
+  // NUL never survives from the model text, so a placeholder cannot be forged.
+  const code: string[] = []
+  const text = escapeHtml(raw.replace(/\u0000/g, '')).replace(/`([^`]+)`/g, (_match, body: string) => {
+    code.push(body)
+    return `\u0000${code.length - 1}\u0000`
+  })
+  return text
+    .replace(/\*\*(?!\s)(.+?)(?<!\s)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*(?!\*)/g, '$1<em>$2</em>')
+    .replace(/\u0000(\d+)\u0000/g, (_match, index: string) => `<code>${code[Number(index)] ?? ''}</code>`)
 }
 
 function cells(line: string): string[] {

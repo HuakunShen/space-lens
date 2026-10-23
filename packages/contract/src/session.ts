@@ -1,6 +1,16 @@
 import { z } from 'zod'
 
-export const SCOPES = ['scan:read', 'scan:start', 'cleanup:plan', 'cleanup:execute', 'ai:chat'] as const
+export const SCOPES = [
+  'scan:read',
+  'scan:start',
+  'cleanup:plan',
+  'cleanup:execute',
+  'ai:chat',
+  'memory:read',
+  'memory:terminate',
+  /** Open a scanned path in the host's own file manager. */
+  'host:reveal',
+] as const
 
 export type Scope = (typeof SCOPES)[number]
 

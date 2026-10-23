@@ -1,5 +1,6 @@
 import type { WorkbenchService } from '@space-lens/client'
 import type { ChildrenPage, CollectorEntry, ScanStatus, TreeNodeSummary } from '@space-lens/contract'
+import { unmeasuredSkipCount } from '@space-lens/contract'
 import { canCollectNode, collectRefusalReason } from '@space-lens/web-ui/lib/app-scan'
 import {
   CLEANUP_RISKS,
@@ -8,6 +9,7 @@ import {
   type CleanupRisk,
   type FocusView,
   type LensPort,
+  type ProposalRow,
   type ScanSummary,
   type StageOutcome,
   type StageRejection,
@@ -53,7 +55,14 @@ export const AGENT_LIMITS = {
 
 const MAX_RESULT_BYTES = AGENT_LIMITS.maxResultTokens * AGENT_LIMITS.bytesPerToken
 
-export const TOOL_NAMES = ['get_scan_summary', 'list_children', 'find_cache_candidates', 'propose_cleanup'] as const
+export const TOOL_NAMES = [
+  'get_scan_summary',
+  'list_children',
+  'find_cache_candidates',
+  'propose_cleanup',
+  'list_proposal',
+  'remove_from_proposal',
+] as const
 
 export type ToolName = (typeof TOOL_NAMES)[number]
 
@@ -134,6 +143,35 @@ export const AI_TOOLS: readonly ChatTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'list_proposal',
+      description:
+        "The user's live cleanup selection for this scan: what you staged plus their own picks, minus anything they removed. Read it before changing the selection.",
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'remove_from_proposal',
+      description:
+        'Take items out of the cleanup selection when the user wants to keep them. Only shrinks the selection; ids come from list_proposal or earlier results.',
+      parameters: {
+        type: 'object',
+        properties: {
+          nodeIds: {
+            type: 'array',
+            description: `Ids to remove (max ${AGENT_LIMITS.maxProposeItems}).`,
+            items: { type: 'string' },
+          },
+        },
+        required: ['nodeIds'],
+        additionalProperties: false,
+      },
+    },
+  },
 ]
 
 /** Run-scoped state: the seen-id set, the token budget and the staged list. */
@@ -162,6 +200,19 @@ export interface ToolOutcome {
 
 export function createToolRuntime(): ToolRuntime {
   return { seen: new Map(), toolCalls: 0, toolOutputTokens: 0, toolOutputBytes: 0, staged: [], stopReason: null }
+}
+
+/**
+ * Starts a new run on a runtime kept for a whole conversation: the seen ids
+ * (and the memory tools' seen groups, keyed by this object) survive, so a
+ * follow-up can name what an earlier answer found; every budget starts over.
+ */
+export function resetRunBudget(runtime: ToolRuntime): void {
+  runtime.toolCalls = 0
+  runtime.toolOutputTokens = 0
+  runtime.toolOutputBytes = 0
+  runtime.staged.length = 0
+  runtime.stopReason = null
 }
 
 /** The notice the model receives when a run budget guard trips. */
@@ -229,6 +280,7 @@ const HANDLERS: Record<ToolName, Handler> = {
     const lines = [
       `get_scan_summary state=${summary.state} totalMB=${mb(summary.totalBytes)} entries=${summary.entryCount}`,
       `root ${rowLine(summary.root)}`,
+      ...(summary.scope !== undefined ? [`scope ${compactName(summary.scope).slice(0, 300)}`] : []),
       ...summary.notes.slice(0, 5).map((note) => `note ${compactName(note)}`),
       ROW_HEADER,
       ...top.map(rowLine),
@@ -365,6 +417,53 @@ const HANDLERS: Record<ToolName, Handler> = {
       summary: `propose_cleanup: ${outcome.staged.length} staged, ${allRejected.length} rejected`,
     }
   },
+
+  async list_proposal(_runtime, lens): Promise<HandlerOutput> {
+    if (!lens.proposal) return errorOutput('list_proposal', 'this host cannot read the selection')
+    const rows = await lens.proposal()
+    const shown = rows.slice(0, AGENT_LIMITS.maxListLimit)
+    const bytes = rows.reduce((sum, row) => sum + row.size, 0)
+    return {
+      content: [
+        `list_proposal rows=${rows.length} totalMB=${mb(bytes)}${rows.length > shown.length ? ` shown=${shown.length}` : ''}`,
+        'id|name|MB|risk|reason (risk "user" = the user picked it)',
+        ...shown.map(proposalLine),
+      ].join('\n'),
+      summary: `list_proposal: ${rows.length} rows, ${mb(bytes)} MB`,
+    }
+  },
+
+  async remove_from_proposal(runtime, lens, args): Promise<HandlerOutput> {
+    if (!lens.unstage) return errorOutput('remove_from_proposal', 'this host cannot edit the selection')
+    const raw = args.nodeIds
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return errorOutput('remove_from_proposal', 'nodeIds must be a non-empty array')
+    }
+    if (raw.length > AGENT_LIMITS.maxProposeItems) {
+      return errorOutput('remove_from_proposal', `at most ${AGENT_LIMITS.maxProposeItems} ids per call`)
+    }
+    const ids = [...new Set(raw.map(asString).filter((id): id is string => id !== null && id !== ''))]
+    // Removal only ever shrinks what would be deleted, so it needs no seen-id
+    // check: the worst a bad id does is miss.
+    const outcome = await lens.unstage(ids)
+    const removedIds = new Set(outcome.removed.map((row) => row.nodeId))
+    for (let index = runtime.staged.length - 1; index >= 0; index -= 1) {
+      if (removedIds.has(runtime.staged[index]!.nodeId)) runtime.staged.splice(index, 1)
+    }
+    const bytes = outcome.removed.reduce((sum, row) => sum + row.size, 0)
+    return {
+      content: [
+        `remove_from_proposal removed=${outcome.removed.length} freedMB=${mb(bytes)} missing=${outcome.missing.length}`,
+        ...outcome.removed.map((row) => `- ${proposalLine(row)}`),
+        ...outcome.missing.map((id) => `? ${safeId(id)}|not in the selection`),
+      ].join('\n'),
+      summary: `remove_from_proposal: ${outcome.removed.length} removed`,
+    }
+  },
+}
+
+function proposalLine(row: ProposalRow): string {
+  return `${safeId(row.nodeId)}|${compactName(row.name)}|${mb(row.size)}|${row.risk ?? 'user'}|${compactName(row.reason ?? '')}`
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +542,9 @@ export async function buildInitialContext(lens: LensPort, focusNodeId?: string):
   }
 
   push(`scan state=${summary.state} totalMB=${mb(summary.totalBytes)} entries=${summary.entryCount}`)
+  if (summary.scope !== undefined) {
+    push(`scope ${compactName(summary.scope).slice(0, 300)} (the folder the user has open; answer about it)`)
+  }
   for (const note of summary.notes.slice(0, 5)) push(`note ${compactName(note)}`)
   push(`breadcrumb ${compactName([...view.ancestors, view.node].map((node) => node.name).join(' > ')).slice(0, 300)}`)
   push(`focus ${rowLine(view.node)}`)
@@ -635,7 +737,34 @@ function describe(error: unknown): string {
 /** The slice of `WorkbenchService` the tools read; `discover` is optional so a bridge without it still works. */
 export type LensService = Pick<WorkbenchService, 'scanStatus' | 'treeSlice' | 'children'> & Partial<Pick<WorkbenchService, 'discover'>>
 
-export function lensPortFromService(service: LensService, scanId: string, stage: LensPort['stage']): LensPort {
+/** The folder a conversation is about, when it is narrower than the scan root. */
+export interface LensScope {
+  nodeId: string
+  path: string
+}
+
+export interface LensPortOptions {
+  /** Narrows the summary and the cache search to this folder; `null` = whole scan. */
+  scope?: LensScope | null
+  proposal?: LensPort['proposal']
+  unstage?: LensPort['unstage']
+}
+
+/** Cache rows are filtered client-side under a scope, so a scoped search reads a wider page first. */
+const SCOPED_DISCOVERY_PAGE = 200
+
+function isUnder(path: string, folder: string): boolean {
+  const base = folder.endsWith('/') ? folder : `${folder}/`
+  return path === folder || path.startsWith(base)
+}
+
+export function lensPortFromService(
+  service: LensService,
+  scanId: string,
+  stage: LensPort['stage'],
+  options: LensPortOptions = {},
+): LensPort {
+  const scope = options.scope ?? null
   const rootId = async (): Promise<string> => {
     const status = await service.scanStatus(scanId)
     const id = status.rootIds[0]
@@ -645,7 +774,7 @@ export function lensPortFromService(service: LensService, scanId: string, stage:
   return {
     async summary(): Promise<ScanSummary> {
       const status = await service.scanStatus(scanId)
-      const id = status.rootIds[0]
+      const id = scope?.nodeId ?? status.rootIds[0]
       if (id === undefined) throw new Error('scan has no root node to summarise')
       const slice = await service.treeSlice({ scanId, nodeId: id, depth: 1, maxChildrenPerNode: 15 })
       return {
@@ -656,6 +785,7 @@ export function lensPortFromService(service: LensService, scanId: string, stage:
         notes: summaryNotes(status),
         root: slice.focusNode,
         topChildren: slice.tree.children.slice(0, 15),
+        ...(scope !== null ? { scope: scope.path } : {}),
       }
     },
     async focus(nodeId: string | null): Promise<FocusView> {
@@ -677,10 +807,22 @@ export function lensPortFromService(service: LensService, scanId: string, stage:
     },
     async cacheCandidates(limit: number): Promise<CacheCandidatePage> {
       if (!service.discover) throw new Error('this host cannot run discovery')
-      const page = await service.discover({ scanId, kind: 'caches', minSize: 0, offset: 0, limit })
-      return { items: page.items, total: page.total, totalSize: page.totalSize }
+      if (scope === null) {
+        const page = await service.discover({ scanId, kind: 'caches', minSize: 0, offset: 0, limit })
+        return { items: page.items, total: page.total, totalSize: page.totalSize }
+      }
+      // Discovery has no path filter; the largest rows are read and narrowed here.
+      const page = await service.discover({ scanId, kind: 'caches', minSize: 0, offset: 0, limit: SCOPED_DISCOVERY_PAGE })
+      const inside = page.items.filter((item) => isUnder(item.node.path, scope.path))
+      return {
+        items: inside.slice(0, limit),
+        total: inside.length,
+        totalSize: inside.reduce((sum, item) => sum + item.node.size, 0),
+      }
     },
     stage,
+    ...(options.proposal ? { proposal: options.proposal } : {}),
+    ...(options.unstage ? { unstage: options.unstage } : {}),
   }
 }
 
@@ -690,7 +832,7 @@ function summaryNotes(status: ScanStatus): string[] {
   if (status.message !== '') notes.push(status.message.slice(0, 300))
   const coverage = status.coverage
   if (coverage) {
-    notes.push(`${coverage.skippedCount} skipped, ${coverage.deniedCount} denied, ${coverage.issueCount} unreadable`)
+    notes.push(`${unmeasuredSkipCount(coverage)} skipped, ${coverage.deniedCount} denied, ${coverage.issueCount} unreadable`)
     for (const issue of coverage.issues.slice(0, 3)) notes.push(`${issue.path}: ${issue.reason}`)
   }
   return notes

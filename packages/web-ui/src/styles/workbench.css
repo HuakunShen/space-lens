@@ -952,9 +952,13 @@
   }
   .settings-fields {
     padding-top: 12px;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
+  /* A fieldset's default min-width is its content's, so one nowrap child
+     widened the whole group past the panel and forced a sideways scroll. */
   .settings-fields fieldset {
+    min-width: 0;
     margin-bottom: 25px;
   }
   .settings-fields legend {
@@ -969,15 +973,21 @@
     line-height: 1.6;
     margin-bottom: 12px;
   }
+  /* Windows and Linux float the legend; the row must start below it, not
+     squeeze into the space beside it. */
   .update-row {
+    clear: both;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
   }
   .update-version {
+    min-width: 0;
     font-size: 12px;
     color: var(--muted-foreground);
+    overflow-wrap: anywhere;
   }
   .update-action {
     font-size: 12px;
@@ -988,6 +998,33 @@
   }
   .update-action:disabled {
     opacity: 0.6;
+  }
+  /* Process list headers stay solid while rows scroll under them; the page
+     background is transparent in glass mode, so it cannot be used here. */
+  .process-table-head {
+    background: var(--card);
+  }
+  :root:is([data-backdrop='glass'], [data-backdrop='vibrancy']) .process-table-head {
+    background: rgb(var(--glass-chrome) / 1);
+  }
+  /* Storage | Memory: the current view is a filled pill, the other one plain. */
+  .view-switch-button {
+    border-radius: 9999px;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    transition:
+      background-color 120ms,
+      color 120ms;
+  }
+  .view-switch-button:hover {
+    color: var(--foreground);
+  }
+  .view-switch-button[aria-pressed='true'] {
+    background: var(--primary);
+    color: var(--primary-foreground);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
   }
   .setting-options {
     display: flex;
@@ -1290,6 +1327,83 @@
   }
   .coverage-volume span {
     color: var(--muted-foreground);
+  }
+  .reconcile-bar {
+    display: flex;
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: var(--muted);
+    margin: 10px 0 4px;
+  }
+  .reconcile-bar > span {
+    min-width: 2px;
+  }
+  .reconcile-measured {
+    background: var(--primary);
+  }
+  .reconcile-volume {
+    background: var(--chart-2);
+  }
+  .reconcile-fda {
+    display: grid;
+    justify-items: start;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    border: 1px solid color-mix(in oklab, var(--color-amber-500, #f59e0b) 40%, transparent);
+    border-radius: 0.5rem;
+    background: color-mix(in oklab, var(--color-amber-500, #f59e0b) 10%, transparent);
+    padding: 0.75rem;
+  }
+  .reconcile-fda p {
+    margin: 0;
+  }
+  .reconcile-unseen {
+    background: color-mix(in oklch, var(--muted-foreground) 45%, transparent);
+  }
+  .reconcile-bar > .reconcile-volume + .reconcile-volume {
+    border-left: 1px solid var(--background);
+  }
+  .reconcile-rows li,
+  .coverage-reasons li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .coverage-reasons li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .reconcile-rows i {
+    width: 9px;
+    height: 9px;
+    border-radius: 3px;
+    margin-top: 3px;
+  }
+  .reconcile-rows p,
+  .coverage-reasons p {
+    margin: 2px 0 0;
+    font-size: 11px;
+  }
+  .reconcile-rows span,
+  .coverage-reasons span {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .coverage-reasons em {
+    margin-left: 6px;
+    font-style: normal;
+    font-size: 10px;
+    color: var(--muted-foreground);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0 6px;
+  }
+  .coverage-reasons li.by-design span {
+    color: var(--muted-foreground);
+    font-weight: 400;
   }
   .coverage-issues li {
     display: grid;

@@ -1,14 +1,35 @@
 <script lang="ts">
   import { ShieldCheck, CircleAlert, ChevronRight } from '@lucide/svelte'
+  import { unmeasuredSkipCount } from '@space-lens/contract'
   import type { ScanStatus } from '../../types'
   import { formatBytes } from '../../lib/format'
+  import { reconcileStorage, skipReasonRows } from '../../lib/storage-reconcile'
   import { Button } from '../ui/button/index'
   import { Progress } from '../ui/progress/index'
   import * as Sheet from '../ui/sheet/index'
 
-  let { status }: { status: ScanStatus } = $props()
+  interface Props {
+    status: ScanStatus
+    /** Desktop only: whether macOS Full Disk Access is in effect for this app. */
+    fullDiskAccess?: 'granted' | 'denied' | 'unknown' | 'unsupported'
+    /** Opens the system's Full Disk Access pane; absent where there is none. */
+    onOpenFullDiskAccess?: () => void
+  }
+  let { status, fullDiskAccess = 'unsupported', onOpenFullDiskAccess }: Props = $props()
   let open = $state(false)
   let coverage = $derived(status.coverage)
+  let unmeasured = $derived(coverage ? unmeasuredSkipCount(coverage) : 0)
+  let reasons = $derived(coverage ? skipReasonRows(coverage) : [])
+  let reconciliation = $derived(status.storage ? reconcileStorage(status.storage) : null)
+
+  /** System Settings and most disk tools print decimal gigabytes. */
+  function decimalGb(bytes: number): string {
+    return `${(bytes / 1e9).toLocaleString(undefined, { maximumFractionDigits: 1, minimumFractionDigits: 1 })} GB`
+  }
+
+  function share(bytes: number, total: number): string {
+    return `${total > 0 ? Math.max(0, Math.min(100, (bytes / total) * 100)) : 0}%`
+  }
 </script>
 
 {#if coverage}
@@ -20,8 +41,7 @@
     <span>{formatBytes(status.bytesScanned)} on disk</span>
     <span class="coverage-logical">{formatBytes(coverage.logicalBytes)} logical</span>
     <Button variant="ghost" size="sm" class="ml-auto h-7 gap-1.5 text-xs" onclick={() => (open = true)}>
-      {#if coverage.skippedCount}<CircleAlert size={13} /> {coverage.skippedCount.toLocaleString()} skipped{:else}Scan
-        details{/if}
+      {#if unmeasured}<CircleAlert size={13} /> {unmeasured.toLocaleString()} skipped{:else}Scan details{/if}
       <ChevronRight size={13} />
     </Button>
   </div>
@@ -51,6 +71,76 @@
           files can differ. Hard-link names each contribute logical length, while their allocated blocks are counted
           once. These are measurements, not a promise of space recovered by deleting.
         </p>
+        {#if reconciliation}
+          <section aria-label="Disk usage reconciliation" class="coverage-reconcile">
+            <h3>Where the used space goes</h3>
+            <p>
+              This disk reports <strong>{formatBytes(reconciliation.inUseBytes)}</strong> in use
+              ({decimalGb(reconciliation.inUseBytes)} as System Settings counts it) of {formatBytes(
+                reconciliation.capacityBytes,
+              )}. The scan measures files it can walk; the rest is below.
+            </p>
+            <div class="reconcile-bar" aria-hidden="true">
+              <span
+                class="reconcile-measured"
+                style:width={share(reconciliation.measured.bytes, reconciliation.inUseBytes)}
+              ></span>
+              {#each reconciliation.otherVolumes as row (row.key)}
+                <span class="reconcile-volume" style:width={share(row.bytes, reconciliation.inUseBytes)}></span>
+              {/each}
+              <span class="reconcile-unseen" style:width={share(reconciliation.unseen.bytes, reconciliation.inUseBytes)}
+              ></span>
+            </div>
+            <ul class="reconcile-rows">
+              <li>
+                <i class="reconcile-measured"></i>
+                <div><strong>{reconciliation.measured.label}</strong><p>{reconciliation.measured.detail}</p></div>
+                <span>{formatBytes(reconciliation.measured.bytes)}</span>
+              </li>
+              {#each reconciliation.otherVolumes as row (row.key)}
+                <li>
+                  <i class="reconcile-volume"></i>
+                  <div><strong>{row.label} volume</strong><p>{row.detail}</p></div>
+                  <span>{formatBytes(row.bytes)}</span>
+                </li>
+              {/each}
+              <li>
+                <i class="reconcile-unseen"></i>
+                <div><strong>{reconciliation.unseen.label}</strong><p>{reconciliation.unseen.detail}</p></div>
+                <span>{formatBytes(reconciliation.unseen.bytes)}</span>
+              </li>
+            </ul>
+            {#if fullDiskAccess === 'denied' && onOpenFullDiskAccess}
+              <div class="reconcile-fda" role="note">
+                <p>
+                  Some folders were not scanned because Space Lens does not have Full Disk Access. Turn it on under
+                  System Settings → Privacy &amp; Security → Full Disk Access, then restart Space Lens and scan again.
+                  Only file sizes and names are read, and iCloud and Photos originals are never downloaded.
+                </p>
+                <Button variant="outline" size="sm" onclick={onOpenFullDiskAccess}>Open “Full Disk Access”</Button>
+              </div>
+            {/if}
+            {#if reconciliation.purgeableBytes}
+              <p>
+                <strong>{formatBytes(reconciliation.purgeableBytes)} purgeable.</strong> macOS frees this on demand, mostly
+                local snapshots and cached iCloud files, so it counts as free space for new data.
+              </p>
+            {/if}
+            {#if reconciliation.overcounted}
+              <p>
+                The scan measured more than the disk reports in use, for example APFS clones that share blocks but are
+                counted once per copy.
+              </p>
+            {/if}
+            {#if reconciliation.scannedVolumes.length}
+              <p>
+                Volumes a startup-disk scan walks: {reconciliation.scannedVolumes
+                  .map((row) => `${row.label} ${formatBytes(row.bytes)}`)
+                  .join(' · ')}. Their totals include snapshot data the scan cannot see.
+              </p>
+            {/if}
+          </section>
+        {/if}
         {#if status.volumes?.length}
           <section aria-label="Disk capacity">
             <h3>Disk capacity</h3>
@@ -82,10 +172,24 @@
         <section aria-label="Skipped scan areas">
           <h3>Not scanned</h3>
           <p>
-            {coverage.skippedCount.toLocaleString()} areas skipped · {coverage.deniedCount.toLocaleString()} access denials.
+            {unmeasured.toLocaleString()} areas not measured · {coverage.deniedCount.toLocaleString()} access denials.
             Cloud storage, online-only items and child mounts are left out. Their sizes are unknown. Symlinks are not followed;
             duplicate directory aliases are counted once.
           </p>
+          {#if reasons.length}
+            <ul class="coverage-reasons" aria-label="Skipped by reason">
+              {#each reasons as row (row.reason)}
+                <li class:by-design={!row.missing}>
+                  <div>
+                    <strong>{row.label}</strong>
+                    {#if !row.missing}<em>not missing</em>{/if}
+                    <p>{row.detail}</p>
+                  </div>
+                  <span>{row.count.toLocaleString()}</span>
+                </li>
+              {/each}
+            </ul>
+          {/if}
           {#if coverage.issuesTruncated}<p>
               Showing {coverage.issues.length.toLocaleString()} of {coverage.issueCount.toLocaleString()} notices.
             </p>{/if}

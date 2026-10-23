@@ -18,6 +18,9 @@ import {
   ScanSessionSchema,
   SessionSchema,
   ScanStatusSchema,
+  ScanCoverageSchema,
+  StorageBreakdownSchema,
+  unmeasuredSkipCount,
   buildContractArtifacts,
   CleanupExecuteRequestSchema,
   CleanupPlanRequestSchema,
@@ -25,6 +28,8 @@ import {
   DiscoveryPageSchema,
   EventEnvelopeSchema,
   ProblemSchema,
+  RevealPathRequestSchema,
+  RevealPathResultSchema,
   ScanStartRequestSchema,
   TreeSliceSchema,
   LocalScanReportSchema,
@@ -108,6 +113,51 @@ describe('scan contract', () => {
       false,
     )
   })
+  it('splits skips by reason and counts only unmeasured ones as missing', () => {
+    const coverage = ScanCoverageSchema.parse({
+      mode: 'local-only',
+      protection: 'macos-no-materialization',
+      sizeMetric: 'allocated',
+      logicalBytes: 0,
+      files: 0,
+      directories: 0,
+      skippedCount: 12,
+      skippedByReason: { symlink: 9, 'permission-denied': 2, 'mount-boundary': 1 },
+      deniedCount: 2,
+      issueCount: 3,
+      issuesTruncated: false,
+      issues: [],
+      elapsedMs: 1,
+    })
+    expect(unmeasuredSkipCount(coverage)).toBe(3)
+    // Sockets, duplicate aliases and online-only files hide no data either.
+    expect(
+      unmeasuredSkipCount({
+        ...coverage,
+        skippedCount: 20,
+        skippedByReason: { ...coverage.skippedByReason, 'special-file': 5, 'duplicate-directory': 2, dataless: 1 },
+      }),
+    ).toBe(3)
+    // Older reports have no split; every skip stays counted.
+    expect(unmeasuredSkipCount({ ...coverage, skippedByReason: undefined })).toBe(12)
+  })
+  it('accepts an APFS storage breakdown on scan status', () => {
+    const storage = {
+      container: 'disk3',
+      capacityBytes: 1000,
+      inUseBytes: 520,
+      purgeableBytes: 119,
+      scannedBytes: 287,
+      volumes: [{ name: 'Macintosh HD - Data', role: 'Data', device: 'disk3s5', inUseBytes: 459 }],
+      snapshots: { volume: 'disk3s5', count: 25, timeMachineCount: 25, oldestTimeMachine: '2026-10-05T16:01:11' },
+    }
+    expect(StorageBreakdownSchema.parse(storage)).toEqual(storage)
+    expect(StorageBreakdownSchema.safeParse({ ...storage, purgeableBytes: null, snapshots: null }).success).toBe(true)
+    expect(
+      StorageBreakdownSchema.safeParse({ ...storage, snapshots: { ...storage.snapshots, oldestTimeMachine: 'Oct 5' } })
+        .success,
+    ).toBe(false)
+  })
   it('fills defaults and accepts a minimal scan start', () => {
     const parsed = ScanStartRequestSchema.parse({ paths: ['/tmp/demo'] })
     expect(parsed).toEqual({
@@ -148,9 +198,9 @@ describe('app audit report contract', () => {
     }
     // Older hosts omit auditId: still parses.
     expect(AppAuditReportSchema.parse(base)).toEqual(base)
-    expect(
-      AppAuditReportSchema.parse({ ...base, auditId: 'audit_abcdef1234567890abcdef' }).auditId,
-    ).toBe('audit_abcdef1234567890abcdef')
+    expect(AppAuditReportSchema.parse({ ...base, auditId: 'audit_abcdef1234567890abcdef' }).auditId).toBe(
+      'audit_abcdef1234567890abcdef',
+    )
     for (const auditId of ['audit_short', 'audit_', 'plain-id', 'audit_abcdef!', '']) {
       expect(AppAuditReportSchema.safeParse({ ...base, auditId }).success).toBe(false)
     }
@@ -191,13 +241,11 @@ describe('app scan contract', () => {
     ]) {
       expect(AppScanStartRequestSchema.safeParse(invalid).success).toBe(false)
     }
-    expect(
-      RecentAppScanSchema.safeParse({ ...origin, lastScannedAt: 'not-a-date' }).success,
-    ).toBe(false)
+    expect(RecentAppScanSchema.safeParse({ ...origin, lastScannedAt: 'not-a-date' }).success).toBe(false)
     expect(RecentAppScanSchema.safeParse({ ...origin }).success).toBe(false)
-    expect(RecentAppScanSchema.safeParse({ ...origin, lastScannedAt: '2026-10-13T00:00:00.000Z', extra: 1 }).success).toBe(
-      false,
-    )
+    expect(
+      RecentAppScanSchema.safeParse({ ...origin, lastScannedAt: '2026-10-13T00:00:00.000Z', extra: 1 }).success,
+    ).toBe(false)
   })
 
   it('keeps the app origin optional so old session payloads still parse', () => {
@@ -277,12 +325,12 @@ describe('app cleanup contract', () => {
   })
 
   it('requires the literal confirm for app execute', () => {
-    expect(
-      AppCleanupExecuteRequestSchema.safeParse({ planId: 'plan_abcdef1234567890', confirm: true }).success,
-    ).toBe(true)
-    expect(
-      AppCleanupExecuteRequestSchema.safeParse({ planId: 'plan_abcdef1234567890', confirm: false }).success,
-    ).toBe(false)
+    expect(AppCleanupExecuteRequestSchema.safeParse({ planId: 'plan_abcdef1234567890', confirm: true }).success).toBe(
+      true,
+    )
+    expect(AppCleanupExecuteRequestSchema.safeParse({ planId: 'plan_abcdef1234567890', confirm: false }).success).toBe(
+      false,
+    )
     expect(AppCleanupExecuteRequestSchema.safeParse({ planId: 'plan_abcdef1234567890' }).success).toBe(false)
   })
 
@@ -291,9 +339,9 @@ describe('app cleanup contract', () => {
     // No fabricated scanId: engine-shaped extras are rejected by strictObject.
     expect(AppCleanupPlanSchema.safeParse({ ...plan, scanId: 'scan_abcdefgh' }).success).toBe(false)
     expect(AppCleanupPlanSchema.safeParse({ ...plan, mode: 'permanent' }).success).toBe(false)
-    expect(
-      AppCleanupPlanSchema.safeParse({ ...plan, entries: Array.from({ length: 201 }, () => entry) }).success,
-    ).toBe(false)
+    expect(AppCleanupPlanSchema.safeParse({ ...plan, entries: Array.from({ length: 201 }, () => entry) }).success).toBe(
+      false,
+    )
   })
 })
 describe('tree slice contract', () => {
@@ -431,6 +479,52 @@ describe('ai advisor contract', () => {
     expect(CapabilitiesSchema.parse(capabilities).ai).toBeUndefined()
     expect(CapabilitiesSchema.parse({ ...capabilities, ai: true }).ai).toBe(true)
     expect(CapabilitiesSchema.safeParse({ ...capabilities, ai: 'yes' }).success).toBe(false)
+  })
+
+  it('carries the path reveal flag and the host platform as optional capabilities', () => {
+    const capabilities = {
+      apiMajor: API_MAJOR,
+      contractVersion: CONTRACT_VERSION,
+      scan: { start: true, cancel: true, maxConcurrent: 1 },
+      cleanup: { plan: false, execute: false, mode: 'none' as const },
+      host: { folderPicker: false },
+      icloud: 'unavailable' as const,
+    }
+    expect(CapabilitiesSchema.parse(capabilities).host.pathReveal).toBeUndefined()
+    const revealed = CapabilitiesSchema.parse({
+      ...capabilities,
+      host: { folderPicker: false, pathReveal: true, platform: 'macos' },
+    })
+    expect(revealed.host.pathReveal).toBe(true)
+    expect(revealed.host.platform).toBe('macos')
+    expect(
+      CapabilitiesSchema.safeParse({ ...capabilities, host: { folderPicker: false, platform: 'solaris' } }).success,
+    ).toBe(false)
+  })
+})
+
+describe('reveal contract', () => {
+  it('takes one absolute path, an optional action and nothing else', () => {
+    expect(RevealPathRequestSchema.parse({ path: '/tmp/a' })).toEqual({ path: '/tmp/a' })
+    expect(RevealPathRequestSchema.parse({ path: '/tmp/a', action: 'open' })).toEqual({
+      path: '/tmp/a',
+      action: 'open',
+    })
+    for (const invalid of [
+      {},
+      { path: '' },
+      { path: 42 },
+      { path: '/tmp/a', action: 'delete' },
+      { path: '/tmp/a', extra: 1 },
+    ]) {
+      expect(RevealPathRequestSchema.safeParse(invalid).success).toBe(false)
+    }
+  })
+
+  it('answers one revealed flag', () => {
+    expect(RevealPathResultSchema.parse({ revealed: true })).toEqual({ revealed: true })
+    expect(RevealPathResultSchema.safeParse({}).success).toBe(false)
+    expect(RevealPathResultSchema.safeParse({ revealed: 'yes' }).success).toBe(false)
   })
 })
 

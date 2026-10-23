@@ -226,6 +226,31 @@ it('sends closed reveal IPC requests and preserves typed app cleanup failures', 
   expect(failure).toMatchObject({ code: 'StalePlan', message: 'plan expired' })
 })
 
+it('sends the scanned-path reveal as its own host request arm', async () => {
+  let receive: (message: unknown) => void = () => {}
+  const requests: unknown[] = []
+  const ports: TauriPorts = {
+    createChannel(callback) {
+      receive = callback
+      return 'channel'
+    },
+    async invoke(command, payload) {
+      if (command === 'sl_connect') return { sessionId: 'session_1' }
+      requests.push({ command, ...payload })
+      receive({ ok: true, result: { revealed: true } })
+      return undefined
+    },
+  }
+  const service = createTauriService(ports)
+  expect(await service.revealPath!({ path: '/tmp/a' })).toEqual({ revealed: true })
+  expect(requests[0]).toEqual({
+    command: 'sl_host_request',
+    sessionId: 'session_1',
+    reply: 'channel',
+    request: { kind: 'revealScanPath', path: '/tmp/a', action: 'reveal' },
+  })
+})
+
 it('sends the exact appScanStart submit arm and returns the app session', async () => {
   let receive: (message: unknown) => void = () => {}
   const requests: unknown[] = []

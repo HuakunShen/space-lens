@@ -7,16 +7,36 @@ import {
   AppAuditReportSchema,
   AppAuditRequestSchema,
   AppIconRequestSchema,
+  AuditLogSchema,
+  CandidatesRequestSchema,
   ChildrenPageRequestSchema,
   CleanupExecuteRequestSchema,
   CleanupPlanRequestSchema,
   DiscoveryRequestSchema,
+  FreeUpCandidatesSchema,
+  HistoryRequestSchema,
+  MemoryHistorySchema,
+  MemorySnapshotSchema,
+  RevealPathRequestSchema,
   ScanIdSchema,
   ScanStartRequestSchema,
   SessionExchangeRequestSchema,
+  TerminateExecuteRequestSchema,
+  TerminateOutcomeSchema,
+  TerminatePlanRequestSchema,
+  TerminatePlanSchema,
   TreeSliceRequestSchema,
 } from '@space-lens/contract'
-import type { AppAuditRequest, AiChatRequest, AiConfigView } from '@space-lens/contract'
+import type {
+  AppAuditRequest,
+  AiChatRequest,
+  AiConfigView,
+  CandidatesRequest,
+  HistoryRequest,
+  RevealAction,
+  TerminateExecuteRequest,
+  TerminatePlanRequest,
+} from '@space-lens/contract'
 import type { SessionRecord } from './auth.ts'
 import type { AuthService } from './auth.ts'
 import type { AssetHandler } from './assets.ts'
@@ -31,6 +51,8 @@ import { mountedVolumes, volumeCapacities } from './volumes.ts'
 import { resolveLocalScanBin } from './local-process.ts'
 import { runAppAuditCli, runAppIconCli } from './app-audit.ts'
 import { forwardChatCompletion, forwardChatStream } from './ai.ts'
+import type { MemoryBridge, MemoryCall } from './memory.ts'
+import { revealPath, type FileManagerTarget } from './reveal.ts'
 
 export interface HostDeps {
   config: ResolvedServeConfig
@@ -43,6 +65,18 @@ export interface HostDeps {
   allowlist: ClientAllowlist
   /** Absolute protected release CLI path; otherwise env/repository discovery is used. */
   localScanBin?: string
+  /**
+   * Bridge to `spacelens memory stdio`. Present only when the host was started
+   * with `--allow-memory` and the release CLI resolved; its absence turns every
+   * `/api/v1/memory/*` route into the standard `Unavailable` problem.
+   */
+  memory?: MemoryBridge
+  /**
+   * How a revealed path reaches the file manager. Absent in production (the
+   * platform launcher runs); tests inject a recorder so no test ever opens a
+   * real window.
+   */
+  revealLauncher?: (target: FileManagerTarget) => void | Promise<void>
 }
 
 type AppEnv = { Variables: { session: SessionRecord } }
@@ -65,7 +99,7 @@ function jsonResponse(payload: unknown, status: number, extraHeaders?: Record<st
 
 export function buildApp(deps: HostDeps): HonoApp {
   const app = new Hono<AppEnv>() as HonoApp
-  const { config, auth, scans, events, assets, health, capabilities, allowlist, localScanBin } = deps
+  const { config, auth, scans, events, assets, health, capabilities, allowlist, localScanBin, memory } = deps
 
   // App-storage audit spawns share one per-process guard: at most two
   // concurrent CLI audits; the third caller gets a 429 LimitExceeded.
@@ -116,7 +150,12 @@ export function buildApp(deps: HostDeps): HonoApp {
       throw Problems.forbidden(`client address ${normalizeRemoteAddress(remote)} is not in the allowed networks`)
     }
     const verdict = checkOrigin(
-      { hostHeader: c.req.header('host') ?? null, origin, secFetchSite: c.req.header('sec-fetch-site') ?? null },
+      {
+        hostHeader: c.req.header('host') ?? null,
+        origin,
+        secFetchSite: c.req.header('sec-fetch-site') ?? null,
+        secFetchMode: c.req.header('sec-fetch-mode') ?? null,
+      },
       policy,
     )
     if (verdict !== 'ok') {
@@ -169,6 +208,27 @@ export function buildApp(deps: HostDeps): HonoApp {
       sessionId: result.session.sessionId,
       expiresAt: new Date(result.session.expiresAtMs).toISOString(),
       scopes: [...result.session.scopes] as Session['scopes'],
+    }
+    events.publish({ kind: 'session', expiresAt: session.expiresAt })
+    return c.json(session)
+  })
+
+  // 3b. Development-only session: no ticket, no handshake. It exists only
+  // when the host was started with `--dev-open-session` (loopback bind only),
+  // so a dev server does not need a copied ticket on every reload. Without the
+  // flag the route is simply not there.
+  app.post('/api/v1/session/dev', (c) => {
+    if (!config.devOpenSession) {
+      throw Problems.unavailable(
+        'dev sessions are off; pair with the ticket printed by spacelens serve',
+      )
+    }
+    const minted = auth.mintSession()
+    const session: Session = {
+      token: minted.token,
+      sessionId: minted.sessionId,
+      expiresAt: new Date(minted.expiresAtMs).toISOString(),
+      scopes: [...minted.scopes] as Session['scopes'],
     }
     events.publish({ kind: 'session', expiresAt: session.expiresAt })
     return c.json(session)
@@ -347,6 +407,25 @@ export function buildApp(deps: HostDeps): HonoApp {
     }
   })
 
+  // 4c. Reveal a scanned path in the host's own file manager. The path is
+  // data, never a command: the host resolves it against the roots it serves
+  // and refuses anything outside them before a process is spawned.
+  app.post('/api/v1/host/reveal', async (c) => {
+    ensureScope(c.get('session'), 'host:reveal')
+    const request = await parseBody<{ path: string; action?: RevealAction }>(c, RevealPathRequestSchema)
+    const outcome = await revealPath(request.path, config.roots, {
+      launch: deps.revealLauncher,
+      action: request.action ?? 'reveal',
+    })
+    if (!outcome.ok) {
+      if (outcome.reason === 'invalid') throw Problems.invalid(outcome.message)
+      if (outcome.reason === 'forbidden') throw Problems.forbidden(outcome.message)
+      if (outcome.reason === 'notFound') throw Problems.notFound(outcome.message)
+      throw Problems.unavailable(outcome.message)
+    }
+    return c.json({ revealed: true })
+  })
+
   // 5. AI advisor: only when the operator configured one. The base URL, model
   // and key live on the host; nothing here lets a client change them. When the
   // feature is off the routes answer the standard Unavailable problem (and no
@@ -402,6 +481,86 @@ export function buildApp(deps: HostDeps): HonoApp {
       })
     }
     return c.json(await forwardChatCompletion(forwarded))
+  })
+
+  // 5b. Memory view and process control: the host never re-implements a rule,
+  // so every route forwards exactly one call to the `spacelens memory stdio`
+  // child and re-validates its reply against the same contract schema the
+  // client uses (a malformed reply is InternalError, never forwarded). The
+  // bridge's presence is the feature switch: no bridge (started without
+  // `--allow-memory`, or the release CLI could not be resolved) answers the
+  // standard Unavailable problem, exactly like the AI routes without a config.
+  const requireMemory = (): MemoryBridge => {
+    if (memory === undefined) {
+      throw Problems.unavailable(
+        'this host does not have the memory view enabled (start it with --allow-memory)',
+        false,
+      )
+    }
+    return memory
+  }
+
+  /** Feature gate first, then scope, so a disabled feature never leaks scope state. */
+  const memoryGate = (session: SessionRecord, scope: 'memory:read' | 'memory:terminate'): MemoryBridge => {
+    const bridge = requireMemory()
+    ensureScope(session, scope)
+    return bridge
+  }
+
+  /** Re-validate one child reply; anything off-contract becomes InternalError. */
+  const parseMemoryReply = <T>(
+    raw: unknown,
+    schema: { safeParse(input: unknown): { success: boolean; data?: T } },
+  ): T => {
+    const parsed = schema.safeParse(raw)
+    if (!parsed.success || parsed.data === undefined) {
+      throw Problems.internal('the memory process returned a reply that does not satisfy the contract')
+    }
+    return parsed.data
+  }
+
+  app.get('/api/v1/memory/snapshot', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:read')
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, { method: 'snapshot' }), MemorySnapshotSchema))
+  })
+
+  app.post('/api/v1/memory/history', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:read')
+    const request = await parseBody<HistoryRequest>(c, HistoryRequestSchema)
+    const call: MemoryCall = { method: 'history', request }
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, call), MemoryHistorySchema))
+  })
+
+  app.post('/api/v1/memory/candidates', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:read')
+    const request = await parseBody<CandidatesRequest>(c, CandidatesRequestSchema)
+    const call: MemoryCall = { method: 'candidates', request }
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, call), FreeUpCandidatesSchema))
+  })
+
+  app.get('/api/v1/memory/audit', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:read')
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, { method: 'audit' }), AuditLogSchema))
+  })
+
+  app.post('/api/v1/memory/terminate/plan', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:terminate')
+    const request = await parseBody<TerminatePlanRequest>(c, TerminatePlanRequestSchema)
+    const call: MemoryCall = { method: 'plan', request }
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, call), TerminatePlanSchema))
+  })
+
+  app.post('/api/v1/memory/terminate/execute', async (c) => {
+    const session = c.get('session')
+    const bridge = memoryGate(session, 'memory:terminate')
+    const request = await parseBody<TerminateExecuteRequest>(c, TerminateExecuteRequestSchema)
+    const call: MemoryCall = { method: 'execute', request }
+    return c.json(parseMemoryReply(await bridge.call(session.sessionId, call), TerminateOutcomeSchema))
   })
 
   // 6. SSE: fetch-based clients (EventSource cannot send Authorization).

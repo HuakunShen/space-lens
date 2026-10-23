@@ -24,19 +24,21 @@
     formatBytes,
     formatNodeName,
     resolveScanVolume,
+    scanBaseline,
     isVirtualAppPath,
     isAppBundleNode,
     isAccountingLeaf,
     annotationForNode,
+    fileManagerLabel,
   } from '@space-lens/web-ui'
   import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
-  import type { AppAuditEntry, AppAuditReport, CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, ScanStatus } from '@space-lens/contract'
+  import type { AppAuditEntry, AppAuditReport, CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, ScanStatus, Session } from '@space-lens/contract'
   import { setMode, userPrefersMode } from 'mode-watcher'
   import { addSelection, selectedAncestor } from '../lib/selection'
   import { canCollectNode } from '@space-lens/web-ui/lib/app-scan'
   import { ACTIVE_SCAN_KEY, parseActiveScan } from '../lib/resume'
-  import { APPEARANCE_KEY, parseAppearance, resolveStyle } from '../lib/appearance'
+  import { APPEARANCE_KEY, glassStrength, parseAppearance, resolveStyle } from '../lib/appearance'
   import { CHART_MODE_KEY, TREEMAP_DENSITY_KEY, parseChartMode, parseTreemapDensity } from '../lib/chart-mode'
   import { checkForAppUpdate, currentAppVersion, installAppUpdate } from '../lib/updater'
   import type { UpdateStatus } from '../lib/updater'
@@ -46,9 +48,11 @@
     describeError,
     loadRecentTargets,
     loadRoot,
+    loadScanSizes,
     loadToken,
     rememberBaseUrl,
     rememberRecentTarget,
+    rememberScanSize,
     resolveBaseUrl,
     saveToken,
     startEventStream,
@@ -64,8 +68,13 @@
     gitignoredAvailable as gitignoredGate,
     appAuditAvailable as appAuditGate,
     appScanAvailable as appScanGate,
+    memoryAvailable as memoryGate,
+    pathRevealAvailable as pathRevealGate,
   } from '../lib/gates'
+  import MemoryPage from '../lib/memory/MemoryPage.svelte'
   import AiPanel from '../lib/ai/panel.svelte'
+  import FullDiskAccessNotice from '../lib/FullDiskAccessNotice.svelte'
+  import { openFullDiskAccessSettings, readFullDiskAccess, type FullDiskAccess } from '../lib/permissions.ts'
   import { createAiChatPort, createServiceAiChatPort } from '../lib/ai/chat-port.ts'
   import type { AiChatPort } from '@space-lens/ai-advisor'
   import { shouldApplyAuditReport } from '../lib/app-storage'
@@ -84,6 +93,8 @@
   let explicitUrlInput = $state('')
   let collectorOpen = $state(false)
   let aiOpen = $state(false)
+  /** Top-level Storage | Memory switch state (§6.1); the page owns it. */
+  let memoryView = $state(false)
   // Loaded with the desktop service; the AI drawer is gated on it when no
   // HTTP host serves an operator-configured advisor.
   let aiPorts = $state<TauriPorts | null>(null)
@@ -236,6 +247,20 @@
   let startingScan = $state(false)
   let startingAppId = $state<string | null>(null)
   let recentTargets = $state(loadRecentTargets())
+  let scanSizes = $state(loadScanSizes())
+  // A finished folder scan becomes the progress baseline for the next scan of
+  // the same location (keyed by the scan label the host echoes back).
+  $effect(() => {
+    const status = workbench.status
+    if (status?.state !== 'ready' || !status.coverage || status.app || !status.label) return
+    if (scanSizes[status.label]?.at === status.updatedAt) return
+    rememberScanSize(status.label, {
+      bytes: status.bytesScanned,
+      entries: status.coverage.files + status.coverage.directories,
+      at: status.updatedAt,
+    })
+    scanSizes = loadScanSizes()
+  })
   let recentAppScans = $state(loadRecentAppScans())
   /** Pinned per-scan audit reports (§1 Q3): browsing never invalidates. */
   let pinnedReports = $state(new Map<string, AppAuditReport>())
@@ -248,6 +273,14 @@
   let appearance = $state(parseAppearance(null))
   let appVersion = $state<string | null>(null)
   let updateStatus = $state<UpdateStatus>({ state: 'idle' })
+  let fullDiskAccess = $state<FullDiskAccess>('unsupported')
+  $effect(() => {
+    if (!__SPACLENS_DESKTOP__) return
+    const refresh = () => void readFullDiskAccess().then((value) => (fullDiskAccess = value), () => {})
+    refresh()
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  })
   if (__SPACLENS_DESKTOP__) void currentAppVersion().then((version) => (appVersion = version))
   let preferencesReady = $state(false)
   let view = $state<'browse' | DiscoveryKind | 'apps'>('browse')
@@ -342,7 +375,20 @@
     }),
   )
   const hostAi = $derived(Boolean(workbench.capabilities?.ai && workbench.service?.aiChat))
+  /**
+   * Opening a scanned path in the host's own file manager. The label names the
+   * *host's* file manager — for the HTTP host that is the machine that ran
+   * the scan, not the browser's.
+   */
+  const pathRevealAvailable = $derived(
+    pathRevealGate({ capabilities: workbench.capabilities, service: workbench.service }),
+  )
+  const revealLabel = $derived(fileManagerLabel(workbench.capabilities?.host.platform, 'reveal'))
+  const openLabel = $derived(fileManagerLabel(workbench.capabilities?.host.platform, 'open'))
   const aiAvailable = $derived(aiGate({ desktop: __SPACLENS_DESKTOP__, ports: aiPorts, hostAi }))
+  const memoryAvailable = $derived(
+    memoryGate({ capabilities: workbench.capabilities, service: workbench.service }),
+  )
   /**
    * The port the drawer drives. The desktop shell keeps its BYOK proxy (the
    * key lives in Rust); the HTTP host serves a managed, read-only config and
@@ -457,7 +503,7 @@
     const interfaceStyle = resolveStyle(appearance.style, __SPACLENS_DESKTOP__, navigator.userAgent)
     document.documentElement.dataset.interface = interfaceStyle
     document.documentElement.dataset.density = appearance.density
-    document.documentElement.dataset.transparency = appearance.transparency
+    document.documentElement.style.setProperty('--glass-strength', String(glassStrength(appearance.transparency)))
     // Material capability and native OS/accent attributes are supplied by the host.
     window.localStorage.setItem(APPEARANCE_KEY, JSON.stringify(appearance))
   })
@@ -663,6 +709,52 @@
     }
   }
 
+  /**
+   * Opens a session: the printed pairing ticket when there is one, otherwise a
+   * development-only session from a host started with `--dev-open-session`.
+   *
+   * The dev route is a convenience, not a fallback that hides a broken host: it
+   * is only tried when there is no ticket to spend, and a host without the flag
+   * answers Unavailable, so the pairing form stays the answer for a normal
+   * host.
+   */
+  async function openSession(
+    service: { exchange: (ticket: string, password?: string) => Promise<Session>; devSession?: () => Promise<Session> },
+    ticket: string | null,
+  ): Promise<Session> {
+    if (ticket !== null) {
+      return service.exchange(ticket, hosted && passwordInput !== '' ? passwordInput : undefined)
+    }
+    if (service.devSession !== undefined) {
+      try {
+        return await service.devSession()
+      } catch {
+        // No dev session on this host — fall through to the ticket exchange.
+      }
+    }
+    return service.exchange('', hosted && passwordInput !== '' ? passwordInput : undefined)
+  }
+
+  /**
+   * Pairs a fresh browser against a development host. The token is saved before
+   * `connect()` runs, so connect sees a stored token and skips the exchange.
+   * Anything else (no flag, a remote host, an old build) is left alone and the
+   * pairing form stays up.
+   */
+  async function openDevSession(): Promise<void> {
+    const resolved = resolveBaseUrl(explicitUrlInput || null)
+    const [{ createHttpService }] = await Promise.all([import('@space-lens/client')])
+    const service = createHttpService({ baseUrl: resolved.url, getToken: loadToken })
+    if (service.devSession === undefined) return
+    try {
+      const session = await service.devSession()
+      saveToken(session.token)
+    } catch {
+      return
+    }
+    await connect()
+  }
+
   async function connect(): Promise<void> {
     workbench.phase = 'connecting'
     workbench.connectMessage = null
@@ -680,7 +772,7 @@
         )
       const ticket = ticketInput === '' ? ticketFromLocation() : ticketInput
       if (ticket || loadToken() === null) {
-        const session = await service.exchange(ticket ?? '', hosted && passwordInput !== '' ? passwordInput : undefined)
+        const session = await openSession(service, ticket)
         saveToken(session.token)
       }
       if (ticket !== null) {
@@ -1186,6 +1278,25 @@
       notice = `Copy this path: ${path}`
     }
   }
+  /**
+   * Open a scanned path in the host's own file manager. `reveal` shows the
+   * item in its parent folder, selected; `open` opens a folder in the file
+   * manager itself. The host resolves the path against the roots it serves, so
+   * the request is refused there when it points outside them.
+   */
+  async function revealInFileManager(node: TreeNodeSummary, action: 'reveal' | 'open'): Promise<void> {
+    const service = workbench.service
+    if (!service?.revealPath) {
+      notice = 'This host cannot open folders in a file manager'
+      return
+    }
+    try {
+      await service.revealPath({ path: node.path, action })
+      notice = action === 'open' ? `Opened ${node.name}` : `Revealed ${node.name}`
+    } catch (error) {
+      notice = describeError(error)
+    }
+  }
   function newLocation(path = ''): void {
     if (workbench.deleting || planning) return
     navigationRequest++
@@ -1313,6 +1424,14 @@
         if (autoscan === null || workbench.phase !== 'ready') return
         return startScan(workbench.targets.map((target) => target.path))
       })
+    } else {
+      // A host started with `--dev-open-session` opens a session without a
+      // ticket; a normal host answers Unavailable and this leaves the pairing
+      // form untouched. Developers should not copy a ticket on every reload.
+      void openDevSession().then(() => {
+        if (autoscan === null || workbench.phase !== 'ready') return
+        return startScan(workbench.targets.map((target) => target.path))
+      })
     }
     return () => {
       window.removeEventListener('resize', onViewportResize)
@@ -1320,6 +1439,24 @@
     }
   })
 </script>
+
+{#snippet viewSwitch()}
+  <!-- Top-level Storage | Memory switch (§6.1). Memory sampling does not need
+       a disk scan, so the switch is available as soon as the host is paired —
+       including on the "New scan" page, where people look for it first. -->
+  <div class="flex items-center gap-0.5 rounded-full border bg-background/90 p-0.5 shadow-sm backdrop-blur">
+    <button type="button" class="view-switch-button" aria-pressed={!memoryView} onclick={() => (memoryView = false)}>Storage</button>
+    <button type="button" class="view-switch-button" aria-pressed={memoryView} onclick={() => (memoryView = true)}>Memory</button>
+  </div>
+{/snippet}
+
+{#if workbench.phase === 'ready' && memoryAvailable && !memoryView}
+  <!-- Storage view: the switch sits in the toolbar's empty middle. The memory
+       view has its own header row, so the pill is not rendered there. -->
+  <div class="view-switch-pill fixed top-1.5 left-1/2 z-50 -translate-x-1/2" role="group" aria-label="Storage or memory view">
+    {@render viewSwitch()}
+  </div>
+{/if}
 
 {#if workbench.phase !== 'ready'}
   <div data-tauri-drag-region class="fixed top-0 right-0 left-0 z-40 h-10"></div>
@@ -1336,6 +1473,17 @@
     onPassword={(value) => (passwordInput = value)}
     onConnect={() => void connect()}
   />
+{:else if memoryView && memoryAvailable}
+  <div class="flex h-dvh min-h-0 flex-col bg-background text-foreground">
+    <header class="grid h-10 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border/60 px-4">
+      <!-- The window's traffic lights sit in the first column; the switch's
+           highlight already says which view this is. -->
+      <span aria-hidden="true"></span>
+      <div role="group" aria-label="Storage or memory view">{@render viewSwitch()}</div>
+      <span aria-hidden="true"></span>
+    </header>
+    <MemoryPage service={workbench.service} capabilities={workbench.capabilities} />
+  </div>
 {:else if pickerOpen || workbench.status === null || workbench.status.state !== 'ready'}
   {#if view === 'apps' && appAuditAvailable}
     <main class="scan-picker flex h-dvh min-h-0 flex-col bg-background text-foreground">
@@ -1401,6 +1549,15 @@
               ? 'Scan cancelled. Choose a location to start again.'
               : null)}
         status={workbench.status}
+        sidebarFooter={__SPACLENS_DESKTOP__ ? fdaNotice : undefined}
+        progressBaseline={workbench.status?.state === 'scanning'
+          ? scanBaseline(
+              workbench.status.label,
+              pathsByScan.get(workbench.status.scanId) ?? scannedPaths,
+              scanSizes,
+              workbench.volumes,
+            )
+          : null}
         onScan={(paths) => void startScan(paths)}
         onForget={forgetRecent}
         auditReport={appAuditReport}
@@ -1475,6 +1632,7 @@
           onSelectApp={(appId) => void startAppScan(appId)}
           onForgetApp={forgetRecentApp}
           switchingBlocked={workbench.deleting || planning}
+          footer={__SPACLENS_DESKTOP__ ? fdaNotice : undefined}
           onSettings={() => (settingsOpen = true)}
           volume={scanVolume}
           scanBytes={workbench.status?.bytesScanned ?? 0}
@@ -1542,7 +1700,11 @@
             onIcon={appIcon}
           />
         {/if}
-        <ScanCoveragePanel status={workbench.status} />
+        <ScanCoveragePanel
+          status={workbench.status}
+          fullDiskAccess={fullDiskAccess}
+          onOpenFullDiskAccess={__SPACLENS_DESKTOP__ ? () => void openFullDiskAccessSettings() : undefined}
+        />
         {#if view === 'browse'}
           <div
             class="explorer-pathbar macos:min-h-10 macos:px-4 windows:mx-4 windows:border-b-0 windows:px-2 linux:min-h-12 linux:px-5"
@@ -1559,6 +1721,8 @@
               onSelect={(node) => void focus(node)}
               onBack={goUp}
               canGoBack={ancestors.length > 1}
+              onReveal={pathRevealAvailable ? (node, action) => void revealInFileManager(node, action) : undefined}
+              revealLabel={revealLabel}
             />
             <span
               >{navigating
@@ -1687,6 +1851,9 @@
                   onOpen={(node) => void focus(node)}
                   onCollect={collect}
                   onRemove={uncollect}
+                  onReveal={pathRevealAvailable ? (node, action) => void revealInFileManager(node, action) : undefined}
+                  revealLabel={revealLabel}
+                  openLabel={openLabel}
                 />{/key}
               {#if workbench.items.length < workbench.childrenTotal}<div class="load-more">
                   <Button.Root variant="ghost" size="sm" disabled={navigating} onclick={() => void loadMoreChildren()}
@@ -1733,6 +1900,9 @@
               onRetry={() => void refreshDiscovery(true)}
               onBrowse={(item) => void browseDiscovered(item)}
               onCopy={(path) => void copyPath(path)}
+              onReveal={pathRevealAvailable ? (node, action) => void revealInFileManager(node, action) : undefined}
+              revealLabel={revealLabel}
+              openLabel={openLabel}
             />{/key}
         {/if}
       </div>
@@ -1795,6 +1965,7 @@
     />
   </div>
 {/if}
+{#snippet fdaNotice()}<FullDiskAccessNotice />{/snippet}
 <AppearancePanel
   open={settingsOpen}
   style={appearance.style}

@@ -29,6 +29,8 @@ export interface OriginCheckInput {
   hostHeader: string | null
   origin: string | null
   secFetchSite: string | null
+  /** `Sec-Fetch-Mode`; `navigate` marks a top-level page load. */
+  secFetchMode?: string | null
 }
 
 export interface OriginPolicy {
@@ -40,13 +42,24 @@ export interface OriginPolicy {
  * One gate, three questions, in order: is the request even addressed to us
  * (Host), does a browser-presented Origin match the allowlist exactly, and is
  * an Origin-less browser fetch quietly declaring itself same-site?
+ *
+ * A top-level *navigation* is allowed through even when it is cross-site: the
+ * response is a document the linking page cannot read, and refusing it means
+ * opening the workbench from a chat message or a bookmark shows a JSON error
+ * instead of the app. Subresource and API requests still need an Origin the
+ * policy knows, so a hostile page cannot read anything.
  */
 export function checkOrigin(input: OriginCheckInput, policy: OriginPolicy): OriginVerdict {
   if (input.hostHeader === null || !policy.authorities.includes(input.hostHeader)) return 'refused-host'
   if (input.origin !== null) {
     if (!policy.allowedOrigins.includes(input.origin)) return 'refused-origin'
   }
-  if (input.secFetchSite !== null && input.origin === null && input.secFetchSite === 'cross-site') {
+  if (
+    input.secFetchSite !== null &&
+    input.origin === null &&
+    input.secFetchSite === 'cross-site' &&
+    input.secFetchMode !== 'navigate'
+  ) {
     return 'refused-cross-site'
   }
   return 'ok'

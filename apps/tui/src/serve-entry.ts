@@ -21,6 +21,9 @@ const FLAG_ALIASES: Record<string, string> = {
   'allow-cidr': 'allowCidr',
   'allow-lan': 'allowLan',
   'allow-cleanup': 'allowCleanup',
+  'allow-memory': 'allowMemory',
+  'allow-process-control': 'allowProcessControl',
+  'dev-open-session': 'devOpenSession',
   'ui-origin': 'uiOrigins',
   'ticket-ttl': 'ticketTtlSeconds',
   root: 'roots',
@@ -87,6 +90,9 @@ export function parseServeArgs(argv: readonly string[]): ParsedServeArgs {
         break
       case 'allowLan':
       case 'allowCleanup':
+      case 'allowMemory':
+      case 'allowProcessControl':
+      case 'devOpenSession':
       case 'json':
       case 'machine':
       case 'trustProxy':
@@ -135,6 +141,16 @@ Bind and access:
 Capabilities:
   --allow-cleanup     grant paired sessions cleanup powers (trash-only, never permanent delete)
   --root <dir>        directories scans may target (repeatable; default: current directory)
+
+Memory view (optional):
+  --allow-memory      grant the read-only memory view (live snapshot, history, candidates, audit)
+  --allow-process-control
+                      allow quitting processes from a loopback UI; requires --allow-memory and a
+                      loopback bind with loopback-only --ui-origin values
+
+Development:
+  --dev-open-session  let a loopback client open a session without the pairing ticket
+                      (POST /api/v1/session/dev); loopback bind only, never for a shared host
 
 AI advisor (optional):
   --ai-base-url <url> OpenAI-compatible base URL (https; http only for loopback). Enables the advisor.
@@ -209,6 +225,16 @@ export async function runServe(argv: readonly string[]): Promise<void> {
         `pairing URL (single use): ${pairingUrl}`,
         `scan roots: ${server.config.roots.join(', ')}`,
         `cleanup: ${server.config.allowCleanup ? 'enabled (trash only)' : 'disabled (read-only)'}`,
+        `memory: ${
+          server.config.allowProcessControl
+            ? 'read + process control'
+            : server.config.allowMemory
+              ? 'read-only'
+              : 'disabled'
+        }`,
+        server.config.devOpenSession
+          ? 'dev sessions: open (loopback clients need no pairing ticket)'
+          : '',
         args.ai ? `ai advisor: ${args.ai.model} at ${args.ai.baseUrl}` : '',
         args.uiOrigins?.length ? `cross-origin UIs: ${args.uiOrigins.join(', ')}` : '',
         `press p + Enter to reprint the pairing URL, Ctrl+C to stop`,

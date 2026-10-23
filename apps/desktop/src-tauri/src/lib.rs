@@ -4,10 +4,19 @@ pub mod app_cleanup_policy;
 pub mod commands;
 pub mod engine;
 pub mod events;
+pub mod memory;
 mod native_material;
+pub mod permissions;
+pub mod reveal;
 
 use std::path::PathBuf;
 use tauri::Manager;
+
+/// A full-disk scan allocates and frees millions of small blocks; the macOS
+/// system allocator kept those pages resident (and counted by Activity
+/// Monitor) long after the scan, piling up with every rescan.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 pub fn run() {
   let roots = default_roots();
@@ -19,6 +28,9 @@ pub fn run() {
     .manage(commands::AppState::new(roots))
     .setup(|app| {
       native_material::create_main_window(app)?;
+      // `app` is already `&mut App`, so `new` takes the reborrow directly;
+      // clippy rejects the redundant `&app`.
+      app.manage(memory::MemoryState::new(app));
       Ok(())
     })
     .on_window_event(|window, event| {
@@ -46,12 +58,15 @@ pub fn run() {
       ai::ai_chat,
       ai::ai_chat_stream,
       ai::ai_chat_cancel,
+      permissions::fda_status,
+      permissions::fda_open_settings,
+      permissions::fda_app_path,
     ])
     .run(tauri::generate_context!())
     .expect("error while running Space Lens desktop");
 }
 
-fn dirs_home() -> PathBuf {
+pub(crate) fn dirs_home() -> PathBuf {
   std::env::var("HOME")
     .map(PathBuf::from)
     .unwrap_or_else(|_| PathBuf::from("/"))
@@ -64,7 +79,18 @@ fn dirs_home() -> PathBuf {
 fn default_roots() -> Vec<PathBuf> {
   let mut roots = vec![dirs_home()];
   #[cfg(target_os = "macos")]
-  roots.push(PathBuf::from("/Volumes"));
+  {
+    // The startup disk. `/` is the firmlink union of the read-only system
+    // volume and the writable data volume; `/System/Volumes/Data` is that
+    // writable half, which the protected walker treats as its own root (it
+    // excludes nested roots from the parent traversal, so the disk is
+    // measured once). Serving both is what lets the drive list offer
+    // "Macintosh HD" — the same pair the browser host uses when it is
+    // started with `--root /`.
+    roots.push(PathBuf::from("/"));
+    roots.push(PathBuf::from("/System/Volumes/Data"));
+    roots.push(PathBuf::from("/Volumes"));
+  }
   #[cfg(target_os = "linux")]
   {
     roots.push(PathBuf::from("/mnt"));
@@ -97,6 +123,11 @@ mod tests {
     assert!(roots
       .iter()
       .any(|root| root == std::path::Path::new("/Volumes")));
+    // The startup disk is scannable too: `/` and its writable data volume.
+    assert!(roots.iter().any(|root| root == std::path::Path::new("/")));
+    assert!(roots
+      .iter()
+      .any(|root| root == std::path::Path::new("/System/Volumes/Data")));
   }
 
   #[cfg(target_os = "linux")]

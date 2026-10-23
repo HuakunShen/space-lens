@@ -26,11 +26,14 @@ function requestRaw(
   port: number,
   path: string,
   headers: Record<string, string>,
-): Promise<{ status: number | undefined }> {
+): Promise<{ status: number | undefined; body: string }> {
   return new Promise((resolve, reject) => {
     const request = http.request({ host: '127.0.0.1', port, path, headers, method: 'GET' }, (response) => {
-      response.resume()
-      response.on('end', () => resolve({ status: response.statusCode }))
+      const chunks: Buffer[] = []
+      response.on('data', (chunk: Buffer) => chunks.push(chunk))
+      response.on('end', () =>
+        resolve({ status: response.statusCode, body: Buffer.concat(chunks).toString('utf8') }),
+      )
     })
     request.on('error', reject)
     request.end()
@@ -47,6 +50,10 @@ function pairTicket(pairingUrl: string): string {
 describe('http host', () => {
   // realpath: the engine scans the resolved path (macOS /var → /private/var)
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'spacelens-http-')))
+  const webRoot = realpathSync(mkdtempSync(join(tmpdir(), 'spacelens-web-')))
+  // The asset handler falls back to `200.html` (SvelteKit's static fallback)
+  // for document requests, which is how `/` is served in a real build.
+  writeFileSync(join(webRoot, '200.html'), '<!doctype html><title>Space Lens</title>')
   mkdirSync(join(root, 'data'))
   writeFileSync(join(root, 'data', 'file.txt'), 'content')
   writeFileSync(join(root, '.gitignore'), 'secret\n')
@@ -59,6 +66,7 @@ describe('http host', () => {
     server = await startServe({
       port: 0,
       roots: [root],
+      webRoot,
       allowCleanup: true,
       maxTotalScans: 4,
       trash: fakeTrash(),
@@ -69,6 +77,7 @@ describe('http host', () => {
   afterAll(async () => {
     await server.stop()
     rmSync(root, { recursive: true, force: true })
+    rmSync(webRoot, { recursive: true, force: true })
   })
 
   const api = async (path: string, init?: RequestInit): Promise<Response> =>
@@ -117,6 +126,26 @@ describe('http host', () => {
     expect(hostRefused.status).toBe(400)
     const originRefused = await fetch(`${origin}/health`, { headers: { origin: 'https://evil.example' } })
     expect(originRefused.status).toBe(403)
+  })
+
+  it('serves the app to a top-level navigation from another site', async () => {
+    // Opening the workbench from a chat message or a bookmark: the document
+    // request carries no Origin and declares itself cross-site. undici strips
+    // Sec-Fetch-* headers, so send them through the raw HTTP client.
+    const navigation = await requestRaw(server.port, '/', {
+      'sec-fetch-site': 'cross-site',
+      'sec-fetch-mode': 'navigate',
+      'sec-fetch-dest': 'document',
+    })
+    expect(navigation.body.slice(0, 200)).not.toContain('Forbidden')
+    expect(navigation.status).toBe(200)
+
+    // The same headers on a subresource are still refused.
+    const subresource = await requestRaw(server.port, '/api/v1/capabilities', {
+      'sec-fetch-site': 'cross-site',
+      'sec-fetch-mode': 'cors',
+    })
+    expect(subresource.status).toBe(403)
   })
 
   it('refuses spoofed forwarded addresses outside the allowlist when the proxy is trusted', async () => {

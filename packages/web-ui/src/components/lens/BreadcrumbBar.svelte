@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronLeft, ChevronRight, Home } from "@lucide/svelte";
+  import { ChevronLeft, ChevronRight, Home, ExternalLink } from "@lucide/svelte";
   import type { TreeNodeSummary } from "../../types";
   import { Button } from "../ui/button/index";
 
@@ -8,9 +8,25 @@
     onSelect: (node: TreeNodeSummary) => void;
     onBack?: () => void;
     canGoBack?: boolean;
+    /**
+     * Shows the current folder in the host's own file manager (Finder /
+     * Explorer / the Linux file manager). Absent when the host cannot do it.
+     */
+    onReveal?: (node: TreeNodeSummary, action: "reveal" | "open") => void;
+    /** The label for that action, named after the host's platform. */
+    revealLabel?: string;
   }
 
-  let { items, onSelect, onBack, canGoBack = false }: Props = $props();
+  let {
+    items,
+    onSelect,
+    onBack,
+    canGoBack = false,
+    onReveal,
+    revealLabel = "Reveal in file manager",
+  }: Props = $props();
+
+  const current = $derived(items.at(-1));
 </script>
 
 <nav class="flex min-w-0 items-center gap-1" aria-label="Current path">
@@ -44,4 +60,17 @@
       </Button>
     {/each}
   </div>
+  {#if onReveal && current}
+    {@const target = current}
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      type="button"
+      onclick={() => onReveal(target, "reveal")}
+      aria-label={`Reveal ${target.name} in the file manager`}
+      title={revealLabel}
+    >
+      <ExternalLink class="size-3.5" />
+    </Button>
+  {/if}
 </nav>

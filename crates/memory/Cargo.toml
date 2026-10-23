@@ -1,0 +1,28 @@
+[package]
+name                 = "spacelens-memory"
+description          = "Process and memory sampling, grouping and safe termination planning for Space Lens."
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+repository.workspace = true
+version.workspace    = true
+
+[features]
+default = []
+appkit  = ["dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation"]
+
+[dependencies]
+serde      = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+thiserror  = "2"
+# Pinned to match the engine; "user" is added only if Process::user_id needs it.
+sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mach2   = "0.7.0"
+objc2   = { version = "0.6.4", optional = true }
+objc2-app-kit = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSRunningApplication", "NSWorkspace"] }
+objc2-foundation = { version = "0.3.2", optional = true, default-features = false, features = ["std", "NSArray", "NSString"] }

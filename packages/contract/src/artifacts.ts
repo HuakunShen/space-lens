@@ -11,8 +11,41 @@ import {
   CleanupPlanSchema,
 } from './cleanup.ts'
 import { EventEnvelopeSchema } from './events.ts'
+import {
+  AuditLogSchema,
+  AuditRecordSchema,
+  CandidateReasonSchema,
+  CandidatesRequestSchema,
+  FreeUpCandidateSchema,
+  FreeUpCandidatesSchema,
+  GroupSeriesSchema,
+  HistoryRequestSchema,
+  MemoryBreakdownSchema,
+  MemoryHistorySchema,
+  MemoryPressureSchema,
+  MemorySnapshotSchema,
+  ProcessGroupSchema,
+  ProcessRowSchema,
+  SystemPointSchema,
+  TerminateExecuteRequestSchema,
+  TerminateOutcomeSchema,
+  TerminatePlanEntrySchema,
+  TerminatePlanRequestSchema,
+  TerminatePlanSchema,
+  TerminateRefusalSchema,
+  TerminateResultSchema,
+  TerminateTargetSchema,
+} from './memory.ts'
 import { DiscoveryKindSchema, DiscoveryRequestSchema, DiscoveryItemSchema, DiscoveryPageSchema } from './discovery.ts'
-import { AppAuditRequestSchema, AppAuditReportSchema, AppIconRequestSchema, AppIconSchema, AppScanOriginSchema, AppScanStartRequestSchema, RecentAppScanSchema } from './apps.ts'
+import {
+  AppAuditRequestSchema,
+  AppAuditReportSchema,
+  AppIconRequestSchema,
+  AppIconSchema,
+  AppScanOriginSchema,
+  AppScanStartRequestSchema,
+  RecentAppScanSchema,
+} from './apps.ts'
 import {
   LocalScanReportSchema,
   LocalScanNodeSchema,
@@ -23,6 +56,7 @@ import {
   ScanVolumeSchema,
 } from './local-scan.ts'
 import { ProblemSchema } from './problem.ts'
+import { RevealPathRequestSchema, RevealPathResultSchema } from './reveal.ts'
 import { ScanStartRequestSchema, ScanStatusSchema, TreeSliceSchema, TreeSliceRequestSchema } from './scan.ts'
 import { SessionExchangeRequestSchema, SessionSchema } from './session.ts'
 import { API_MAJOR, CONTRACT_VERSION } from './version.ts'
@@ -55,6 +89,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   AppAuditReport: AppAuditReportSchema,
   AppIconRequest: AppIconRequestSchema,
   AppIcon: AppIconSchema,
+  RevealPathRequest: RevealPathRequestSchema,
+  RevealPathResult: RevealPathResultSchema,
   AppScanOrigin: AppScanOriginSchema,
   AppScanStartRequest: AppScanStartRequestSchema,
   RecentAppScan: RecentAppScanSchema,
@@ -71,6 +107,29 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   Problem: ProblemSchema,
   AiConfigView: AiConfigViewSchema,
   AiChatRequest: AiChatRequestSchema,
+  MemoryBreakdown: MemoryBreakdownSchema,
+  MemoryPressure: MemoryPressureSchema,
+  ProcessRow: ProcessRowSchema,
+  ProcessGroup: ProcessGroupSchema,
+  MemorySnapshot: MemorySnapshotSchema,
+  TerminateTarget: TerminateTargetSchema,
+  TerminatePlanRequest: TerminatePlanRequestSchema,
+  TerminatePlanEntry: TerminatePlanEntrySchema,
+  TerminateRefusal: TerminateRefusalSchema,
+  TerminatePlan: TerminatePlanSchema,
+  TerminateExecuteRequest: TerminateExecuteRequestSchema,
+  TerminateResult: TerminateResultSchema,
+  TerminateOutcome: TerminateOutcomeSchema,
+  CandidateReason: CandidateReasonSchema,
+  FreeUpCandidate: FreeUpCandidateSchema,
+  FreeUpCandidates: FreeUpCandidatesSchema,
+  CandidatesRequest: CandidatesRequestSchema,
+  SystemPoint: SystemPointSchema,
+  GroupSeries: GroupSeriesSchema,
+  MemoryHistory: MemoryHistorySchema,
+  HistoryRequest: HistoryRequestSchema,
+  AuditRecord: AuditRecordSchema,
+  AuditLog: AuditLogSchema,
 }
 
 export function buildContractArtifacts(): Record<string, string> {

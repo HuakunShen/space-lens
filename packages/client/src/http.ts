@@ -5,6 +5,8 @@ import type {
   AppIconRequest,
   AiChatRequest,
   AiConfigView,
+  AuditLog,
+  CandidatesRequest,
   Capabilities,
   ChildrenPage,
   ChildrenPageRequest,
@@ -14,8 +16,13 @@ import type {
   CleanupPlanRequest,
   DiscoveryRequest,
   DiscoveryPage,
+  FreeUpCandidates,
   Health,
+  HistoryRequest,
+  MemoryHistory,
+  MemorySnapshot,
   Problem,
+  RevealAction,
   RootsResponse,
   VolumesResponse,
   ScanListResponse,
@@ -23,10 +30,22 @@ import type {
   ScanStartRequest,
   ScanStatus,
   Session,
+  TerminateExecuteRequest,
+  TerminateOutcome,
+  TerminatePlan,
+  TerminatePlanRequest,
   TreeSlice,
   TreeSliceRequest,
 } from '@space-lens/contract'
-import { ScanListResponseSchema } from '@space-lens/contract'
+import {
+  AuditLogSchema,
+  FreeUpCandidatesSchema,
+  MemoryHistorySchema,
+  MemorySnapshotSchema,
+  ScanListResponseSchema,
+  TerminateOutcomeSchema,
+  TerminatePlanSchema,
+} from '@space-lens/contract'
 
 /** One client-side failure kind, shaped like the wire Problem. */
 export class ServiceError extends Error {
@@ -101,6 +120,10 @@ export function createHttpService(options: HttpServiceOptions) {
         method: 'POST',
         body: JSON.stringify({ ticket, ...(password ? { password } : {}) }),
       }),
+    // Development only: the host opens a session without a ticket when it was
+    // started with `--dev-open-session`. Hosts without the flag answer
+    // Unavailable, and the caller falls back to the pairing form.
+    devSession: () => request<Session>('/api/v1/session/dev', { method: 'POST', body: '{}' }),
     capabilities: () => request<Capabilities>('/api/v1/capabilities'),
     roots: () => request<RootsResponse>('/api/v1/roots'),
     volumes: () => request<VolumesResponse>('/api/v1/volumes'),
@@ -121,6 +144,15 @@ export function createHttpService(options: HttpServiceOptions) {
       request<AppAuditReport>('/api/v1/apps/audit', { method: 'POST', body: JSON.stringify(body) }),
     appIcon: (body: AppIconRequest) =>
       request<AppIcon>('/api/v1/apps/icon', { method: 'POST', body: JSON.stringify(body) }),
+    /**
+     * Opens a scanned path in the host's own file manager. The host resolves
+     * the path against the roots it serves and refuses anything outside them.
+     */
+    revealPath: (body: { path: string; action?: RevealAction }) =>
+      request<{ revealed: boolean }>('/api/v1/host/reveal', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     plan: (body: CleanupPlanRequest) =>
       request<CleanupPlan>('/api/v1/cleanup/plan', { method: 'POST', body: JSON.stringify(body) }),
     execute: (body: CleanupExecuteRequest) =>
@@ -161,6 +193,28 @@ export function createHttpService(options: HttpServiceOptions) {
       const tail = decoder.decode()
       if (tail !== '') onChunk(tail)
     },
+    // Memory view and process control (§4.5/§4.8): one frozen route per method,
+    // and every reply is re-validated against the same contract schema the host
+    // used, so a drifted child reply fails here instead of in the UI.
+    memorySnapshot: async () =>
+      MemorySnapshotSchema.parse(await request<unknown>('/api/v1/memory/snapshot')),
+    memoryHistory: async (body: HistoryRequest) =>
+      MemoryHistorySchema.parse(
+        await request<unknown>('/api/v1/memory/history', { method: 'POST', body: JSON.stringify(body) }),
+      ),
+    memoryCandidates: async (body: CandidatesRequest) =>
+      FreeUpCandidatesSchema.parse(
+        await request<unknown>('/api/v1/memory/candidates', { method: 'POST', body: JSON.stringify(body) }),
+      ),
+    memoryAudit: async () => AuditLogSchema.parse(await request<unknown>('/api/v1/memory/audit')),
+    memoryTerminatePlan: async (body: TerminatePlanRequest) =>
+      TerminatePlanSchema.parse(
+        await request<unknown>('/api/v1/memory/terminate/plan', { method: 'POST', body: JSON.stringify(body) }),
+      ),
+    memoryTerminateExecute: async (body: TerminateExecuteRequest) =>
+      TerminateOutcomeSchema.parse(
+        await request<unknown>('/api/v1/memory/terminate/execute', { method: 'POST', body: JSON.stringify(body) }),
+      ),
   }
 }
 

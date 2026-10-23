@@ -1,6 +1,7 @@
 use anyhow::Result;
 use base64::Engine as _;
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use memory_cmd::MemoryCommand;
 use space_lens::cloud::{
   build_eviction_plan, execute_eviction_plan, inspect_item, EvictionOutcome, EvictionPlan,
   NativeICloudBackend, ScanOptions as CloudScanOptions,
@@ -12,11 +13,14 @@ use space_lens::{
   ScanOptions,
 };
 use spacelens_app_audit::{audit_installed_apps, AppAuditOptions};
+use spacelens_storage_usage::{storage_breakdown, ScannedRoot};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 #[cfg(feature = "mcp")]
 mod mcp;
+
+mod memory_cmd;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -42,6 +46,10 @@ enum Command {
   AppAudit(AppAuditArgs),
   #[command(name = "app-icon")]
   AppIcon(AppIconArgs),
+  #[command(name = "storage-usage")]
+  StorageUsage(StorageUsageArgs),
+  #[command(subcommand)]
+  Memory(MemoryCommand),
   #[cfg(feature = "mcp")]
   Mcp,
 }
@@ -184,6 +192,17 @@ struct AppIconArgs {
   path: PathBuf,
 }
 
+/// APFS accounting for a finished scan: each `--root` pairs, in order, with
+/// the `--scanned-bytes` the scan measured under it. Prints `null` when no
+/// root is on APFS.
+#[derive(Debug, Args)]
+struct StorageUsageArgs {
+  #[arg(long = "root", value_name = "PATH", required = true)]
+  roots: Vec<PathBuf>,
+  #[arg(long = "scanned-bytes", value_name = "BYTES", required = true)]
+  scanned_bytes: Vec<u64>,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum IgnoredModeArg {
   Exclude,
@@ -208,6 +227,8 @@ fn main() -> Result<()> {
     Command::ICloud(args) => run_icloud(args),
     Command::AppAudit(args) => run_app_audit(args),
     Command::AppIcon(args) => run_app_icon(args),
+    Command::StorageUsage(args) => run_storage_usage(args),
+    Command::Memory(command) => memory_cmd::run(command),
     #[cfg(feature = "mcp")]
     Command::Mcp => mcp::run(),
   }
@@ -537,6 +558,19 @@ fn new_audit_id() -> String {
     first.finish(),
     second.finish() & 0xFFFF_FFFF
   )
+}
+
+fn run_storage_usage(args: StorageUsageArgs) -> Result<()> {
+  if args.roots.len() != args.scanned_bytes.len() {
+    anyhow::bail!("storage-usage needs one --scanned-bytes per --root");
+  }
+  let roots: Vec<ScannedRoot> = args
+    .roots
+    .into_iter()
+    .zip(args.scanned_bytes)
+    .map(|(path, bytes)| ScannedRoot { path, bytes })
+    .collect();
+  print_json(&storage_breakdown(&roots))
 }
 
 fn run_app_audit(args: AppAuditArgs) -> Result<()> {

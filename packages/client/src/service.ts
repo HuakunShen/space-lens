@@ -25,6 +25,17 @@ import type {
   DiscoveryRequest,
   DiscoveryPage,
   TreeSlice,
+  AuditLog,
+  CandidatesRequest,
+  FreeUpCandidates,
+  HistoryRequest,
+  MemoryHistory,
+  MemorySnapshot,
+  RevealAction,
+  TerminateExecuteRequest,
+  TerminateOutcome,
+  TerminatePlan,
+  TerminatePlanRequest,
 } from '@space-lens/contract'
 
 /**
@@ -66,6 +77,14 @@ export interface WorkbenchService {
    * hosts predate the host request. */
   revealAppLocation?(body: { appId: string; path: string }): Promise<{ revealed: boolean }>
   /**
+   * Opens a *scanned* path in the host's own file manager (Finder / Explorer /
+   * the Linux file manager). `reveal` shows the item in its parent folder,
+   * selected; `open` opens a folder in the file manager itself. The path is
+   * resolved by the host against the roots it serves, so a path outside them
+   * is refused there. Optional: older hosts predate the route and the request.
+   */
+  revealPath?(body: { path: string; action?: RevealAction }): Promise<{ revealed: boolean }>
+  /**
    * Opens the host's own folder picker and answers the one absolute path
    * chosen, or `null` for a cancelled dialog. The affordance is gated by the
    * capabilities' `host.folderPicker` flag — the flag, not this method's
@@ -79,6 +98,23 @@ export interface WorkbenchService {
    */
   aiConfig?(): Promise<AiConfigView>
   aiChat?(body: AiChatRequest): Promise<unknown>
+  /**
+   * Memory view and process control (§4.8). Optional as a group: older hosts
+   * predate the routes, and the gate checks the capability *and* the method.
+   * Every host decides safety in Rust — these only carry the frozen payloads.
+   */
+  memorySnapshot?(): Promise<MemorySnapshot>
+  memoryHistory?(body: HistoryRequest): Promise<MemoryHistory>
+  memoryCandidates?(body: CandidatesRequest): Promise<FreeUpCandidates>
+  memoryAudit?(): Promise<AuditLog>
+  memoryTerminatePlan?(body: TerminatePlanRequest): Promise<TerminatePlan>
+  memoryTerminateExecute?(body: TerminateExecuteRequest): Promise<TerminateOutcome>
+  /**
+   * Reopens an app quit earlier, resolved from an audit record's bundle id.
+   * Desktop-only: the HTTP host answers nothing here (the `reopen` capability
+   * flag is false for `serve`), so the method exists only on the Tauri adapter.
+   */
+  reopenApp?(body: { auditId: string }): Promise<{ reopened: boolean }>
   /**
    * Streams one chat completion through the host. The host sends `stream: true`
    * and forwards the upstream SSE bytes as raw text chunks; `onChunk` receives

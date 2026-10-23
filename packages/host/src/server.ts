@@ -12,6 +12,8 @@ import { resolveServeConfig } from './config.ts'
 import { EventRing } from './events.ts'
 import { buildApp } from './app.ts'
 import { resolveLocalScanBin } from './local-process.ts'
+import { createMemoryBridge, type MemoryBridge } from './memory.ts'
+import { hostPlatform } from './reveal.ts'
 import { ScanManager } from './scan-store.ts'
 import { createSystemTrash } from './trash.ts'
 
@@ -62,9 +64,17 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
   const scopes = [
     'scan:read',
     'scan:start',
+    // Reveal a scanned path in this host's own file manager. It never writes
+    // and never leaves the roots the operator configured, so it rides along
+    // with the read scopes.
+    'host:reveal',
     ...(config.allowCleanup ? ['cleanup:plan', 'cleanup:execute'] : []),
     // The AI scope is granted only when the operator configured an advisor.
     ...(config.ai !== null ? ['ai:chat'] : []),
+    // Memory scopes follow the flags: read-only with --allow-memory, control
+    // additionally with --allow-process-control (which requires a local host).
+    ...(config.allowMemory ? ['memory:read'] : []),
+    ...(config.allowProcessControl ? ['memory:terminate'] : []),
   ]
 
   const auth = new AuthService({
@@ -94,6 +104,32 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
   } catch {
     appAuditAvailable = false
   }
+
+  // The memory view rides the same protected release CLI as protected scans.
+  // It is created only when the read-only view is enabled; if the binary does
+  // not resolve (or the child cannot say hello) the capability stays absent and
+  // every memory route answers Unavailable, while the scopes stay granted so a
+  // paired UI can tell "disabled" from "missing scope" and hide the view.
+  let memory: MemoryBridge | undefined
+  let memoryCapability: Capabilities['memory']
+  if (config.allowMemory) {
+    try {
+      memory = createMemoryBridge({ binary: resolveLocalScanBin(options.localScanBin) })
+      const hello = await memory.hello()
+      memoryCapability = {
+        sample: true,
+        terminate: config.allowProcessControl && hello.terminate,
+        gracefulAppQuit: hello.gracefulAppQuit,
+        reopen: false,
+        platform: hello.platform,
+      }
+    } catch {
+      await memory?.stop()
+      memory = undefined
+      memoryCapability = undefined
+    }
+  }
+
   const capabilities: Capabilities = {
     apiMajor: API_MAJOR,
     contractVersion: CONTRACT_VERSION,
@@ -105,9 +141,10 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
       maxConcurrent: config.maxConcurrentScans,
     },
     cleanup: { plan: config.allowCleanup, execute: config.allowCleanup, mode: config.allowCleanup ? 'trash' : 'none' },
-    host: { folderPicker: false },
+    host: { folderPicker: false, pathReveal: true, platform: hostPlatform() },
     icloud: 'unavailable',
     ai: config.ai !== null,
+    ...(memoryCapability === undefined ? {} : { memory: memoryCapability }),
   }
 
   const app = buildApp({
@@ -120,6 +157,7 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
     capabilities,
     allowlist: createClientAllowlist(config.allowCidr),
     localScanBin: options.localScanBin,
+    ...(memory === undefined ? {} : { memory }),
   })
 
   let server: ServerType | null = null
@@ -158,6 +196,7 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
   const stop = async (): Promise<void> => {
     if (stopped) return
     stopped = true
+    await memory?.stop()
     await scans.close()
     await new Promise<void>((resolve) => {
       server?.close(() => resolve())

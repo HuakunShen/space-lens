@@ -1,5 +1,6 @@
 export { default as DiskChart } from './components/lens/DiskChart.svelte'
 export { resolveScanVolume } from './lib/scan-volume'
+export { scanBaseline, type ScanBaseline, type ScanSizeRecord } from './lib/scan-progress'
 // Lens components (product)
 export { default as BreadcrumbBar } from './components/lens/BreadcrumbBar.svelte'
 export { default as ChildList } from './components/lens/ChildList.svelte'
@@ -33,6 +34,35 @@ export { default as AppearancePanel } from './components/lens/AppearancePanel.sv
 // App-shell components (connection + feedback)
 export { default as ConnectionPanel } from './components/app/ConnectionPanel.svelte'
 export { default as StateBanner } from './components/app/StateBanner.svelte'
+
+// Memory view components (§6.2). Props only: they never call the transport.
+export { default as Sparkline } from './components/memory/Sparkline.svelte'
+export { default as MemoryPressureCard } from './components/memory/MemoryPressureCard.svelte'
+export { default as MemoryBreakdownBar } from './components/memory/MemoryBreakdownBar.svelte'
+export { default as ProcessSegmentBar } from './components/memory/ProcessSegmentBar.svelte'
+export { default as ProcessTable } from './components/memory/ProcessTable.svelte'
+export { default as ProcessTree } from './components/memory/ProcessTree.svelte'
+export { default as ProcessGraph } from './components/memory/ProcessGraph.svelte'
+export { default as KindGlyph } from './components/memory/KindGlyph.svelte'
+export { default as ProcessDrawer } from './components/memory/ProcessDrawer.svelte'
+// Memory view action components (§6.2 items 6–7, §6.3, §7). Props only: the page
+// owns the transport, the Quit list and the plan/execute calls.
+export { default as QuitListPanel } from './components/memory/QuitListPanel.svelte'
+export { default as TerminateDialog } from './components/memory/TerminateDialog.svelte'
+export { default as FreeUpDialog } from './components/memory/FreeUpDialog.svelte'
+export { default as AuditLogPanel } from './components/memory/AuditLogPanel.svelte'
+export type { QuitListEntry } from './components/memory/QuitListPanel.svelte'
+export type { TableRow, StageTarget } from './components/memory/ProcessTable.svelte'
+export type { MemoryFilter, MemorySortKey, TableQuery } from './lib/memory/table.js'
+export type { ProcessForest, TreeKind, TreeNode, TreeProtection, TreeRow, TreeSearch } from './lib/memory/tree.js'
+export type {
+  GraphEdge,
+  GraphEdgeKind,
+  GraphNode,
+  GraphOptions,
+  GraphRole,
+  ProcessGraph as ProcessGraphView,
+} from './lib/memory/graph.js'
 
 // Primitives, namespaced: several export the same member names (Header,
 // Footer, …), so a blanket `export *` would be an ambiguity, not a convenience.
@@ -69,6 +99,7 @@ export {
 } from './lib/app-scan.js'
 export type { AuditAnnotation, CleanupEligibility, RecentAppEntry } from './lib/app-scan.js'
 export { cn } from './lib/utils.js'
+export { fileManagerLabel } from './lib/file-manager.js'
 export { chartEmptyMessage } from './lib/chart-empty.js'
 export {
   CHART_MODES,

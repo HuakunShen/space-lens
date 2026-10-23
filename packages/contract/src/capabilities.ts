@@ -1,8 +1,18 @@
 import { z } from 'zod'
 import { CLEANUP_MODES } from './cleanup.ts'
+import { MEMORY_PLATFORMS } from './memory.ts'
 import { API_MAJOR, CONTRACT_VERSION } from './version.ts'
 
 const UintSchema = z.number().int().nonnegative()
+
+/**
+ * The operating system the host itself runs on. The frontend uses it to name
+ * the right file manager ("Open in Finder" / "Open in Explorer" / …): for the
+ * HTTP host that is the *server's* platform, not the browser's.
+ */
+export const HOST_PLATFORMS = ['macos', 'windows', 'linux', 'unknown'] as const
+
+export type HostPlatform = (typeof HOST_PLATFORMS)[number]
 
 export const CapabilitiesSchema = z.strictObject({
   apiMajor: z.literal(API_MAJOR),
@@ -29,6 +39,13 @@ export const CapabilitiesSchema = z.strictObject({
     folderPicker: z.boolean(),
     /** Finder reveal of an allow-listed audited app location. Absent on older hosts. */
     appLocationReveal: z.boolean().optional(),
+    /**
+     * Reveal of a *scanned* path in the host's own file manager. Absent on
+     * older hosts, which never had the route.
+     */
+    pathReveal: z.boolean().optional(),
+    /** The host's operating system, so the UI can name the file manager. */
+    platform: z.enum(HOST_PLATFORMS).optional(),
   }),
   icloud: z.enum(['unavailable']),
   /**
@@ -37,6 +54,24 @@ export const CapabilitiesSchema = z.strictObject({
    * advertise it.
    */
   ai: z.boolean().optional(),
+  /**
+   * Memory view and process control (crates/memory). Absent on older hosts and
+   * on machine-mode hosts that never pass the allow flags, in which case the
+   * Memory view stays hidden.
+   */
+  memory: z
+    .strictObject({
+      /** snapshot/history/candidates/audit readable. */
+      sample: z.boolean(),
+      /** plan/execute available to this session's host config. */
+      terminate: z.boolean(),
+      /** AppKit quit works (macOS + appkit feature). */
+      gracefulAppQuit: z.boolean(),
+      /** desktop-only "Reopen" from audit. */
+      reopen: z.boolean(),
+      platform: z.enum(MEMORY_PLATFORMS),
+    })
+    .optional(),
 })
 
 export type Capabilities = z.infer<typeof CapabilitiesSchema>

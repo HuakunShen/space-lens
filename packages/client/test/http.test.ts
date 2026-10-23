@@ -34,6 +34,34 @@ describe('http service', () => {
     body = { scans: [{ ...status, state: 'unknown' }] }
     await expect(service.listScans()).rejects.toThrow()
   })
+  it('opens a ticket-less dev session on demand', async () => {
+    const service = createHttpService({
+      baseUrl: 'http://localhost',
+      getToken: () => null,
+      fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        expect(String(input)).toBe('http://localhost/api/v1/session/dev')
+        expect(init?.method).toBe('POST')
+        return jsonResponse(
+          { token: 'sls_dev', sessionId: 'sess_dev', expiresAt: '2026-10-18T00:00:00.000Z', scopes: ['scan:read'] },
+          200,
+        )
+      }) as typeof fetch,
+    })
+
+    const session = await service.devSession()
+    expect(session.token).toBe('sls_dev')
+  })
+  it('posts the reveal request with authentication and returns the flag', async () => {
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('http://localhost/api/v1/host/reveal')
+      expect(init?.method).toBe('POST')
+      expect((init?.headers as Record<string, string>).authorization).toBe('Bearer session')
+      expect(JSON.parse(init?.body as string)).toEqual({ path: '/tmp/a', action: 'open' })
+      return jsonResponse({ revealed: true }, 200)
+    }) as typeof fetch
+    const service = createHttpService({ baseUrl: 'http://localhost', getToken: () => 'session', fetchImpl })
+    expect(await service.revealPath({ path: '/tmp/a', action: 'open' })).toEqual({ revealed: true })
+  })
   it('posts discovery paging with authentication and returns totals', async () => {
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toBe('http://localhost/api/v1/discovery')

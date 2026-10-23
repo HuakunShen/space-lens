@@ -1,7 +1,14 @@
 import type { CollectorEntry, TreeNodeSummary } from '@space-lens/contract'
 import { canCollectNode, collectRefusalReason } from '@space-lens/web-ui/lib/app-scan'
 import { addSelection, selectedAncestor } from '@space-lens/web-ui/lib/selection'
-import type { CleanupRisk, StageOutcome, StageRejection, StageRequestItem } from './types.ts'
+import type {
+  CleanupRisk,
+  ProposalRow,
+  StageOutcome,
+  StageRejection,
+  StageRequestItem,
+  UnstageOutcome,
+} from './types.ts'
 
 /**
  * Slice C — the bridge from the agent's `propose_cleanup` to the existing
@@ -44,6 +51,10 @@ export interface Stager {
   stage: (items: readonly StageRequestItem[]) => Promise<StageOutcome>
   /** AI reason + risk per staged entry id (entry ids are unique per collector). */
   readonly meta: ReadonlyMap<string, StageMeta>
+  /** `LensPort['proposal']`: the live collector rows for this scan, with the AI's notes. */
+  proposal: () => Promise<ProposalRow[]>
+  /** `LensPort['unstage']`: drops this scan's rows for these node ids; never adds. */
+  unstage: (nodeIds: readonly string[]) => Promise<UnstageOutcome>
 }
 
 /**
@@ -121,5 +132,36 @@ export function createStager(options: StagerOptions): Stager {
     return { staged, rejected }
   }
 
-  return { stage, meta }
+  const toRow = (entry: CollectorEntry): ProposalRow => {
+    const detail = meta.get(entry.id)
+    return {
+      nodeId: entry.nodeId,
+      name: entry.name,
+      size: entry.size,
+      risk: detail?.risk ?? null,
+      reason: detail?.reason ?? null,
+    }
+  }
+
+  const proposal = async (): Promise<ProposalRow[]> =>
+    options
+      .collector()
+      .filter((entry) => entry.scanId === options.scanId)
+      .map(toRow)
+      .sort((a, b) => b.size - a.size)
+
+  const unstage = async (nodeIds: readonly string[]): Promise<UnstageOutcome> => {
+    const wanted = new Set(nodeIds)
+    const entries = options.collector()
+    const removed = entries.filter((entry) => entry.scanId === options.scanId && wanted.has(entry.nodeId))
+    if (removed.length > 0) {
+      const gone = new Set(removed.map((entry) => entry.id))
+      options.setCollector(entries.filter((entry) => !gone.has(entry.id)))
+      for (const id of gone) meta.delete(id)
+    }
+    const found = new Set(removed.map((entry) => entry.nodeId))
+    return { removed: removed.map(toRow), missing: [...wanted].filter((id) => !found.has(id)) }
+  }
+
+  return { stage, meta, proposal, unstage }
 }
