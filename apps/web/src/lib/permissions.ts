@@ -20,3 +20,16 @@ export async function openFullDiskAccessSettings(): Promise<void> {
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('fda_open_settings')
 }
+
+/** The `.app` the grant must list; null outside a bundled desktop app. */
+export async function readAppBundlePath(): Promise<string | null> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  const value: unknown = await invoke('fda_app_path')
+  return typeof value === 'string' ? value : null
+}
+
+/** Full Disk Access applies to a process only once it has been relaunched. */
+export async function relaunchApp(): Promise<void> {
+  const { relaunch } = await import('@tauri-apps/plugin-process')
+  await relaunch()
+}

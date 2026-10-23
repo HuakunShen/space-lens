@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte'
   import { ArrowRight, FolderSearch, FolderOpen, LoaderCircle, RefreshCw, Search } from '@lucide/svelte'
   import type { AppAuditReport } from '@space-lens/contract'
   import type { ScanStatus, ScanTarget, ScanVolume } from '../../types'
@@ -57,6 +58,8 @@
     onIcon?: (appPath: string) => Promise<string | null>
     /** Expected size of the running scan, for a determinate bar and ETA. */
     progressBaseline?: ScanBaseline | null
+    /** Notices shown at the bottom of the sidebar. */
+    sidebarFooter?: Snippet
   }
 
   let {
@@ -88,6 +91,7 @@
     onForgetApp,
     onIcon = undefined,
     progressBaseline = null,
+    sidebarFooter,
   }: Props = $props()
 
   // The host reports measured bytes, not elapsed time, so the clock is kept
@@ -235,6 +239,7 @@
         onForgetApp={onForgetApp}
         onSelect={(target) => (selectedId = target.id)}
         onCustom={() => (selectedId = 'custom')}
+        footer={sidebarFooter}
       />
     {/if}
     <section

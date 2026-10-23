@@ -60,6 +60,7 @@ pub fn run() {
       ai::ai_chat_cancel,
       permissions::fda_status,
       permissions::fda_open_settings,
+      permissions::fda_app_path,
     ])
     .run(tauri::generate_context!())
     .expect("error while running Space Lens desktop");

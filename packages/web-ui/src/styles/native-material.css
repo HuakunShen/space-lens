@@ -16,6 +16,8 @@
     --card: rgb(255 255 255 / calc(92% * var(--glass-strength)));
     --control: rgb(255 255 255 / calc(95% * var(--glass-strength)));
     --native-content: rgb(255 255 255 / calc(98% * var(--glass-strength)));
+    /* The window itself: what shows wherever no panel covers the material. */
+    --window-fill: rgb(246 246 246 / calc(84% * var(--glass-strength)));
   }
   :root.dark[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) {
     --glass-strength: 1;
@@ -26,12 +28,13 @@
     --native-content: rgb(18 18 18 / calc(97% * var(--glass-strength)));
     --muted: rgb(255 255 255 / calc(7% * var(--glass-strength)));
     --muted-foreground: #b0b0b0;
+    --window-fill: rgb(22 22 22 / calc(86% * var(--glass-strength)));
   }
 }
 @layer components {
   /* Keep data surfaces readable even over a bright wallpaper or inactive glass. */
-  :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy']) body {
-    background: transparent;
+  .sidebar-notice {
+    margin: 0.5rem 0.25rem 0;
   }
   :root[macos]:is([data-backdrop='glass'], [data-backdrop='vibrancy'])
     :is(.workspace-content, .scan-picker .picker-layout > section) {

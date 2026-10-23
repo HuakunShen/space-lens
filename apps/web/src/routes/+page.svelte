@@ -1528,7 +1528,6 @@
     </main>
   {:else}
     <div class="relative">
-      {#if __SPACLENS_DESKTOP__}<FullDiskAccessNotice />{/if}
       <ScanPicker
         {targets}
         volumes={workbench.volumes}
@@ -1548,6 +1547,7 @@
               ? 'Scan cancelled. Choose a location to start again.'
               : null)}
         status={workbench.status}
+        sidebarFooter={__SPACLENS_DESKTOP__ ? fdaNotice : undefined}
         progressBaseline={workbench.status?.state === 'scanning'
           ? scanBaseline(
               workbench.status.label,
@@ -1630,6 +1630,7 @@
           onSelectApp={(appId) => void startAppScan(appId)}
           onForgetApp={forgetRecentApp}
           switchingBlocked={workbench.deleting || planning}
+          footer={__SPACLENS_DESKTOP__ ? fdaNotice : undefined}
           onSettings={() => (settingsOpen = true)}
           volume={scanVolume}
           scanBytes={workbench.status?.bytesScanned ?? 0}
@@ -1962,6 +1963,7 @@
     />
   </div>
 {/if}
+{#snippet fdaNotice()}<FullDiskAccessNotice />{/snippet}
 <AppearancePanel
   open={settingsOpen}
   style={appearance.style}

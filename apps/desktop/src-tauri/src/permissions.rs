@@ -53,6 +53,18 @@ pub fn fda_status() -> FullDiskAccess {
   status()
 }
 
+/// The `.app` this process runs from: the entry Full Disk Access must list.
+/// Copies of the app (an installed one, a build folder) are separate entries,
+/// so the notice names this one.
+#[tauri::command]
+pub fn fda_app_path() -> Option<String> {
+  let exe = std::env::current_exe().ok()?;
+  exe
+    .ancestors()
+    .find(|path| path.extension().is_some_and(|ext| ext == "app"))
+    .map(|path| path.display().to_string())
+}
+
 /// Opens System Settings at Privacy & Security → Full Disk Access.
 #[tauri::command]
 pub fn fda_open_settings() -> Result<(), String> {
