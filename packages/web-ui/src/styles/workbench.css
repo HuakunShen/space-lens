@@ -952,9 +952,13 @@
   }
   .settings-fields {
     padding-top: 12px;
-    overflow: auto;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
+  /* A fieldset's default min-width is its content's, so one nowrap child
+     widened the whole group past the panel and forced a sideways scroll. */
   .settings-fields fieldset {
+    min-width: 0;
     margin-bottom: 25px;
   }
   .settings-fields legend {
@@ -969,15 +973,21 @@
     line-height: 1.6;
     margin-bottom: 12px;
   }
+  /* Windows and Linux float the legend; the row must start below it, not
+     squeeze into the space beside it. */
   .update-row {
+    clear: both;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
   }
   .update-version {
+    min-width: 0;
     font-size: 12px;
     color: var(--muted-foreground);
+    overflow-wrap: anywhere;
   }
   .update-action {
     font-size: 12px;
