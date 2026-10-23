@@ -136,6 +136,16 @@ pub struct AppScanStartRequest {
   pub app_id: String,
 }
 
+/// Whether the guarded scanner (`kuntu_scan::local_scan`) can walk here. It
+/// pins directories by file descriptor, which only exists on Unix; elsewhere
+/// every pinned call returns `Unsupported`, so a `localOnly` scan would finish
+/// "ready" with empty roots. On those platforms a `localOnly` request runs the
+/// regular walker instead: it reads metadata, plus `.gitignore` files when
+/// asked to respect them, and reports no progress until it finishes.
+pub fn protected_scan_supported() -> bool {
+  cfg!(unix)
+}
+
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanStartRequest {
@@ -779,7 +789,7 @@ impl EngineStore {
   pub fn start_scan(&mut self, request: ScanStartRequest) -> EngineResult<ScanSession> {
     // Branch before canonicalize/lstat. Protected work delegates all metadata
     // access to the guarded scanner and indexes only its returned snapshot.
-    if request.local_only {
+    if request.local_only && protected_scan_supported() {
       let (session, task) = self.prepare_local_scan(request)?;
       let report = scan_local_directory_with_progress(task.options, task.cancellation, |_| {});
       let status = self.finish_local_scan(&session.scan_id, report)?;
@@ -3179,10 +3189,6 @@ mod retention_tests {
     assert_eq!(store.status(&third.scan_id).unwrap().state, "scanning");
   }
 
-  // Needs a child of the fixture root to plan against; the protected local
-  // scanner lists none under a Windows temp dir (verbatim `\\?\` root), so
-  // this runs where that scanner enumerates (macOS, Linux).
-  #[cfg(not(windows))]
   #[test]
   fn small_scans_stay_within_the_node_budget_and_their_plans_go_with_them() {
     let fixture = Fixture::new();
