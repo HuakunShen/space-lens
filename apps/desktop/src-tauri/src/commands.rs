@@ -740,7 +740,9 @@ pub async fn sl_submit(
             .ok_or_else(|| json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}))?;
     drop(sessions);
     match request {
-      SubmitRequest::ScanStart { request } if request.local_only => {
+      // Where the guarded scanner cannot walk (Windows), a localOnly request
+      // falls through to the regular scan below rather than finishing empty.
+      SubmitRequest::ScanStart { request } if request.local_only && crate::engine::protected_scan_supported() => {
         let prepared = bundle.engine.lock().unwrap().prepare_local_scan(request);
         match prepared {
           Ok((session, task)) => {
