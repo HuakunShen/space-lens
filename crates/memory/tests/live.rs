@@ -57,6 +57,24 @@ mod portable {
       second_own.cpu_percent.is_some(),
       "the second sample has a previous tick to diff CPU usage against"
     );
+    assert!(
+      second_own
+        .command
+        .as_deref()
+        .is_some_and(|command| !command.trim().is_empty()),
+      "the sampler reads its own command line"
+    );
+    assert_ne!(
+      second_own.state,
+      spacelens_memory::ProcessState::Unknown,
+      "a live process has a known scheduler state"
+    );
+    if cfg!(target_os = "linux") {
+      assert!(
+        second_own.threads.is_some_and(|threads| threads > 0),
+        "linux reports the tasks of a live process"
+      );
+    }
 
     assert!(second.system.total_bytes > 0, "total memory is reported");
     assert!(
@@ -107,6 +125,11 @@ mod macos {
     assert!(
       footprint > 0,
       "the footprint of a live process is never zero"
+    );
+
+    assert!(
+      macos_own.threads.is_some_and(|threads| threads > 0),
+      "the macOS sampler reads a live thread count"
     );
 
     let drift = macos_own.start_time_us.abs_diff(sysinfo_own.start_time_us);
@@ -233,6 +256,11 @@ mod unix_signal {
       uid,
       name: "sleep".to_string(),
       exe: Some("/bin/sleep".into()),
+      command: Some("worker --job 42".to_string()),
+      user: Some("hk".to_string()),
+      state: spacelens_memory::ProcessState::Sleeping,
+      threads: Some(2),
+      listening_ports: vec![],
       cpu_percent: None,
       footprint_bytes: None,
       resident_bytes: None,

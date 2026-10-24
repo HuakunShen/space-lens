@@ -280,3 +280,32 @@ fn every_process_has_a_row_and_its_group_lists_it() {
     assert!(group.pids.contains(&group.main_pid));
   }
 }
+
+#[test]
+fn another_users_command_line_is_never_exposed() {
+  let process = RawProcess {
+    pid: 7001,
+    ppid: Some(1),
+    start_time_us: 1_700_000_000_000_000,
+    uid: Some(502),
+    name: "secret-agent".to_string(),
+    exe: Some("/usr/local/bin/secret-agent".into()),
+    command: Some("/usr/local/bin/secret-agent --token hunter2".to_string()),
+    user: Some("other".to_string()),
+    state: spacelens_memory::ProcessState::Sleeping,
+    threads: Some(4),
+    listening_ports: vec![],
+    cpu_percent: None,
+    footprint_bytes: None,
+    resident_bytes: None,
+    virtual_bytes: None,
+    zombie: false,
+  };
+  let (_, rows) = build_groups(&[process], &[], None, Some(501));
+  assert_eq!(rows.len(), 1);
+  assert_eq!(
+    rows[0].command, None,
+    "another account's argv stays private"
+  );
+  assert_eq!(rows[0].user.as_deref(), Some("other"));
+}

@@ -52,6 +52,24 @@ pub enum ProcessKind {
   Other,
 }
 
+/// The scheduler state of a process at sample time.
+///
+/// The wire keeps six stable states: the operating systems disagree on the
+/// finer points (macOS `SSTOP` vs Linux `T`/`t`, kernel threads, traced
+/// processes), so anything outside these buckets is `Unknown` rather than a
+/// guess.
+#[non_exhaustive]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProcessState {
+  Running,
+  Sleeping,
+  Idle,
+  Stopped,
+  Zombie,
+  Unknown,
+}
+
 /// Why a process must not be terminated.
 #[non_exhaustive]
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -228,6 +246,18 @@ pub struct ProcessRow {
   pub virtual_bytes: Option<u64>,
   pub restricted: bool,
   pub protection: Option<Protection>,
+  /// The full command line, joined with spaces. `None` when the kernel does
+  /// not let this user read it (another account, restricted, or a platform
+  /// without a reader). Capped at [`crate::group::MAX_COMMAND_BYTES`].
+  pub command: Option<String>,
+  /// The owning account name, when it can be resolved.
+  pub user: Option<String>,
+  /// The scheduler state at sample time.
+  pub state: ProcessState,
+  /// The number of threads, when the platform reports it.
+  pub threads: Option<u32>,
+  /// TCP ports this process is listening on, sorted ascending.
+  pub listening_ports: Vec<u16>,
 }
 
 /// A group of related processes treated as one unit.

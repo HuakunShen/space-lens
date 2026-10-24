@@ -37,6 +37,13 @@ const USER_APP_PREFIXES: &[&str] = &[
 
 /// The longest wire `name` (`String /* ≤ 256 bytes */` in §4.1).
 const MAX_NAME_BYTES: usize = 256;
+/// The longest wire command line. A command can be long (Electron apps pass
+/// dozens of switches); the table shows a prefix and the drawer wraps it, so
+/// anything longer is truncated on a character boundary.
+pub const MAX_COMMAND_BYTES: usize = 4096;
+/// The longest wire account name; POSIX names are far shorter, but a
+/// directory-service account can be unusual.
+const MAX_USER_BYTES: usize = 128;
 
 /// The outermost ancestor of `exe` whose file name ends in `.app`, if any.
 ///
@@ -215,25 +222,41 @@ pub fn build_groups(
   let mut rows: Vec<ProcessRow> = processes
     .iter()
     .enumerate()
-    .map(|(index, process)| ProcessRow {
-      pid: process.pid,
-      ppid: process.ppid,
-      start_time_us: process.start_time_us,
-      name: clamp_name(&process.name),
-      owned_by_current_user: owns_process(process, current_uid),
-      group_id: group_ids[index].clone(),
-      kind: classify_kind(
-        process,
-        bundles[index].as_deref(),
-        apps_by_pid.get(&process.pid).copied(),
-        current_uid,
-      ),
-      cpu_percent: process.cpu_percent,
-      footprint_bytes: process.footprint_bytes,
-      resident_bytes: process.resident_bytes,
-      virtual_bytes: process.virtual_bytes,
-      restricted: process.footprint_bytes.is_none(),
-      protection: None,
+    .map(|(index, process)| {
+      let owned = owns_process(process, current_uid);
+      ProcessRow {
+        pid: process.pid,
+        ppid: process.ppid,
+        start_time_us: process.start_time_us,
+        name: clamp_name(&process.name),
+        owned_by_current_user: owned,
+        group_id: group_ids[index].clone(),
+        kind: classify_kind(
+          process,
+          bundles[index].as_deref(),
+          apps_by_pid.get(&process.pid).copied(),
+          current_uid,
+        ),
+        cpu_percent: process.cpu_percent,
+        footprint_bytes: process.footprint_bytes,
+        resident_bytes: process.resident_bytes,
+        virtual_bytes: process.virtual_bytes,
+        restricted: process.footprint_bytes.is_none(),
+        protection: None,
+        // §6.1: another account's argv is never exposed, even on a platform
+        // where the kernel happens to make it readable.
+        command: owned
+          .then_some(process.command.as_deref())
+          .flatten()
+          .and_then(|command| clamp_text(command, MAX_COMMAND_BYTES)),
+        user: process
+          .user
+          .as_deref()
+          .and_then(|user| clamp_text(user, MAX_USER_BYTES)),
+        state: process.state,
+        threads: process.threads,
+        listening_ports: process.listening_ports.clone(),
+      }
     })
     .collect();
   rows.sort_by_key(|row| row.pid);
@@ -296,14 +319,24 @@ fn group_name(
 
 /// Truncate a name to at most [`MAX_NAME_BYTES`] bytes on a UTF-8 boundary.
 fn clamp_name(name: &str) -> String {
-  if name.len() <= MAX_NAME_BYTES {
-    return name.to_string();
+  clamp_text(name, MAX_NAME_BYTES).unwrap_or_default()
+}
+
+/// A non-empty string, truncated to at most `max` bytes on a UTF-8 boundary.
+/// An empty or whitespace-only value is `None`, never `Some("")`.
+fn clamp_text(value: &str, max: usize) -> Option<String> {
+  let value = value.trim();
+  if value.is_empty() {
+    return None;
   }
-  let mut end = MAX_NAME_BYTES;
-  while end > 0 && !name.is_char_boundary(end) {
+  if value.len() <= max {
+    return Some(value.to_string());
+  }
+  let mut end = max;
+  while end > 0 && !value.is_char_boundary(end) {
     end -= 1;
   }
-  name[..end].to_string()
+  Some(value[..end].to_string())
 }
 
 /// Whether the process belongs to the current user.

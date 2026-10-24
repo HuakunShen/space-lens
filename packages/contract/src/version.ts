@@ -7,4 +7,4 @@ export const SERVICE_NAME = 'space-lens-serve'
  */
 export const API_MAJOR = 1
 
-export const CONTRACT_VERSION = '1.0.0'
+export const CONTRACT_VERSION = '1.1.0'

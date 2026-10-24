@@ -18,6 +18,7 @@
 use crate::error::MemoryError;
 use crate::model::{MemoryBreakdown, MemoryPressure, Platform, PressureLevel, PressureSource};
 use crate::platform::portable::PortableSampler;
+use crate::platform::ports::ListeningPorts;
 use crate::raw::{RawSample, VmPages};
 use crate::sampler::ProcessSampler;
 use std::collections::{HashMap, HashSet};
@@ -40,6 +41,8 @@ pub struct MacSampler {
   /// so a pid reused after its process exited is re-read instead of serving a
   /// stale identity. Pruned to the live keys on every tick.
   starts: HashMap<(u32, u64), u64>,
+  /// Listening TCP ports, refreshed at most every ten seconds.
+  ports: ListeningPorts,
 }
 
 impl MacSampler {
@@ -48,6 +51,7 @@ impl MacSampler {
     MacSampler {
       portable: PortableSampler::new(),
       starts: HashMap::new(),
+      ports: ListeningPorts::new(),
     }
   }
 }
@@ -65,6 +69,7 @@ impl ProcessSampler for MacSampler {
 
   fn sample(&mut self) -> Result<RawSample, MemoryError> {
     let mut sample = self.portable.sample()?;
+    self.ports.refresh_if_stale();
 
     let mut live: HashSet<(u32, u64)> = HashSet::with_capacity(sample.processes.len());
     for process in &mut sample.processes {
@@ -77,6 +82,8 @@ impl ProcessSampler for MacSampler {
         process.start_time_us = exact;
       }
       process.footprint_bytes = footprint_bytes(process.pid);
+      process.threads = thread_count(process.pid);
+      process.listening_ports = self.ports.for_pid(process.pid).to_vec();
     }
     self.starts.retain(|key, _| live.contains(key));
 
@@ -98,6 +105,26 @@ fn footprint_bytes(pid: u32) -> Option<u64> {
     )
   };
   (result == 0).then_some(info.ri_phys_footprint)
+}
+
+/// The live thread count of `pid`, from `proc_pidinfo(PROC_PIDTASKINFO)`.
+///
+/// sysinfo's `Process::tasks()` only exists on Linux, so macOS reads the count
+/// the kernel keeps in `proc_taskinfo` instead. Other users' processes still
+/// answer this call with a task count, so it is not gated on the footprint read.
+fn thread_count(pid: u32) -> Option<u32> {
+  let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+  let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
+  let result = unsafe {
+    libc::proc_pidinfo(
+      pid as libc::c_int,
+      libc::PROC_PIDTASKINFO,
+      0,
+      &mut info as *mut libc::proc_taskinfo as *mut libc::c_void,
+      size,
+    )
+  };
+  (result == size).then_some(info.pti_threadnum.max(0) as u32)
 }
 
 /// The exact start time of `pid` in microseconds since the Unix epoch, from

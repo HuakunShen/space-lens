@@ -28,7 +28,7 @@ use spacelens_storage_usage::{storage_breakdown, ScannedRoot};
 
 pub const EVENT_NAME: &str = "spacelens://event";
 pub const API_MAJOR: u32 = 1;
-pub const CONTRACT_VERSION: &str = "1.0.0";
+pub const CONTRACT_VERSION: &str = "1.1.0";
 pub const SERVICE_INSTANCE_ID: &str = "inst_desktop";
 
 /// One connected frontend session: its own engine store and event sink.

@@ -18,6 +18,9 @@ pub mod appkit;
 #[cfg(target_os = "macos")]
 pub mod macos;
 
+#[cfg(target_os = "macos")]
+pub mod ports;
+
 #[cfg(unix)]
 pub mod unix_signal;
 
