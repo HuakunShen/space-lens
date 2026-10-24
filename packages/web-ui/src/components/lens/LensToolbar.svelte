@@ -4,6 +4,8 @@
     'toolbar-icon macos:size-7 macos:rounded-md linux:size-9 linux:rounded-lg linux:bg-(--control) linux:text-foreground linux:shadow-xs windows:size-8 windows:rounded-[4px] focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none'
   interface Props {
     title: string
+    /** Secondary line under the title; defaults to the product name. */
+    subtitle?: string
     logo?: string
     mode?: string
     chromeInset?: string
@@ -25,6 +27,7 @@
   }
   let {
     title,
+    subtitle = 'Space Lens',
     logo,
     mode = 'browser',
     chromeInset = 'px-4',
@@ -68,7 +71,7 @@
     <strong class="macos:text-sm linux:text-sm windows:hidden" data-tauri-drag-region>{title}</strong>
     <span
       class="macos:text-xs linux:text-xs windows:text-xs windows:font-medium windows:text-foreground"
-      data-tauri-drag-region>Space Lens</span
+      data-tauri-drag-region>{subtitle}</span
     >
   </div>
   <div class="toolbar-spacer" data-tauri-drag-region></div>

@@ -44,6 +44,8 @@ export { default as ProcessTable } from './components/memory/ProcessTable.svelte
 export { default as ProcessTree } from './components/memory/ProcessTree.svelte'
 export { default as ProcessGraph } from './components/memory/ProcessGraph.svelte'
 export { default as KindGlyph } from './components/memory/KindGlyph.svelte'
+export { default as ProcessStateDot } from './components/memory/ProcessStateDot.svelte'
+export { default as StaleProcessesPanel } from './components/memory/StaleProcessesPanel.svelte'
 export { default as ProcessDrawer } from './components/memory/ProcessDrawer.svelte'
 // Memory view action components (§6.2 items 6–7, §6.3, §7). Props only: the page
 // owns the transport, the Quit list and the plan/execute calls.
@@ -52,8 +54,15 @@ export { default as TerminateDialog } from './components/memory/TerminateDialog.
 export { default as FreeUpDialog } from './components/memory/FreeUpDialog.svelte'
 export { default as AuditLogPanel } from './components/memory/AuditLogPanel.svelte'
 export type { QuitListEntry } from './components/memory/QuitListPanel.svelte'
+export { default as MemorySidebar } from './components/memory/MemorySidebar.svelte'
+export { default as ProcessDetailDialog } from './components/memory/ProcessDetailDialog.svelte'
 export type { TableRow, StageTarget } from './components/memory/ProcessTable.svelte'
 export type { MemoryFilter, MemorySortKey, TableQuery } from './lib/memory/table.js'
+export { MEMORY_SECTIONS, MEMORY_SECTION_LABELS, parseMemorySection } from './lib/memory/sections.js'
+export { PROCESS_STATE_DOT, PROCESS_STATE_LABELS, PROCESS_STATE_TEXT } from './lib/memory/labels.js'
+export { detectStaleProcesses, STALE_REASON_LABELS, STALE_REASONS, STALE_THRESHOLDS } from './lib/memory/stale.js'
+export type { StaleProcess, StaleReason } from './lib/memory/stale.js'
+export type { MemorySection } from './lib/memory/sections.js'
 export type { ProcessForest, TreeKind, TreeNode, TreeProtection, TreeRow, TreeSearch } from './lib/memory/tree.js'
 export type {
   GraphEdge,
@@ -70,6 +79,8 @@ import * as Badge from './components/ui/badge/index.js'
 import * as Button from './components/ui/button/index.js'
 import * as Card from './components/ui/card/index.js'
 import * as ContextMenu from './components/ui/context-menu/index.js'
+import * as Dialog from './components/ui/dialog/index.js'
+import * as HoverCard from './components/ui/hover-card/index.js'
 import * as Checkbox from './components/ui/checkbox/index.js'
 import * as Input from './components/ui/input/index.js'
 import * as Progress from './components/ui/progress/index.js'
@@ -77,7 +88,7 @@ import * as ScrollArea from './components/ui/scroll-area/index.js'
 import * as Separator from './components/ui/separator/index.js'
 import * as Select from './components/ui/select/index.js'
 import * as Sheet from './components/ui/sheet/index.js'
-export { Badge, Button, Card, ContextMenu, Checkbox, Input, Progress, ScrollArea, Separator, Select, Sheet }
+export { Badge, Button, Card, ContextMenu, Checkbox, Dialog, HoverCard, Input, Progress, ScrollArea, Separator, Select, Sheet }
 
 // Helpers
 export { formatBytes, formatPercent } from './lib/format.js'

@@ -57,6 +57,11 @@ function row(pid: number, groupId: string, overrides: Partial<ProcessRow> = {}):
     virtualBytes: null,
     restricted: false,
     protection: null,
+    command: null,
+    user: null,
+    state: 'sleeping',
+    threads: null,
+    listeningPorts: [],
     ...overrides,
   }
 }

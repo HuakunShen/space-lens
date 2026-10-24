@@ -18,6 +18,12 @@ export const TABLE_COLUMNS = {
   memory: { defaultWidth: 96, min: 64, max: 200 },
   real: { defaultWidth: 96, min: 64, max: 200 },
   virtual: { defaultWidth: 96, min: 64, max: 200 },
+  running: { defaultWidth: 92, min: 68, max: 180 },
+  ports: { defaultWidth: 112, min: 76, max: 220 },
+  started: { defaultWidth: 150, min: 110, max: 260 },
+  user: { defaultWidth: 96, min: 64, max: 220 },
+  status: { defaultWidth: 78, min: 60, max: 140 },
+  command: { defaultWidth: 320, min: 160, max: 720 },
   pid: { defaultWidth: 72, min: 52, max: 140 },
   kind: { defaultWidth: 80, min: 56, max: 160 },
 } as const satisfies Record<string, ColumnSpec>

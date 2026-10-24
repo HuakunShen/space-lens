@@ -26,6 +26,11 @@ function row(
     virtualBytes: null,
     restricted: false,
     protection: null,
+    command: null,
+    user: null,
+    state: 'sleeping',
+    threads: null,
+    listeningPorts: [],
   }
 }
 

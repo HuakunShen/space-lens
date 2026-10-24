@@ -11,7 +11,7 @@
   import { Badge } from '../ui/badge/index'
   import * as Sheet from '../ui/sheet/index'
   import { ScrollArea } from '../ui/scroll-area/index'
-  import { formatBytes, formatPercentValue } from '../../lib/memory/format.ts'
+  import { formatBytes, formatDuration, formatPercentValue, runningSecondsFromIso } from '../../lib/memory/format.ts'
   import Sparkline from './Sparkline.svelte'
   import { groupKey, KIND_LABEL, protectionReason, type StageTarget } from './ProcessTable.svelte'
 
@@ -27,6 +27,8 @@
     onForceQuit?: (group: ProcessGroup) => void
     /** Add the group to the client Quit list (never executes). */
     onStage?: (key: string, target: StageTarget) => void
+    /** Open the detail drawer for one member process. */
+    onOpenProcess?: (process: ProcessRow) => void
   }
 
   let {
@@ -37,6 +39,7 @@
     onQuit,
     onForceQuit,
     onStage,
+    onOpenProcess,
   }: Props = $props()
 
   let open = $derived(group !== null)
@@ -54,6 +57,7 @@
   })
 
   let series = $derived(group ? (history?.groups.find((entry) => entry.groupId === group.groupId) ?? null) : null)
+  let running = $derived(group ? runningSecondsFromIso(group.startedAt, snapshot.sampledAt) : null)
 
   let risks = $derived.by((): string[] => {
     if (!group) return []
@@ -97,7 +101,8 @@
         </div>
         <Sheet.Description>
           {group.pids.length} process{group.pids.length === 1 ? '' : 'es'} · started
-          {new Date(group.startedAt).toLocaleString()} · {formatBytes(group.footprintBytes)}
+          {new Date(group.startedAt).toLocaleString()}{running === null ? '' : ` (${formatDuration(running)})`} ·
+          {formatBytes(group.footprintBytes)}
         </Sheet.Description>
       </Sheet.Header>
 
@@ -135,15 +140,35 @@
           <p class="mb-1 text-xs font-medium tracking-wide text-muted-foreground uppercase">Members</p>
           <ul role="list" class="divide-y rounded-md border text-sm">
             {#each members as process (process.pid)}
-              <li class="flex items-center justify-between gap-2 px-2 py-1.5">
-                <span class="flex min-w-0 items-center gap-2">
-                  <span class="truncate">{process.name}</span>
-                  {#if process.restricted}<Badge variant="outline">Restricted</Badge>{/if}
-                </span>
-                <span class="flex shrink-0 items-center gap-3 text-xs tabular-nums text-muted-foreground">
-                  <span>{memoryText(process)}</span>
-                  <span>{process.cpuPercent === null ? '—' : `${formatPercentValue(process.cpuPercent)}%`}</span>
-                </span>
+              <li>
+                {#if onOpenProcess}
+                  <button
+                    type="button"
+                    class="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-muted/50"
+                    title={`Open ${process.name}`}
+                    onclick={() => onOpenProcess?.(process)}
+                  >
+                    <span class="flex min-w-0 items-center gap-2">
+                      <span class="truncate">{process.name}</span>
+                      {#if process.restricted}<Badge variant="outline">Restricted</Badge>{/if}
+                    </span>
+                    <span class="flex shrink-0 items-center gap-3 text-xs tabular-nums text-muted-foreground">
+                      <span>{memoryText(process)}</span>
+                      <span>{process.cpuPercent === null ? '—' : `${formatPercentValue(process.cpuPercent)}%`}</span>
+                    </span>
+                  </button>
+                {:else}
+                  <div class="flex items-center justify-between gap-2 px-2 py-1.5">
+                    <span class="flex min-w-0 items-center gap-2">
+                      <span class="truncate">{process.name}</span>
+                      {#if process.restricted}<Badge variant="outline">Restricted</Badge>{/if}
+                    </span>
+                    <span class="flex shrink-0 items-center gap-3 text-xs tabular-nums text-muted-foreground">
+                      <span>{memoryText(process)}</span>
+                      <span>{process.cpuPercent === null ? '—' : `${formatPercentValue(process.cpuPercent)}%`}</span>
+                    </span>
+                  </div>
+                {/if}
               </li>
             {/each}
           </ul>

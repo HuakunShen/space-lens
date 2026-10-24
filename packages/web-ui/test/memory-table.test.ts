@@ -36,6 +36,11 @@ function row(overrides: Partial<ProcessRow> & { pid: number; groupId: string }):
     virtualBytes: null,
     restricted: false,
     protection: null,
+    command: null,
+    user: null,
+    state: 'sleeping',
+    threads: null,
+    listeningPorts: [],
     ...overrides,
   }
 }
@@ -163,4 +168,56 @@ test('selecting 1000 processes across 300 groups stays under the 20 ms budget', 
   const elapsed = performance.now() - started
   assert.ok(out.length > 0)
   assert.ok(elapsed < 20, `selectGroups took ${elapsed.toFixed(2)} ms, budget is 20 ms`)
+})
+
+test('ports filter selects groups with a listening member', () => {
+  const server = group({ groupId: 'grp_0000000000000050', name: 'Server' })
+  const idle = group({ groupId: 'grp_0000000000000051', name: 'Idle' })
+  const snap = snapshot(
+    [server, idle],
+    [
+      row({ pid: 51, groupId: server.groupId, listeningPorts: [45001] }),
+      row({ pid: 52, groupId: idle.groupId }),
+    ],
+  )
+  assert.deepEqual(
+    selectGroups(snap, { sort: 'name', desc: false, filter: 'ports', search: '' }).map((g) => g.name),
+    ['Server'],
+  )
+  assert.deepEqual(
+    selectGroups(snap, { sort: 'name', desc: false, filter: 'all', search: '45001' }).map((g) => g.name),
+    ['Server'],
+  )
+})
+
+test('search also matches a member command, account and state', () => {
+  const alpha = group({ groupId: 'grp_0000000000000030', name: 'Alpha' })
+  const beta = group({ groupId: 'grp_0000000000000031', name: 'Beta' })
+  const snap = snapshot(
+    [alpha, beta],
+    [
+      row({ pid: 31, groupId: alpha.groupId, command: 'node server.js --port 3000', user: 'deploy', state: 'running' }),
+      row({ pid: 32, groupId: beta.groupId, command: '/Applications/Beta.app/Contents/MacOS/Beta', user: 'hk' }),
+    ],
+  )
+  const search = (s: string) =>
+    selectGroups(snap, { sort: 'name', desc: false, filter: 'all', search: s }).map((g) => g.name)
+  assert.deepEqual(search('server.js'), ['Alpha'])
+  assert.deepEqual(search('DEPLOY'), ['Alpha'])
+  assert.deepEqual(search('running'), ['Alpha'])
+  assert.deepEqual(search('/Applications/Beta'), ['Beta'])
+})
+
+test('running descending means longest-running first', () => {
+  const old = group({ groupId: 'grp_0000000000000040', name: 'Old', startedAt: '2026-10-18T08:00:00.000Z' })
+  const recent = group({ groupId: 'grp_0000000000000041', name: 'Recent', startedAt: '2026-10-18T10:00:00.000Z' })
+  const snap = snapshot([old, recent])
+  assert.deepEqual(
+    selectGroups(snap, { sort: 'running', desc: true, filter: 'all', search: '' }).map((g) => g.name),
+    ['Old', 'Recent'],
+  )
+  assert.deepEqual(
+    selectGroups(snap, { sort: 'running', desc: false, filter: 'all', search: '' }).map((g) => g.name),
+    ['Recent', 'Old'],
+  )
 })

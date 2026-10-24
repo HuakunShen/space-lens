@@ -6,8 +6,8 @@
  */
 import type { MemorySnapshot, ProcessGroup } from '@space-lens/contract'
 
-export type MemorySortKey = 'name' | 'cpu' | 'footprint' | 'resident' | 'virtual' | 'pid'
-export type MemoryFilter = 'all' | 'apps' | 'background' | 'mine' | 'protected'
+export type MemorySortKey = 'name' | 'cpu' | 'footprint' | 'resident' | 'virtual' | 'running' | 'pid'
+export type MemoryFilter = 'all' | 'apps' | 'background' | 'mine' | 'protected' | 'ports'
 export interface TableQuery {
   sort: MemorySortKey
   desc: boolean
@@ -31,6 +31,15 @@ function numericValue(
       return group.residentBytes
     case 'virtual':
       return virtualBytes.get(group.groupId) ?? null
+    case 'running': {
+      // The column shows elapsed time, but sorting by the start timestamp is
+      // the stable choice: elapsed time changes every tick, so a live sort
+      // would make rows swap places while the pointer rests on them. Negated
+      // so descending (the default for a numeric column) means "running
+      // longest first", matching what the column shows.
+      const startedAt = Date.parse(group.startedAt)
+      return Number.isNaN(startedAt) ? null : -startedAt
+    }
     case 'pid':
       return group.mainPid
   }
@@ -59,7 +68,12 @@ function groupVirtualBytes(snap: MemorySnapshot): ReadonlyMap<string, number> {
   return totals
 }
 
-function matchesFilter(group: ProcessGroup, filter: MemoryFilter, owned: ReadonlySet<string> | null): boolean {
+function matchesFilter(
+  group: ProcessGroup,
+  filter: MemoryFilter,
+  owned: ReadonlySet<string> | null,
+  portGroups: ReadonlySet<string> | null,
+): boolean {
   switch (filter) {
     case 'all':
       return true
@@ -71,15 +85,46 @@ function matchesFilter(group: ProcessGroup, filter: MemoryFilter, owned: Readonl
       return owned !== null && owned.has(group.groupId)
     case 'protected':
       return group.protection !== null
+    case 'ports':
+      return portGroups !== null && portGroups.has(group.groupId)
   }
 }
 
-function matchesSearch(group: ProcessGroup, needle: string): boolean {
+/** Group ids with at least one member listening on a TCP port. */
+function groupsWithPorts(snap: MemorySnapshot): ReadonlySet<string> {
+  const groups = new Set<string>()
+  for (const process of snap.processes) {
+    if (process.listeningPorts.length > 0) groups.add(process.groupId)
+  }
+  return groups
+}
+
+function matchesSearch(group: ProcessGroup, needle: string, details: ReadonlyMap<string, string> | null): boolean {
   if (needle === '') return true
   if (group.name.toLowerCase().includes(needle)) return true
   if (group.bundleId !== null && group.bundleId.toLowerCase().includes(needle)) return true
+  if (group.bundlePath !== null && group.bundlePath.toLowerCase().includes(needle)) return true
   if (String(group.mainPid).includes(needle)) return true
-  return group.pids.some((pid) => String(pid).includes(needle))
+  if (group.pids.some((pid) => String(pid).includes(needle))) return true
+  return details?.get(group.groupId)?.includes(needle) ?? false
+}
+
+/**
+ * One searchable string per group, built from its member processes. Searching
+ * a command or an account is how people find "the node that is eating RAM";
+ * the table used to stop at app name, bundle id and pid.
+ */
+function groupDetails(snap: MemorySnapshot): ReadonlyMap<string, string> {
+  const details = new Map<string, string>()
+  for (const process of snap.processes) {
+    const fields = [process.command, process.user, process.state, process.listeningPorts.join(' ')].filter(
+      (value): value is string => typeof value === 'string' && value !== '',
+    )
+    if (fields.length === 0) continue
+    const previous = details.get(process.groupId)
+    details.set(process.groupId, `${previous ?? ''} ${fields.join(' ')}`.toLowerCase())
+  }
+  return details
 }
 
 function tieBreak(a: ProcessGroup, b: ProcessGroup): number {
@@ -90,9 +135,11 @@ function tieBreak(a: ProcessGroup, b: ProcessGroup): number {
 export function selectGroups(snap: MemorySnapshot, q: TableQuery): ProcessGroup[] {
   const needle = q.search.trim().toLowerCase()
   const owned = q.filter === 'mine' ? ownedGroupIds(snap) : null
+  const portGroups = q.filter === 'ports' ? groupsWithPorts(snap) : null
   const virtualBytes = q.sort === 'virtual' ? groupVirtualBytes(snap) : EMPTY_VIRTUAL
+  const details = needle === '' ? null : groupDetails(snap)
   const rows = snap.groups.filter(
-    (group) => matchesFilter(group, q.filter, owned) && matchesSearch(group, needle),
+    (group) => matchesFilter(group, q.filter, owned, portGroups) && matchesSearch(group, needle, details),
   )
   const direction = q.desc ? -1 : 1
   rows.sort((a, b) => {
