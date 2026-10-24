@@ -18,6 +18,9 @@ export const MEMORY_PLATFORMS = ['macos', 'linux', 'windows', 'unsupported'] as 
 export const PRESSURE_LEVELS = ['normal', 'warning', 'critical', 'unknown'] as const
 export const PRESSURE_SOURCES = ['kernel', 'derived', 'unavailable'] as const
 export const PROCESS_KINDS = ['app', 'helper', 'agent', 'cli', 'system', 'other'] as const
+/** Scheduler states; the platforms disagree on details, anything else is `unknown`. */
+export const PROCESS_STATES = ['running', 'sleeping', 'idle', 'stopped', 'zombie', 'unknown'] as const
+export type ProcessState = (typeof PROCESS_STATES)[number]
 export const PROTECTIONS = [
   'kernel',
   'init',
@@ -67,6 +70,7 @@ const PlatformSchema = z.enum(MEMORY_PLATFORMS)
 const PressureLevelSchema = z.enum(PRESSURE_LEVELS)
 const PressureSourceSchema = z.enum(PRESSURE_SOURCES)
 const ProcessKindSchema = z.enum(PROCESS_KINDS)
+const ProcessStateSchema = z.enum(PROCESS_STATES)
 const ProtectionSchema = z.enum(PROTECTIONS)
 const SnapshotNoteSchema = z.enum(SNAPSHOT_NOTES)
 const TerminateModeSchema = z.enum(TERMINATE_MODES)
@@ -115,6 +119,15 @@ export const ProcessRowSchema = z.strictObject({
   virtualBytes: Uint.nullable(),
   restricted: z.boolean(),
   protection: ProtectionSchema.nullable(),
+  /** Full argv joined with spaces; null when the kernel does not expose it. */
+  command: z.string().max(4096).nullable(),
+  /** Owning account name, when resolvable. */
+  user: z.string().max(128).nullable(),
+  state: ProcessStateSchema,
+  /** Thread count, when the platform reports it. */
+  threads: Uint.nullable(),
+  /** Listening TCP ports, sorted ascending (at most 32). */
+  listeningPorts: z.array(Uint).max(32),
 })
 export type ProcessRow = z.infer<typeof ProcessRowSchema>
 

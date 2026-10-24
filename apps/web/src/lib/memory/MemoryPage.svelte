@@ -5,6 +5,10 @@
    * table query, the selection, the in-memory Quit list, the `neverSuggest`
    * list (`localStorage`, guarded), and the plan/execute calls. The plan and
    * execute flow always goes through the host — this page never decides safety.
+   *
+   * The page renders one section at a time; the sidebar and the shared toolbar
+   * live in `+page.svelte`. The snapshot is bindable so the sidebar can show
+   * the same reading without polling a second time.
    */
   import { onMount } from 'svelte'
   import type {
@@ -14,6 +18,7 @@
     MemoryHistory,
     MemorySnapshot,
     ProcessGroup,
+    ProcessRow,
     TerminateOutcome,
     TerminatePlan,
     TerminatePlanRequest,
@@ -25,18 +30,24 @@
     AuditLogPanel,
     Button,
     FreeUpDialog,
+    KindGlyph,
     MemoryBreakdownBar,
     MemoryPressureCard,
+    ProcessDetailDialog,
     ProcessDrawer,
     ProcessGraph,
     ProcessSegmentBar,
     ProcessTable,
     ProcessTree,
     QuitListPanel,
+    StaleProcessesPanel,
     StateBanner,
     TerminateDialog,
+    detectStaleProcesses,
+    formatBytes,
   } from '@space-lens/web-ui'
-  import type { StageTarget, TableQuery } from '@space-lens/web-ui'
+  import type { MemorySection, StageTarget, TableQuery } from '@space-lens/web-ui'
+  import { ClockAlert } from '@lucide/svelte'
   import { memoryTerminateAvailable } from '../gates.ts'
   import { describeError } from '../workbench.svelte.ts'
   import { MEMORY_PRESETS, type AiChatPort, type MemoryPort } from '@space-lens/ai-advisor'
@@ -88,9 +99,21 @@
   interface Props {
     service: WorkbenchService | null
     capabilities: Capabilities | null
+    /** Which Memory section the shared sidebar selected. */
+    section?: MemorySection
+    /** The live snapshot, bindable so the sidebar can show the same reading. */
+    snapshot?: MemorySnapshot | null
+    /** Section navigation for the Overview's "all processes" link. */
+    onSection?: (section: MemorySection) => void
   }
 
-  let { service, capabilities }: Props = $props()
+  let {
+    service,
+    capabilities,
+    section = 'overview',
+    snapshot = $bindable(null),
+    onSection,
+  }: Props = $props()
 
   /** §7: the client's never-suggest list, one `localStorage` key. */
   const NEVER_SUGGEST_KEY = 'spacelens.memory.neverSuggest'
@@ -115,7 +138,6 @@
     }
   }
 
-  let snapshot = $state<MemorySnapshot | null>(null)
   let history = $state<MemoryHistory | null>(null)
   let error = $state<string | null>(null)
   let paused = $state(false)
@@ -137,6 +159,20 @@
    */
   let focusPid = $state<number | null>(null)
   let openGroup = $state<ProcessGroup | null>(null)
+  /**
+   * The process whose detail drawer is open, stored as its identity rather than
+   * the row: the snapshot replaces every row once a second, and the drawer must
+   * follow the live row instead of freezing the values it opened with.
+   */
+  let openProcessKey = $state<{ pid: number; startTimeUs: number } | null>(null)
+  let openProcess = $derived.by((): ProcessRow | null => {
+    if (snapshot === null || openProcessKey === null) return null
+    return (
+      snapshot.processes.find(
+        (process) => process.pid === openProcessKey?.pid && process.startTimeUs === openProcessKey?.startTimeUs,
+      ) ?? null
+    )
+  })
   let quitList = $state<QuitListEntry[]>([])
   let quitListOpen = $state(false)
   let aiOpen = $state(false)
@@ -283,6 +319,27 @@
     openGroup = group
     void refreshHistory(true)
   }
+
+  function openProcessDrawer(process: ProcessRow): void {
+    openProcessKey = { pid: process.pid, startTimeUs: process.startTimeUs }
+  }
+
+  /** Plan a single-process quit; the group drawer's actions stay separate. */
+  function quitProcess(process: ProcessRow, mode: TerminateMode): void {
+    openProcessKey = null
+    void buildPlan(
+      'manual',
+      [{ kind: 'process', pid: process.pid, startTimeUs: process.startTimeUs }],
+      mode,
+    )
+  }
+
+  let topGroups = $derived(
+    [...(snapshot?.groups ?? [])]
+      .sort((a, b) => b.footprintBytes - a.footprintBytes)
+      .slice(0, 6),
+  )
+  let staleProcesses = $derived(snapshot === null ? [] : detectStaleProcesses(snapshot))
 
   function stage(key: string, target: StageTarget): void {
     const entry: QuitListEntry = {
@@ -472,12 +529,7 @@
     {/if}
   </section>
 {:else}
-  <main class="memory-page flex h-full min-h-0 flex-col gap-3 overflow-auto bg-background p-4 text-foreground">
-    <div class="grid items-stretch gap-3 lg:grid-cols-[minmax(18rem,0.9fr)_minmax(0,1.5fr)]">
-      <MemoryPressureCard {snapshot} {history} />
-      <MemoryBreakdownBar breakdown={snapshot.breakdown} />
-    </div>
-
+  <main class="memory-page flex min-h-0 flex-1 flex-col gap-3 overflow-auto bg-background p-4 text-foreground">
     <div class="flex flex-wrap items-center gap-2">
       {#if terminateAvailable}
         <Button.Root onclick={() => void openFreeUp()}>Free up memory…</Button.Root>
@@ -501,98 +553,183 @@
       />
     {/if}
 
-    <ProcessSegmentBar
-      groups={snapshot.groups}
-      usedBytes={snapshot.breakdown.usedBytes}
-      {selection}
-      onSelect={toggleSelect}
-    />
-
-    {#if terminateAvailable && (selection.size > 0 || skippedProtected > 0)}
-      <div
-        class="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm"
-        role="status"
-        aria-live="polite"
-      >
-        {#if selection.size > 0}
-          <span>{selection.size} selected</span>
-          <Button.Root size="sm" onclick={stageSelection}>Add to Quit list</Button.Root>
-          <Button.Root size="sm" variant="ghost" onclick={() => (selection = new Set())}>Clear selection</Button.Root>
-        {/if}
-        {#if skippedProtected > 0}
-          <span class="text-xs text-muted-foreground"
-            >{skippedProtected} protected {skippedProtected === 1 ? 'item was' : 'items were'} not added.</span
-          >
-        {/if}
+    {#if section === 'overview'}
+      <div class="grid items-stretch gap-3 lg:grid-cols-[minmax(18rem,0.9fr)_minmax(0,1.5fr)]">
+        <MemoryPressureCard {snapshot} {history} />
+        <MemoryBreakdownBar breakdown={snapshot.breakdown} />
       </div>
-    {/if}
 
-    <div class="flex flex-wrap items-start gap-4">
-      <div class="flex min-w-0 flex-1 basis-[32rem] flex-col gap-3">
-        <div class="flex items-center gap-1" role="group" aria-label="Table or process tree">
-          <Button.Root size="sm" variant={view === 'table' ? 'secondary' : 'ghost'} onclick={() => (view = 'table')}>
-            By size
-          </Button.Root>
-          <Button.Root size="sm" variant={view === 'tree' ? 'secondary' : 'ghost'} onclick={() => (view = 'tree')}>
-            Process tree
-          </Button.Root>
+      {#if staleProcesses.length > 0}
+        <div
+          class="flex flex-wrap items-center gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2"
+          role="status"
+        >
+          <ClockAlert class="size-4 shrink-0 text-amber-500" />
+          <p class="min-w-0 flex-1 text-sm">
+            <strong>{staleProcesses.length}</strong>
+            {staleProcesses.length === 1 ? 'process looks' : 'processes look'} left behind — orphaned
+            runtimes, stopped processes, or long-idle leftovers.
+          </p>
+          {#if onSection}
+            <Button.Root variant="outline" size="sm" onclick={() => onSection?.('stale')}>
+              Review stale
+            </Button.Root>
+          {/if}
+        </div>
+      {/if}
+
+      <section class="overflow-hidden rounded-md border">
+        <div class="flex items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
+          <h2 class="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Top memory users</h2>
+          {#if onSection}
+            <button
+              type="button"
+              class="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              onclick={() => onSection?.('processes')}>All processes</button
+            >
+          {/if}
+        </div>
+        <ul role="list" class="divide-y">
+          {#each topGroups as group (group.groupId)}
+            {@const share = snapshot.breakdown.usedBytes <= 0 ? 0 : Math.min(100, (group.footprintBytes / snapshot.breakdown.usedBytes) * 100)}
+            <li>
+              <button
+                type="button"
+                class="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-muted/50"
+                title={`Open ${group.name}`}
+                onclick={() => openDrawer(group)}
+              >
+                <KindGlyph kind={group.kind} />
+                <span class="min-w-0 flex-1 truncate text-sm">{group.name}</span>
+                <span class="hidden h-1.5 w-28 overflow-hidden rounded-full bg-muted sm:block">
+                  <span class="block h-full rounded-full bg-primary" style={`width: ${share}%`}></span>
+                </span>
+                <span class="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                  {formatBytes(group.footprintBytes)}
+                </span>
+              </button>
+            </li>
+          {:else}
+            <li class="px-3 py-4 text-sm text-muted-foreground">No applications are using memory right now.</li>
+          {/each}
+        </ul>
+      </section>
+    {:else if section === 'processes'}
+      <ProcessSegmentBar
+        groups={snapshot.groups}
+        usedBytes={snapshot.breakdown.usedBytes}
+        {selection}
+        onSelect={toggleSelect}
+      />
+
+      {#if terminateAvailable && (selection.size > 0 || skippedProtected > 0)}
+        <div
+          class="flex flex-wrap items-center gap-3 rounded-md border bg-muted/40 px-3 py-2 text-sm"
+          role="status"
+          aria-live="polite"
+        >
+          {#if selection.size > 0}
+            <span>{selection.size} selected</span>
+            <Button.Root size="sm" onclick={stageSelection}>Add to Quit list</Button.Root>
+            <Button.Root size="sm" variant="ghost" onclick={() => (selection = new Set())}>Clear selection</Button.Root>
+          {/if}
+          {#if skippedProtected > 0}
+            <span class="text-xs text-muted-foreground"
+              >{skippedProtected} protected {skippedProtected === 1 ? 'item was' : 'items were'} not added.</span
+            >
+          {/if}
+        </div>
+      {/if}
+
+      <div class="flex flex-wrap items-start gap-4">
+        <div class="flex min-w-0 flex-1 basis-[32rem] flex-col gap-3">
+          <div class="flex items-center gap-1" role="group" aria-label="Table or process tree">
+            <Button.Root size="sm" variant={view === 'table' ? 'secondary' : 'ghost'} onclick={() => (view = 'table')}>
+              By size
+            </Button.Root>
+            <Button.Root size="sm" variant={view === 'tree' ? 'secondary' : 'ghost'} onclick={() => (view = 'tree')}>
+              Process tree
+            </Button.Root>
+          </div>
+
+          {#if view === 'table'}
+            <ProcessTable
+              {snapshot}
+              {query}
+              {selection}
+              onSelect={toggleSelect}
+              onOpen={openDrawer}
+              onOpenProcess={openProcessDrawer}
+              onStage={terminateAvailable ? stage : undefined}
+              onQuit={terminateAvailable
+                ? (row) => (row.kind === 'group' ? quitGroup(row.group, 'graceful') : quitProcess(row.process, 'graceful'))
+                : undefined}
+              onForceQuit={terminateAvailable
+                ? (row) => (row.kind === 'group' ? quitGroup(row.group, 'force') : quitProcess(row.process, 'force'))
+                : undefined}
+              onQueryChange={(next) => (query = next)}
+              {intervalMs}
+              onIntervalChange={changeInterval}
+              {paused}
+              onTogglePause={togglePause}
+            />
+          {:else}
+            <ProcessTree
+              {snapshot}
+              search={query.search}
+              onSearchChange={(search) => (query = { ...query, search })}
+              {selection}
+              onSelect={toggleSelect}
+              onOpen={openDrawer}
+              onOpenProcess={openProcessDrawer}
+              onFocus={(pid) => (focusPid = pid)}
+              {focusPid}
+              onStage={terminateAvailable ? stage : undefined}
+              scope={treeScope}
+              onScopeChange={(scope) => (treeScope = scope)}
+            />
+          {/if}
         </div>
 
-        {#if view === 'table'}
-          <ProcessTable
+        {#if focusPid !== null}
+          <ProcessGraph
             {snapshot}
-            {query}
-            {selection}
-            onSelect={toggleSelect}
-            onOpen={openDrawer}
-            onStage={terminateAvailable ? stage : undefined}
-            onQueryChange={(next) => (query = next)}
-            {intervalMs}
-            onIntervalChange={changeInterval}
-            {paused}
-            onTogglePause={togglePause}
-          />
-        {:else}
-          <ProcessTree
-            {snapshot}
-            search={query.search}
-            onSearchChange={(search) => (query = { ...query, search })}
-            {selection}
-            onSelect={toggleSelect}
-            onOpen={openDrawer}
+            pid={focusPid}
             onFocus={(pid) => (focusPid = pid)}
-            {focusPid}
-            onStage={terminateAvailable ? stage : undefined}
-            scope={treeScope}
-            onScopeChange={(scope) => (treeScope = scope)}
+            onClose={() => (focusPid = null)}
+            class="w-full self-start xl:sticky xl:top-4 xl:w-[36rem] xl:shrink-0"
           />
         {/if}
       </div>
 
-      {#if focusPid !== null}
-        <ProcessGraph
-          {snapshot}
-          pid={focusPid}
-          onFocus={(pid) => (focusPid = pid)}
-          onClose={() => (focusPid = null)}
-          class="w-full self-start xl:sticky xl:top-4 xl:w-[36rem] xl:shrink-0"
-        />
+      {#if !terminateAvailable}
+        <p class="text-xs text-muted-foreground" role="status">
+          This host lists processes read-only. Quitting runs in the desktop app or a host started
+          with process control enabled.
+        </p>
       {/if}
-    </div>
+    {:else if section === 'stale'}
+      <StaleProcessesPanel
+        processes={staleProcesses}
+        {terminateAvailable}
+        onOpenProcess={openProcessDrawer}
+        onQuit={(process) => quitProcess(process, 'graceful')}
+      />
+    {:else if section === 'activity'}
+      <AuditLogPanel
+        log={auditLog}
+        reopenAvailable={reopenAvailable && terminateAvailable}
+        onReopen={(auditId) => void reopenApp(auditId)}
+        {reopenBusyId}
+        error={auditError}
+      />
 
-    <AuditLogPanel
-      log={auditLog}
-      reopenAvailable={reopenAvailable && terminateAvailable}
-      onReopen={(auditId) => void reopenApp(auditId)}
-      {reopenBusyId}
-      error={auditError}
-    />
-
-    {#if !terminateAvailable}
-      <p class="text-xs text-muted-foreground" role="status">
-        This host lists processes read-only. Quitting runs in the desktop app or a host started
-        with process control enabled.
-      </p>
+      {#if !terminateAvailable}
+        <p class="text-xs text-muted-foreground" role="status">
+          This host lists processes read-only. Quitting runs in the desktop app or a host started
+          with process control enabled.
+        </p>
+      {/if}
     {/if}
   </main>
 
@@ -604,6 +741,25 @@
     onQuit={(group) => quitGroup(group, 'graceful')}
     onForceQuit={(group) => quitGroup(group, 'force')}
     onStage={terminateAvailable ? stage : undefined}
+    onOpenProcess={(process) => {
+      openGroup = null
+      openProcessKey = { pid: process.pid, startTimeUs: process.startTimeUs }
+    }}
+  />
+
+  <ProcessDetailDialog
+    {snapshot}
+    process={openProcess}
+    {terminateAvailable}
+    onClose={() => (openProcessKey = null)}
+    onStage={terminateAvailable ? stage : undefined}
+    onQuit={(process) => quitProcess(process, 'graceful')}
+    onForceQuit={(process) => quitProcess(process, 'force')}
+    onOpenProcess={(process) => (openProcessKey = { pid: process.pid, startTimeUs: process.startTimeUs })}
+    onOpenGroup={(group) => {
+      openProcessKey = null
+      openDrawer(group)
+    }}
   />
 
   <QuitListPanel

@@ -1,6 +1,6 @@
 [package]
 name = "space-lens-desktop"
-version = "0.6.0"
+version = "0.7.0"
 description = "Space Lens desktop shell: the web workbench compiled in, the kuntu-scan engine driving it over Tauri IPC."
 edition = "2021"
 license = "MIT"

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "space-lens contract",
   "apiMajor": 1,
-  "contractVersion": "1.0.0",
+  "contractVersion": "1.1.0",
   "$defs": {
     "Health": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4332,6 +4332,60 @@
               "type": "null"
             }
           ]
+        },
+        "command": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 4096
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 128
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "running",
+            "sleeping",
+            "idle",
+            "stopped",
+            "zombie",
+            "unknown"
+          ]
+        },
+        "threads": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "listeningPorts": {
+          "maxItems": 32,
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
         }
       },
       "required": [
@@ -4347,7 +4401,12 @@
         "residentBytes",
         "virtualBytes",
         "restricted",
-        "protection"
+        "protection",
+        "command",
+        "user",
+        "state",
+        "threads",
+        "listeningPorts"
       ],
       "additionalProperties": false
     },
@@ -4903,6 +4962,60 @@
                     "type": "null"
                   }
                 ]
+              },
+              "command": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "user": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "running",
+                  "sleeping",
+                  "idle",
+                  "stopped",
+                  "zombie",
+                  "unknown"
+                ]
+              },
+              "threads": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "listeningPorts": {
+                "maxItems": 32,
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
               }
             },
             "required": [
@@ -4918,7 +5031,12 @@
               "residentBytes",
               "virtualBytes",
               "restricted",
-              "protection"
+              "protection",
+              "command",
+              "user",
+              "state",
+              "threads",
+              "listeningPorts"
             ],
             "additionalProperties": false
           }

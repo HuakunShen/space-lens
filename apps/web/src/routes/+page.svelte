@@ -14,6 +14,9 @@
     WorkspaceHeading,
     LensToolbar,
     ScanSidebar,
+    MemorySidebar,
+    MEMORY_SECTION_LABELS,
+    parseMemorySection,
     DiscoveryList,
     AppAuditList,
     AppScanHeader,
@@ -31,9 +34,9 @@
     annotationForNode,
     fileManagerLabel,
   } from '@space-lens/web-ui'
-  import type { ChartMode, TreemapDensity } from '@space-lens/web-ui'
+  import type { ChartMode, MemorySection, TreemapDensity } from '@space-lens/web-ui'
   import type { ScanTarget, TreeNodeSummary } from '@space-lens/web-ui/types'
-  import type { AppAuditEntry, AppAuditReport, CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, ScanStatus, Session } from '@space-lens/contract'
+  import type { AppAuditEntry, AppAuditReport, CleanupPlan, CleanupOutcome, DiscoveryKind, DiscoveryPage, DiscoveryItem, MemorySnapshot, ScanStatus, Session } from '@space-lens/contract'
   import { setMode, userPrefersMode } from 'mode-watcher'
   import { addSelection, selectedAncestor } from '../lib/selection'
   import { canCollectNode } from '@space-lens/web-ui/lib/app-scan'
@@ -95,6 +98,10 @@
   let aiOpen = $state(false)
   /** Top-level Storage | Memory switch state (§6.1); the page owns it. */
   let memoryView = $state(false)
+  /** The Memory sidebar's selected section, persisted for the next visit. */
+  let memorySection = $state<MemorySection>('overview')
+  /** The live snapshot, bound from MemoryPage so the sidebar can read it. */
+  let memorySnapshot = $state<MemorySnapshot | null>(null)
   // Loaded with the desktop service; the AI drawer is gated on it when no
   // HTTP host serves an operator-configured advisor.
   let aiPorts = $state<TauriPorts | null>(null)
@@ -110,6 +117,7 @@
   const CONTENTS_KEY = 'spacelens.contentsWidth'
   const CONTENTS_HEIGHT_KEY = 'spacelens.contentsHeight'
   const LAYOUT_KEY = 'spacelens.layoutDirection'
+  const MEMORY_SECTION_KEY = 'spacelens.memory.section'
   const CONTENTS_MIN = 240
   const CONTENTS_MAX = 720
   const CONTENTS_DEFAULT = 340
@@ -177,6 +185,14 @@
   function setLayoutPreference(next: LayoutPreference): void {
     layoutPreference = next
     window.localStorage.setItem(LAYOUT_KEY, next)
+  }
+  function setMemorySection(next: MemorySection): void {
+    memorySection = next
+    try {
+      window.localStorage.setItem(MEMORY_SECTION_KEY, next)
+    } catch {
+      // The section is still switchable when storage is unavailable.
+    }
   }
   /** `auto` re-decides on every resize, so dragging the host panel narrow
    * stacks the layout without the user touching the toggle. */
@@ -1400,6 +1416,7 @@
     if (storedLayout === 'horizontal' || storedLayout === 'vertical' || storedLayout === 'auto') {
       layoutPreference = storedLayout
     }
+    memorySection = parseMemorySection(window.localStorage.getItem(MEMORY_SECTION_KEY))
     viewportWidth = window.innerWidth
     window.addEventListener('resize', onViewportResize)
     preferencesReady = true
@@ -1450,9 +1467,9 @@
   </div>
 {/snippet}
 
-{#if workbench.phase === 'ready' && memoryAvailable && !memoryView}
-  <!-- Storage view: the switch sits in the toolbar's empty middle. The memory
-       view has its own header row, so the pill is not rendered there. -->
+{#if workbench.phase === 'ready' && memoryAvailable}
+  <!-- Both views share the same pill position: inside the toolbar's empty
+       middle. Keeping it fixed means switching views never moves the target. -->
   <div class="view-switch-pill fixed top-1.5 left-1/2 z-50 -translate-x-1/2" role="group" aria-label="Storage or memory view">
     {@render viewSwitch()}
   </div>
@@ -1474,15 +1491,35 @@
     onConnect={() => void connect()}
   />
 {:else if memoryView && memoryAvailable}
-  <div class="flex h-dvh min-h-0 flex-col bg-background text-foreground">
-    <header class="grid h-10 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-border/60 px-4">
-      <!-- The window's traffic lights sit in the first column; the switch's
-           highlight already says which view this is. -->
-      <span aria-hidden="true"></span>
-      <div role="group" aria-label="Storage or memory view">{@render viewSwitch()}</div>
-      <span aria-hidden="true"></span>
-    </header>
-    <MemoryPage service={workbench.service} capabilities={workbench.capabilities} />
+  <!-- Memory uses the same shell as Storage: the same draggable toolbar (so
+       the window can be moved and Settings opened), the same sidebar geometry,
+       and its own contextual section list instead of scan locations. -->
+  <div class="workbench-shell compact-workbench windows:bg-sidebar">
+    <LensToolbar
+      title="Memory"
+      subtitle={MEMORY_SECTION_LABELS[memorySection]}
+      mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
+      chromeInset={headerInset()}
+      {sidebarVisible}
+      onToggleSidebar={() => (sidebarVisible = !sidebarVisible)}
+      onOpenSettings={() => (settingsOpen = true)}
+    />
+    <div class="workspace-body">
+      {#if sidebarVisible}
+        <MemorySidebar section={memorySection} onSection={setMemorySection} snapshot={memorySnapshot} />
+      {/if}
+      <div
+        class="workspace-content windows:mr-3 windows:rounded-tl-lg windows:border windows:border-border windows:bg-background windows:pt-5"
+      >
+        <MemoryPage
+          service={workbench.service}
+          capabilities={workbench.capabilities}
+          section={memorySection}
+          bind:snapshot={memorySnapshot}
+          onSection={setMemorySection}
+        />
+      </div>
+    </div>
   </div>
 {:else if pickerOpen || workbench.status === null || workbench.status.state !== 'ready'}
   {#if view === 'apps' && appAuditAvailable}

@@ -20,7 +20,12 @@
       "footprintBytes": 20971520,
       "residentBytes": 15728640,
       "virtualBytes": 4345536512,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 100,
@@ -33,7 +38,12 @@
       "footprintBytes": 4194304,
       "residentBytes": 3145728,
       "virtualBytes": 3774873600,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 101,
@@ -46,7 +56,12 @@
       "footprintBytes": 1048576,
       "residentBytes": 786432,
       "virtualBytes": 3774873600,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 102,
@@ -59,7 +74,12 @@
       "footprintBytes": 2097152,
       "residentBytes": 1572864,
       "virtualBytes": 3774873600,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 110,
@@ -72,7 +92,12 @@
       "footprintBytes": null,
       "residentBytes": null,
       "virtualBytes": null,
-      "zombie": true
+      "zombie": true,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 120,
@@ -85,7 +110,12 @@
       "footprintBytes": null,
       "residentBytes": null,
       "virtualBytes": null,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 130,
@@ -98,7 +128,12 @@
       "footprintBytes": 33554432,
       "residentBytes": 29360128,
       "virtualBytes": 6081740800,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 140,
@@ -111,7 +146,12 @@
       "footprintBytes": 44040192,
       "residentBytes": 39845888,
       "virtualBytes": 6123683840,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 200,
@@ -124,7 +164,12 @@
       "footprintBytes": 8388608,
       "residentBytes": 5242880,
       "virtualBytes": 4050644992,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 300,
@@ -137,7 +182,12 @@
       "footprintBytes": 16777216,
       "residentBytes": 12582912,
       "virtualBytes": 4158652416,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 400,
@@ -150,7 +200,12 @@
       "footprintBytes": 262144000,
       "residentBytes": 241172480,
       "virtualBytes": 5153960755,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 500,
@@ -163,7 +218,12 @@
       "footprintBytes": null,
       "residentBytes": 6291456,
       "virtualBytes": 4131389440,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 501,
@@ -176,7 +236,12 @@
       "footprintBytes": null,
       "residentBytes": 20971520,
       "virtualBytes": 4131389440,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 700,
@@ -189,7 +254,12 @@
       "footprintBytes": 96468992,
       "residentBytes": 83886080,
       "virtualBytes": 4404019200,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 701,
@@ -202,7 +272,12 @@
       "footprintBytes": 31457280,
       "residentBytes": 25165824,
       "virtualBytes": 4303355904,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 799,
@@ -215,7 +290,12 @@
       "footprintBytes": 419430400,
       "residentBytes": 398458880,
       "virtualBytes": 7301444403,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 800,
@@ -228,7 +308,12 @@
       "footprintBytes": 188743680,
       "residentBytes": 178257920,
       "virtualBytes": 6073352192,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 900,
@@ -241,7 +326,12 @@
       "footprintBytes": 146800640,
       "residentBytes": 136314880,
       "virtualBytes": 5046586572,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 1000,
@@ -254,7 +344,12 @@
       "footprintBytes": 524288000,
       "residentBytes": 471859200,
       "virtualBytes": 6000000000,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 1001,
@@ -267,7 +362,12 @@
       "footprintBytes": 125829120,
       "residentBytes": 104857600,
       "virtualBytes": 5100273664,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 1002,
@@ -280,7 +380,12 @@
       "footprintBytes": 314572800,
       "residentBytes": 293601280,
       "virtualBytes": 5483304960,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 1003,
@@ -293,7 +398,12 @@
       "footprintBytes": 62914560,
       "residentBytes": 58720256,
       "virtualBytes": 5153960755,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 2000,
@@ -306,7 +416,12 @@
       "footprintBytes": 419430400,
       "residentBytes": 380000000,
       "virtualBytes": 7301444403,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 2001,
@@ -319,7 +434,12 @@
       "footprintBytes": 83886080,
       "residentBytes": 73400320,
       "virtualBytes": 5046586572,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 3000,
@@ -332,7 +452,12 @@
       "footprintBytes": 209715200,
       "residentBytes": 188743680,
       "virtualBytes": 5100273664,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 4000,
@@ -345,7 +470,12 @@
       "footprintBytes": 314572800,
       "residentBytes": 283115520,
       "virtualBytes": 6442450944,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 4001,
@@ -358,7 +488,12 @@
       "footprintBytes": 4194304,
       "residentBytes": 3145728,
       "virtualBytes": 3774873600,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     },
     {
       "pid": 4002,
@@ -371,7 +506,12 @@
       "footprintBytes": 524288000,
       "residentBytes": 503316480,
       "virtualBytes": 8000000000,
-      "zombie": false
+      "zombie": false,
+      "command": null,
+      "user": null,
+      "state": "sleeping",
+      "threads": null,
+      "listeningPorts": []
     }
   ]
 }

@@ -10,7 +10,7 @@
    *
    * Props only; the page owns the transport, the selection and the Quit list.
    */
-  import type { MemorySnapshot, ProcessGroup } from '@space-lens/contract'
+  import type { MemorySnapshot, ProcessGroup, ProcessRow } from '@space-lens/contract'
   import { ChevronDown, ChevronRight, Lock, Search } from '@lucide/svelte'
   import { Button } from '../ui/button/index'
   import { Checkbox } from '../ui/checkbox/index'
@@ -32,6 +32,8 @@
     onSelect: (key: string) => void
     /** Open the drawer for the group the row belongs to. */
     onOpen: (group: ProcessGroup) => void
+    /** Open the detail drawer for a process row. */
+    onOpenProcess?: (process: ProcessRow) => void
     /** A row was clicked: draw this process in the detail diagram. */
     onFocus?: (pid: number) => void
     /** The process the detail diagram is showing, highlighted in the list. */
@@ -51,6 +53,7 @@
     selection,
     onSelect,
     onOpen,
+    onOpenProcess,
     onFocus,
     focusPid = null,
     onStage,
@@ -222,6 +225,16 @@
     scrollTop = element.scrollTop
   }
 
+  function openProcess(pid: number): void {
+    if (!onOpenProcess) {
+      const group = groupById.get(forest.byPid.get(pid)?.groupId ?? '')
+      if (group) onOpen(group)
+      return
+    }
+    const process = snapshot.processes.find((candidate) => candidate.pid === pid)
+    if (process) onOpenProcess(process)
+  }
+
   function stageRow(row: TreeRow): void {
     if (!onStage) return
     const node = row.node
@@ -283,8 +296,7 @@
       case 'Enter': {
         if (!row) break
         event.preventDefault()
-        const group = groupById.get(row.node.groupId)
-        if (group) onOpen(group)
+        openProcess(row.node.pid)
         break
       }
       case 'Delete':
@@ -372,8 +384,7 @@
       const index = rowIndexFromEvent(event)
       if (index === null) return
       const row = rows[index]
-      const group = row ? groupById.get(row.node.groupId) : undefined
-      if (group) onOpen(group)
+      if (row) openProcess(row.node.pid)
     }}
   >
     <div class="process-table-head sticky top-0 z-10 border-b">

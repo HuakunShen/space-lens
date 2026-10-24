@@ -27,6 +27,11 @@ function row(overrides: Partial<ProcessRow> & { pid: number; name: string }): Pr
     virtualBytes: null,
     restricted: false,
     protection: null,
+    command: null,
+    user: null,
+    state: 'sleeping',
+    threads: null,
+    listeningPorts: [],
     ...overrides,
   }
 }

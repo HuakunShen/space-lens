@@ -14,6 +14,8 @@
     "./lib/memory/reasons": "./src/lib/memory/reasons.ts",
     "./lib/memory/tree": "./src/lib/memory/tree.ts",
     "./lib/memory/graph": "./src/lib/memory/graph.ts",
+    "./lib/memory/sections": "./src/lib/memory/sections.ts",
+    "./lib/memory/stale": "./src/lib/memory/stale.ts",
     "./styles.css": "./src/styles.css",
     "./types": "./src/types.ts",
     "./package.json": "./package.json"

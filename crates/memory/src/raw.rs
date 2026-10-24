@@ -3,7 +3,7 @@
 //! safety turn these values into the frozen model in [`crate::model`], so the
 //! field set is deliberately richer than the wire types.
 
-use crate::model::MemoryPressure;
+use crate::model::{MemoryPressure, ProcessState};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -17,6 +17,12 @@ pub struct RawProcess {
   pub uid: Option<u32>,
   pub name: String,
   pub exe: Option<PathBuf>,
+  pub command: Option<String>,
+  pub user: Option<String>,
+  pub state: ProcessState,
+  pub threads: Option<u32>,
+  /// Listening TCP ports, sorted; empty when unknown or not a server.
+  pub listening_ports: Vec<u16>,
   pub cpu_percent: Option<f32>,
   pub footprint_bytes: Option<u64>,
   pub resident_bytes: Option<u64>,

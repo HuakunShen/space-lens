@@ -12,12 +12,12 @@
 //! off as a kernel reading.
 
 use crate::error::MemoryError;
-use crate::model::{MemoryPressure, Platform, PressureLevel, PressureSource};
+use crate::model::{MemoryPressure, Platform, PressureLevel, PressureSource, ProcessState};
 use crate::raw::{RawProcess, RawSample, RawSystem};
 use crate::sampler::ProcessSampler;
 use std::path::Path;
 use sysinfo::{
-  ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, RefreshKind, System, UpdateKind,
+  ProcessRefreshKind, ProcessStatus, ProcessesToUpdate, RefreshKind, System, UpdateKind, Users,
 };
 
 /// Below this share of total memory available, pressure is `Critical`.
@@ -35,6 +35,9 @@ const WARNING_AVAILABLE_PERCENT: f32 = 20.0;
 #[derive(Debug)]
 pub struct PortableSampler {
   system: System,
+  /// The account list, loaded once: process owner ids are stable for the life
+  /// of a machine session, and a per-tick passwd read would be wasteful.
+  users: Users,
   /// Whether a previous process refresh exists to diff CPU usage against.
   warmed_up: bool,
 }
@@ -44,6 +47,7 @@ impl PortableSampler {
   pub fn new() -> Self {
     PortableSampler {
       system: System::new_with_specifics(RefreshKind::nothing()),
+      users: Users::new_with_refreshed_list(),
       warmed_up: false,
     }
   }
@@ -55,15 +59,20 @@ impl Default for PortableSampler {
   }
 }
 
-/// What to read about each process (§4.2): CPU and memory always, and the
-/// executable path and owner uid once. Command lines, environments, working
-/// directories, root directories and disk usage are never read.
+/// What to read about each process (§4.2): CPU, memory, the executable path,
+/// the owner uid, the command line, the scheduler state and the thread count.
+/// The command line and executable path are read once per pid (`OnlyIfNotSet`)
+/// because neither changes for a live process. Environments, working and root
+/// directories and disk usage are never read: the memory view does not show
+/// them, and the environment in particular can hold secrets.
 fn process_refresh_kind() -> ProcessRefreshKind {
   ProcessRefreshKind::nothing()
     .with_cpu()
     .with_memory()
     .with_exe(UpdateKind::OnlyIfNotSet)
     .with_user(UpdateKind::OnlyIfNotSet)
+    .with_cmd(UpdateKind::OnlyIfNotSet)
+    .with_tasks()
 }
 
 impl ProcessSampler for PortableSampler {
@@ -94,6 +103,14 @@ impl ProcessSampler for PortableSampler {
         uid: process_uid(process),
         name: process.name().to_string_lossy().into_owned(),
         exe: process.exe().map(Path::to_path_buf),
+        command: command_line(process),
+        user: process
+          .user_id()
+          .and_then(|uid| self.users.get_user_by_id(uid))
+          .map(|user| user.name().to_string()),
+        state: process_state(process.status()),
+        threads: process.tasks().map(|tasks| tasks.len() as u32),
+        listening_ports: Vec::new(),
         cpu_percent: if warmed_up {
           Some(process.cpu_usage())
         } else {
@@ -119,6 +136,69 @@ impl ProcessSampler for PortableSampler {
       },
       processes,
     })
+  }
+}
+
+/// The command line of `process`, joined with spaces, or `None` when the
+/// platform exposes no argv (or refuses this caller).
+fn command_line(process: &sysinfo::Process) -> Option<String> {
+  command_line_from_args(
+    process
+      .cmd()
+      .iter()
+      .map(|argument| argument.to_string_lossy().into_owned()),
+  )
+}
+
+/// Join argv, stopping before anything that looks like an environment
+/// assignment.
+///
+/// macOS keeps argv and the environment in one `KERN_PROCARGS2` buffer, and a
+/// process that calls `setproctitle` can leave empty argv slots between them.
+/// sysinfo's parser fills those slots from the environment in that case
+/// (observed with Raycast Backend: argc 4, three empty argv slots, then
+/// `COMMAND_MODE=…`). Stopping at the first `KEY=value` token keeps the
+/// environment out of the memory wire; a legitimate `make FOO=bar` argument is
+/// truncated too, which is the safer trade.
+fn command_line_from_args(arguments: impl Iterator<Item = String>) -> Option<String> {
+  let mut line = String::new();
+  for argument in arguments {
+    if is_environment_assignment(&argument) {
+      break;
+    }
+    if !line.is_empty() {
+      line.push(' ');
+    }
+    line.push_str(&argument);
+  }
+  let line = line.trim();
+  (!line.is_empty()).then(|| line.to_string())
+}
+
+/// Whether `argument` is a POSIX-style `NAME=value` environment entry.
+fn is_environment_assignment(argument: &str) -> bool {
+  let Some((name, _)) = argument.split_once('=') else {
+    return false;
+  };
+  let mut chars = name.chars();
+  let Some(first) = chars.next() else {
+    return false;
+  };
+  if !(first.is_ascii_alphabetic() || first == '_') {
+    return false;
+  }
+  chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+/// Map sysinfo's platform-specific statuses onto the six wire states.
+fn process_state(status: ProcessStatus) -> ProcessState {
+  match status {
+    ProcessStatus::Run => ProcessState::Running,
+    ProcessStatus::Sleep => ProcessState::Sleeping,
+    ProcessStatus::Idle => ProcessState::Idle,
+    ProcessStatus::Stop | ProcessStatus::Tracing => ProcessState::Stopped,
+    ProcessStatus::Zombie => ProcessState::Zombie,
+    _ => ProcessState::Unknown,
   }
 }
 
@@ -165,6 +245,19 @@ fn derive_pressure(total_bytes: u64, available_bytes: u64) -> MemoryPressure {
   }
 }
 
+/// The numeric owner of `process`. On Windows `sysinfo` reports a SID, not a
+/// `u32`; the owner is then unknown, which the safety rules treat as another
+/// user (S7), so nothing is ever quit there by mistake.
+#[cfg(unix)]
+fn process_uid(process: &sysinfo::Process) -> Option<u32> {
+  process.user_id().map(|uid| **uid)
+}
+
+#[cfg(not(unix))]
+fn process_uid(_process: &sysinfo::Process) -> Option<u32> {
+  None
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -200,6 +293,35 @@ mod tests {
   }
 
   #[test]
+  fn command_line_stops_before_the_environment() {
+    let arguments = [
+      "Raycast Backend".to_string(),
+      "COMMAND_MODE=unix2003".to_string(),
+      "HOME=/Users/hk".to_string(),
+    ];
+    assert_eq!(
+      command_line_from_args(arguments.into_iter()).as_deref(),
+      Some("Raycast Backend")
+    );
+    let arguments = ["node", "server.js", "--port", "3000"]
+      .into_iter()
+      .map(str::to_string);
+    assert_eq!(
+      command_line_from_args(arguments).as_deref(),
+      Some("node server.js --port 3000")
+    );
+  }
+
+  #[test]
+  fn environment_assignment_detection_is_narrow() {
+    assert!(is_environment_assignment("HOME=/Users/hk"));
+    assert!(is_environment_assignment("_FOO=1"));
+    assert!(!is_environment_assignment("--foo=bar"));
+    assert!(!is_environment_assignment("PATH"));
+    assert!(!is_environment_assignment("1FOO=bar"));
+  }
+
+  #[test]
   fn platform_matches_the_build_target() {
     let expected = if cfg!(target_os = "macos") {
       Platform::Macos
@@ -213,17 +335,4 @@ mod tests {
     assert_eq!(platform(), expected);
     assert_eq!(PortableSampler::new().platform(), expected);
   }
-}
-
-/// The numeric owner of `process`. On Windows `sysinfo` reports a SID, not a
-/// `u32`; the owner is then unknown, which the safety rules treat as another
-/// user (S7), so nothing is ever quit there by mistake.
-#[cfg(unix)]
-fn process_uid(process: &sysinfo::Process) -> Option<u32> {
-  process.user_id().map(|uid| **uid)
-}
-
-#[cfg(not(unix))]
-fn process_uid(_process: &sysinfo::Process) -> Option<u32> {
-  None
 }

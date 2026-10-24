@@ -76,7 +76,7 @@
    * Sort / filter / search / order-freeze are the pure functions from
    * `lib/memory/table.ts`. Props only; no transport.
    */
-  import type { MemorySnapshot } from '@space-lens/contract'
+  import type { MemorySnapshot, ProcessState } from '@space-lens/contract'
   import {
     ArrowDown,
     ArrowUp,
@@ -89,12 +89,23 @@
   } from '@lucide/svelte'
   import { Badge } from '../ui/badge/index'
   import { Button } from '../ui/button/index'
+  import * as ContextMenu from '../ui/context-menu/index'
   import { Checkbox } from '../ui/checkbox/index'
+  import * as HoverCard from '../ui/hover-card/index'
   import { Input } from '../ui/input/index'
   import KindGlyph from './KindGlyph.svelte'
+  import ProcessStateDot from './ProcessStateDot.svelte'
   import ColumnResizer from './ColumnResizer.svelte'
   import { TABLE_COLUMNS, loadWidths, saveWidths } from '../../lib/memory/columns.ts'
-  import { formatBytes, formatPercentValue } from '../../lib/memory/format.ts'
+  import {
+    formatBytes,
+    formatDuration,
+    formatPercentValue,
+    formatStartTime,
+    runningSeconds,
+    runningSecondsFromIso,
+  } from '../../lib/memory/format.ts'
+  import { PROCESS_STATE_LABELS, PROCESS_STATE_TEXT } from '../../lib/memory/labels.ts'
   import {
     applyOrderFreeze,
     selectGroups,
@@ -111,8 +122,14 @@
     onSelect: (key: string) => void
     /** Open the drawer for a row's group. */
     onOpen: (group: ProcessGroup) => void
+    /** Open the detail drawer for a member process row. */
+    onOpenProcess?: (process: ProcessRow) => void
     /** Add a row to the client Quit list (never executes). */
     onStage?: (key: string, target: StageTarget) => void
+    /** Build a graceful plan for the row (usually via the TerminateDialog). */
+    onQuit?: (row: TableRow) => void
+    /** Build a force plan for the row. */
+    onForceQuit?: (row: TableRow) => void
     onQueryChange: (query: TableQuery) => void
     /** Optional interval / pause chrome; hidden when the page does not supply it. */
     intervalMs?: number
@@ -128,7 +145,10 @@
     selection,
     onSelect,
     onOpen,
+    onOpenProcess,
     onStage,
+    onQuit,
+    onForceQuit,
     onQueryChange,
     intervalMs,
     onIntervalChange,
@@ -139,21 +159,26 @@
 
   const ROW_HEIGHT = 28
   const WIDTHS_KEY = 'spacelens.memory.tableColumns'
+  const DETAILS_KEY = 'spacelens.memory.tableDetails'
   /** The fixed checkbox and lock columns either side of the resizable ones. */
   const EDGE_COLUMNS_WIDTH = 64
   const OVERSCAN = 10
-  const FILTERS: readonly MemoryFilter[] = ['all', 'apps', 'background', 'mine', 'protected']
+  const FILTERS: readonly MemoryFilter[] = ['all', 'ports', 'apps', 'background', 'mine', 'protected']
   const FILTER_LABELS: Record<MemoryFilter, string> = {
     all: 'All',
     apps: 'Apps',
     background: 'Background',
     mine: 'Mine',
     protected: 'Protected',
+    ports: 'Ports',
   }
   const INTERVALS: readonly number[] = [1000, 2000, 5000]
 
   let expanded = $state<Set<string>>(new Set())
   let showVirtual = $state(false)
+  /** Started / user / state / command columns, off by default to keep the
+   * table dense; the detail drawer always has them. */
+  let showDetails = $state(readDetailsPreference())
   let frozen = $state(false)
   let prevOrder = $state<string[]>([])
   /**
@@ -164,6 +189,8 @@
   /** Where focus was last, for when its process exits. */
   let focusFallback = 0
   let scrollTop = $state(0)
+  /** A short confirmation in the footer after a context-menu copy. */
+  let copyNotice = $state<string | null>(null)
   let viewportHeight = $state(480)
   let viewportEl = $state<HTMLDivElement | null>(null)
 
@@ -230,6 +257,23 @@
 
   let widths = $state(loadWidths(WIDTHS_KEY, TABLE_COLUMNS))
   type TableColumn = keyof typeof TABLE_COLUMNS
+
+  function readDetailsPreference(): boolean {
+    try {
+      return globalThis.localStorage?.getItem(DETAILS_KEY) === 'true'
+    } catch {
+      return false
+    }
+  }
+
+  function toggleDetails(): void {
+    showDetails = !showDetails
+    try {
+      globalThis.localStorage?.setItem(DETAILS_KEY, String(showDetails))
+    } catch {
+      // The preference is a convenience; losing it is harmless.
+    }
+  }
   function resizeColumn(column: TableColumn, width: number): void {
     widths = { ...widths, [column]: width }
   }
@@ -241,11 +285,16 @@
       widths.memory +
       widths.real +
       (showVirtual ? widths.virtual : 0) +
+      widths.running +
+      widths.ports +
+      (showDetails ? widths.started + widths.user + widths.status + widths.command : 0) +
       widths.pid +
       widths.kind,
   )
 
-  let columnCount = $derived(showVirtual ? 9 : 8)
+  let columnCount = $derived(
+    10 + (showVirtual ? 1 : 0) + (showDetails ? 4 : 0),
+  )
   let restrictedCount = $derived(snapshot.processes.filter((process) => process.restricted).length)
   let showRestrictedNote = $derived(snapshot.notes.includes('restrictedProcesses') && restrictedCount > 0)
   let cpuWarmingUp = $derived(snapshot.notes.includes('cpuWarmingUp'))
@@ -263,6 +312,10 @@
   }
 
   function sortBy(key: MemorySortKey): void {
+    // The pointer is over the table when a header is clicked, and the
+    // hover-freeze would otherwise keep the previous order forever. A sort is
+    // an explicit instruction, so it always unfreezes first.
+    frozen = false
     if (query.sort === key) onQueryChange({ ...query, desc: !query.desc })
     else onQueryChange({ ...query, sort: key, desc: key !== 'name' })
   }
@@ -312,7 +365,7 @@
       case 'Enter':
         if (row) {
           event.preventDefault()
-          onOpen(row.group)
+          openRow(row)
         }
         break
       case 'Delete':
@@ -367,7 +420,7 @@
     const index = rowIndexFromEvent(event)
     if (index === null) return
     const row = rows[index]
-    if (row) onOpen(row.group)
+    if (row) openRow(row)
   }
 
   /** Keep the order frozen while focus moves between rows; unfreeze only on exit. */
@@ -415,6 +468,95 @@
   function rowName(row: TableRow): string {
     return row.kind === 'group' ? row.group.name : row.process.name
   }
+
+  function rowStarted(row: TableRow): string {
+    const at = row.kind === 'group' ? new Date(row.group.startedAt) : new Date(row.process.startTimeUs / 1_000)
+    if (Number.isNaN(at.getTime()) || at.getTime() <= 0) return '—'
+    return at.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  }
+
+  /** The full stamp for a hover title; the column itself is deliberately short. */
+  function rowStartedFull(row: TableRow): string {
+    if (row.kind === 'group') {
+      const at = new Date(row.group.startedAt)
+      return Number.isNaN(at.getTime()) || at.getTime() <= 0 ? '' : at.toLocaleString()
+    }
+    return formatStartTime(row.process.startTimeUs) ?? ''
+  }
+
+  function rowRunning(row: TableRow): string {
+    const seconds =
+      row.kind === 'group'
+        ? runningSecondsFromIso(row.group.startedAt, snapshot.sampledAt)
+        : runningSeconds(row.process.startTimeUs, snapshot.sampledAt)
+    return seconds === null ? '—' : formatDuration(seconds)
+  }
+
+  function rowUser(row: TableRow): string {
+    const process = row.kind === 'process' ? row.process : processByPid.get(row.group.mainPid)
+    if (process === undefined) return '—'
+    if (process.user !== null) return process.user
+    return process.ownedByCurrentUser ? 'You' : '—'
+  }
+
+  function rowStateValue(row: TableRow): ProcessState | null {
+    const process = row.kind === 'process' ? row.process : processByPid.get(row.group.mainPid)
+    return process?.state ?? null
+  }
+
+  function rowState(row: TableRow): string {
+    const state = rowStateValue(row)
+    return state === null ? '—' : PROCESS_STATE_LABELS[state]
+  }
+
+  function rowPorts(row: TableRow): readonly number[] {
+    if (row.kind === 'process') return row.process.listeningPorts
+    // A group's port may be held by a helper, not the main process. The Ports
+    // filter selects the whole group, so the column must show the union.
+    const ports = new Set<number>()
+    for (const pid of row.group.pids) {
+      for (const port of processByPid.get(pid)?.listeningPorts ?? []) ports.add(port)
+    }
+    return [...ports].sort((a, b) => a - b)
+  }
+
+  function portsText(ports: readonly number[]): string {
+    if (ports.length === 0) return '—'
+    if (ports.length <= 2) return ports.join(', ')
+    return `${ports[0]} +${ports.length - 1}`
+  }
+
+  function rowPath(row: TableRow): string | null {
+    return row.group.bundlePath
+  }
+
+  async function copyValue(label: string, value: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(value)
+      copyNotice = `Copied ${label}`
+    } catch {
+      copyNotice = 'Clipboard unavailable'
+    }
+    window.setTimeout(() => (copyNotice = null), 2_000)
+  }
+
+  function rowCommand(row: TableRow): string {
+    const process = row.kind === 'process' ? row.process : processByPid.get(row.group.mainPid)
+    return process?.command ?? '—'
+  }
+
+  function openRow(row: TableRow): void {
+    if (row.kind === 'process' && onOpenProcess) {
+      onOpenProcess(row.process)
+      return
+    }
+    onOpen(row.group)
+  }
 </script>
 
 <div class={`memory-table flex flex-col gap-2 ${className}`}>
@@ -423,7 +565,7 @@
       <Search class="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
       <Input
         class="pl-7"
-        placeholder="Search name, bundle id, pid"
+        placeholder="Search name, command, user, pid, port"
         aria-label="Search processes"
         value={query.search}
         oninput={(event) => onQueryChange({ ...query, search: event.currentTarget.value })}
@@ -471,6 +613,15 @@
         onclick={() => (showVirtual = !showVirtual)}
       >
         Virtual
+      </Button>
+      <Button
+        variant={showDetails ? 'secondary' : 'ghost'}
+        size="xs"
+        aria-pressed={showDetails}
+        title="Show start time, user, state and command columns"
+        onclick={toggleDetails}
+      >
+        Details
       </Button>
     </div>
   </div>
@@ -561,6 +712,41 @@
         {/if}
         <div
           role="columnheader"
+          aria-sort={sortAria('running')}
+          class="relative flex shrink-0 items-center justify-end px-2"
+          style:width={`${widths.running}px`}
+        >
+          <button
+            type="button"
+            class="flex items-center gap-1 hover:text-foreground"
+            title="Sort by start time"
+            onclick={() => sortBy('running')}
+          >
+            Running
+            {#if query.sort === 'running'}{#if query.desc}<ArrowDown class="size-3" />{:else}<ArrowUp class="size-3" />{/if}{/if}
+          </button>{@render resizer('running', 'Running')}
+        </div>
+        <div
+          role="columnheader"
+          class="relative flex shrink-0 items-center justify-end px-2"
+          style:width={`${widths.ports}px`}
+          title="Listening TCP ports"
+        >
+          Ports{@render resizer('ports', 'Ports')}
+        </div>
+        {#if showDetails}
+          <div role="columnheader" class="relative flex shrink-0 items-center px-2" style:width={`${widths.started}px`}>
+            Started{@render resizer('started', 'Started')}
+          </div>
+          <div role="columnheader" class="relative flex shrink-0 items-center px-2" style:width={`${widths.user}px`}>
+            User{@render resizer('user', 'User')}
+          </div>
+          <div role="columnheader" class="relative flex shrink-0 items-center px-2" style:width={`${widths.status}px`}>
+            State{@render resizer('status', 'State')}
+          </div>
+        {/if}
+        <div
+          role="columnheader"
           aria-sort={sortAria('pid')}
           class="relative flex shrink-0 items-center justify-end px-2"
           style:width={`${widths.pid}px`}
@@ -573,6 +759,11 @@
         <div role="columnheader" class="relative shrink-0 px-2" style:width={`${widths.kind}px`}>
           Kind{@render resizer('kind', 'Kind')}
         </div>
+        {#if showDetails}
+          <div role="columnheader" class="relative shrink-0 px-2" style:width={`${widths.command}px`}>
+            Command{@render resizer('command', 'Command')}
+          </div>
+        {/if}
         <div role="columnheader" class="w-8 shrink-0">
           <span class="sr-only">Protection</span>
         </div>
@@ -592,6 +783,9 @@
     {/if}
     {#if frozen}
       <span>Order paused while you point at the table or a row has focus.</span>
+    {/if}
+    {#if copyNotice !== null}
+      <span class="text-emerald-600 dark:text-emerald-400" role="status">{copyNotice}</span>
     {/if}
     {#if showRestrictedNote}
       <span
@@ -616,77 +810,176 @@
   {@const focused = index === focusIndex}
   {@const selected = selection.has(row.key)}
   {@const reason = protectionReason(rowProtection(row))}
-  <div
-    role="row"
-    aria-rowindex={index + 2}
-    aria-selected={selected}
-    data-focused={focused}
-    data-row-index={index}
-    class={`absolute left-0 flex w-full items-center text-sm ${focused ? 'bg-muted/60' : ''}`}
-    style={`top: ${index * ROW_HEIGHT}px; height: ${ROW_HEIGHT}px; min-width: ${rowWidth}px`}
-  >
-    <div role="gridcell" class="flex w-8 shrink-0 items-center justify-center">
-      <Checkbox
-        checked={selected}
-        aria-label={`Select ${rowName(row)}`}
-        onCheckedChange={() => onSelect(row.key)}
-      />
-    </div>
+  {@const state = rowStateValue(row)}
+  {@const ports = rowPorts(row)}
+  <ContextMenu.Root>
+    <ContextMenu.Trigger>
+      {#snippet child({ props })}
+      <div
+        {...props}
+        role="row"
+        aria-rowindex={index + 2}
+        aria-selected={selected}
+        data-focused={focused}
+        data-row-index={index}
+        class={`absolute left-0 flex w-full items-center text-sm ${focused ? 'bg-muted/60' : ''}`}
+        style={`top: ${index * ROW_HEIGHT}px; height: ${ROW_HEIGHT}px; min-width: ${rowWidth}px`}
+      >
+        <div role="gridcell" class="flex w-8 shrink-0 items-center justify-center">
+          <Checkbox
+            checked={selected}
+            aria-label={`Select ${rowName(row)}`}
+            onCheckedChange={() => onSelect(row.key)}
+          />
+        </div>
 
-    <div
-      role="gridcell"
-      class={`flex min-w-0 shrink-0 items-center gap-1.5 px-2 ${row.kind === 'process' ? 'pl-6' : ''}`}
-      style:width={`${widths.name}px`}
-    >
-      {#if row.kind === 'group'}
-        {#if row.group.pids.length > 1}
-          <button
-            type="button"
-            class="shrink-0 text-muted-foreground hover:text-foreground"
-            aria-expanded={expanded.has(row.group.groupId)}
-            aria-label={`${expanded.has(row.group.groupId) ? 'Collapse' : 'Expand'} ${row.group.name}`}
-            onclick={(event) => {
-              event.stopPropagation()
-              toggleExpand(row.group.groupId)
-            }}
-          >
-            {#if expanded.has(row.group.groupId)}
-              <ChevronDown class="size-3.5" />
+        <div
+          role="gridcell"
+          class={`flex min-w-0 shrink-0 items-center gap-1.5 px-2 ${row.kind === 'process' ? 'pl-6' : ''}`}
+          style:width={`${widths.name}px`}
+        >
+          {#if row.kind === 'group'}
+            {#if row.group.pids.length > 1}
+              <button
+                type="button"
+                class="shrink-0 text-muted-foreground hover:text-foreground"
+                aria-expanded={expanded.has(row.group.groupId)}
+                aria-label={`${expanded.has(row.group.groupId) ? 'Collapse' : 'Expand'} ${row.group.name}`}
+                onclick={(event) => {
+                  event.stopPropagation()
+                  toggleExpand(row.group.groupId)
+                }}
+              >
+                {#if expanded.has(row.group.groupId)}
+                  <ChevronDown class="size-3.5" />
+                {:else}
+                  <ChevronRight class="size-3.5" />
+                {/if}
+              </button>
             {:else}
-              <ChevronRight class="size-3.5" />
+              <span class="size-3.5 shrink-0"></span>
             {/if}
-          </button>
-        {:else}
-          <span class="size-3.5 shrink-0"></span>
-        {/if}
-      {/if}
-      <KindGlyph kind={rowKind(row)} />
-      <span class={`truncate ${row.kind === 'process' ? 'text-muted-foreground' : 'font-medium'}`}>
-        {rowName(row)}
-      </span>
-      {#if row.kind === 'group' && row.group.pids.length > 1}
-        <Badge variant="secondary" class="shrink-0">{row.group.pids.length} processes</Badge>
-      {/if}
-      {#if row.kind === 'group' && row.group.frontmost}
-        <Badge variant="outline" class="shrink-0">Frontmost</Badge>
-      {/if}
-      {#if reason}
-        <Lock class="size-3.5 shrink-0 text-muted-foreground" aria-label={reason} title={reason} />
-      {/if}
-    </div>
+          {/if}
+          <KindGlyph kind={rowKind(row)} />
+          {#if state !== null}<ProcessStateDot state={state} />{/if}
+          <span class={`truncate ${row.kind === 'process' ? 'text-muted-foreground' : 'font-medium'}`}>
+            {rowName(row)}
+          </span>
+          {#if row.kind === 'group' && row.group.pids.length > 1}
+            <Badge variant="secondary" class="shrink-0">{row.group.pids.length} processes</Badge>
+          {/if}
+          {#if row.kind === 'group' && row.group.frontmost}
+            <Badge variant="outline" class="shrink-0">Frontmost</Badge>
+          {/if}
+          {#if reason}
+            <Lock class="size-3.5 shrink-0 text-muted-foreground" aria-label={reason} title={reason} />
+          {/if}
+        </div>
 
-    <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.cpu}px`}>{cpuText(row.kind === 'group' ? row.group.cpuPercent : row.process.cpuPercent)}</div>
-    <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.memory}px`}>{memoryText(rowFootprint(row), rowResident(row))}</div>
-    <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.real}px`}>{rowResident(row) === null ? '—' : formatBytes(rowResident(row) ?? 0)}</div>
-    {#if showVirtual}
-      <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.virtual}px`}>{rowVirtual(row) === null ? '—' : formatBytes(rowVirtual(row) ?? 0)}</div>
-    {/if}
-    <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.pid}px`}>{rowPid(row)}</div>
-    <div role="gridcell" class="shrink-0 truncate px-2" style:width={`${widths.kind}px`}>{KIND_LABEL[rowKind(row)]}</div>
-    <div role="gridcell" class="flex w-8 shrink-0 items-center justify-center">
-      {#if reason}
-        <Lock class="size-3.5 text-muted-foreground" aria-label={reason} title={reason} />
-      {/if}
-    </div>
-  </div>
+        <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.cpu}px`}>{cpuText(row.kind === 'group' ? row.group.cpuPercent : row.process.cpuPercent)}</div>
+        <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.memory}px`}>{memoryText(rowFootprint(row), rowResident(row))}</div>
+        <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.real}px`}>{rowResident(row) === null ? '—' : formatBytes(rowResident(row) ?? 0)}</div>
+        {#if showVirtual}
+          <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.virtual}px`}>{rowVirtual(row) === null ? '—' : formatBytes(rowVirtual(row) ?? 0)}</div>
+        {/if}
+        <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.running}px`}>{rowRunning(row)}</div>
+        {#if ports.length > 0}
+          <HoverCard.Root openDelay={140} closeDelay={100}>
+            <HoverCard.Trigger>
+              {#snippet child({ props })}
+                <div
+                  {...props}
+                  role="gridcell"
+                  class="shrink-0 cursor-default truncate px-2 text-right font-mono text-xs text-sky-700 dark:text-sky-300"
+                  style:width={`${widths.ports}px`}
+                >{portsText(ports)}</div>
+              {/snippet}
+            </HoverCard.Trigger>
+            <HoverCard.Content side="bottom" align="end" class="w-64 p-3">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-xs font-semibold">Listening TCP ports</p>
+                <Badge variant="secondary">{ports.length}</Badge>
+              </div>
+              <div class="mt-2 flex max-h-56 flex-wrap gap-1 overflow-y-auto">
+                {#each ports as port (port)}
+                  <Badge variant="outline" class="font-mono text-[11px]">:{port}</Badge>
+                {/each}
+              </div>
+              <p class="mt-2 text-[11px] text-muted-foreground">Right-click the row to copy all ports.</p>
+            </HoverCard.Content>
+          </HoverCard.Root>
+        {:else}
+          <div
+            role="gridcell"
+            class="shrink-0 truncate px-2 text-right font-mono text-xs text-muted-foreground"
+            style:width={`${widths.ports}px`}
+          >—</div>
+        {/if}
+        {#if showDetails}
+          <div
+            role="gridcell"
+            class="shrink-0 truncate px-2 tabular-nums"
+            style:width={`${widths.started}px`}
+            title={rowStartedFull(row)}>{rowStarted(row)}</div
+          >
+          <div role="gridcell" class="shrink-0 truncate px-2" style:width={`${widths.user}px`}>{rowUser(row)}</div>
+          <div role="gridcell" class="shrink-0 truncate px-2" style:width={`${widths.status}px`}>
+            {#if state !== null}<ProcessStateDot {state} showLabel />{:else}—{/if}
+          </div>
+        {/if}
+        <div role="gridcell" class="shrink-0 truncate px-2 text-right tabular-nums" style:width={`${widths.pid}px`}>{rowPid(row)}</div>
+        <div role="gridcell" class="shrink-0 truncate px-2" style:width={`${widths.kind}px`}>{KIND_LABEL[rowKind(row)]}</div>
+        {#if showDetails}
+          <div role="gridcell" class="shrink-0 truncate px-2 font-mono text-xs" style:width={`${widths.command}px`} title={rowCommand(row)}>{rowCommand(row)}</div>
+        {/if}
+        <div role="gridcell" class="flex w-8 shrink-0 items-center justify-center">
+          {#if reason}
+            <Lock class="size-3.5 text-muted-foreground" aria-label={reason} title={reason} />
+          {/if}
+        </div>
+      </div>
+      {/snippet}
+
+    </ContextMenu.Trigger>
+    <ContextMenu.Content class="min-w-44">
+      {@render rowMenu(row)}
+    </ContextMenu.Content>
+  </ContextMenu.Root>
+{/snippet}
+{#snippet rowMenu(row: TableRow)}
+  <ContextMenu.Item onSelect={() => openRow(row)}>Inspect details</ContextMenu.Item>
+  {#if onStage || onQuit || onForceQuit}
+    <div class="my-1 h-px bg-border" role="separator"></div>
+  {/if}
+  {#if onStage}
+    <ContextMenu.Item disabled={rowProtection(row) !== null} onSelect={() => stageRow(row)}>
+      Add to Quit list
+    </ContextMenu.Item>
+  {/if}
+  {#if onQuit}
+    <ContextMenu.Item disabled={rowProtection(row) !== null} onSelect={() => onQuit?.(row)}>Quit</ContextMenu.Item>
+  {/if}
+  {#if onForceQuit}
+    <ContextMenu.Item
+      class="text-destructive"
+      disabled={rowProtection(row) !== null}
+      onSelect={() => onForceQuit?.(row)}>Force quit</ContextMenu.Item
+    >
+  {/if}
+  <div class="my-1 h-px bg-border" role="separator"></div>
+  <ContextMenu.Item onSelect={() => void copyValue('PID', String(rowPid(row)))}>Copy PID</ContextMenu.Item>
+  <ContextMenu.Item onSelect={() => void copyValue('name', rowName(row))}>Copy name</ContextMenu.Item>
+  {#if rowCommand(row) !== '—'}
+    <ContextMenu.Item onSelect={() => void copyValue('command', rowCommand(row))}>Copy command</ContextMenu.Item>
+  {/if}
+  {#if rowPath(row) !== null}
+    <ContextMenu.Item onSelect={() => void copyValue('path', rowPath(row) ?? '')}>Copy path</ContextMenu.Item>
+  {/if}
+  {#if rowPorts(row).length > 0}
+    <ContextMenu.Item
+      onSelect={() => void copyValue('listening ports', rowPorts(row).map((port) => `:${port}`).join(', '))}
+    >
+      Copy listening ports
+    </ContextMenu.Item>
+  {/if}
 {/snippet}

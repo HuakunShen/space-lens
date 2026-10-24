@@ -29,7 +29,12 @@
     "residentBytes": 398458880,
     "virtualBytes": 5153960755,
     "restricted": false,
-    "protection": null
+    "protection": null,
+    "command": "/Applications/Dia.app/Contents/MacOS/Dia --show-dock-icon",
+    "user": "hk",
+    "state": "sleeping",
+    "threads": 17,
+    "listeningPorts": [3080, 7265]
   },
   "ProcessGroup": {
     "groupId": "grp_0123456789abcdef",
@@ -107,7 +112,12 @@
         "residentBytes": 398458880,
         "virtualBytes": 5153960755,
         "restricted": false,
-        "protection": null
+        "protection": null,
+        "command": "/Applications/Dia.app/Contents/MacOS/Dia --show-dock-icon",
+        "user": "hk",
+        "state": "sleeping",
+        "threads": 17,
+    "listeningPorts": [3080, 7265]
       }
     ],
     "notes": [
