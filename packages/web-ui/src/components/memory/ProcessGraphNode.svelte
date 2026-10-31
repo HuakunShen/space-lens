@@ -33,13 +33,17 @@
 </script>
 
 <div
+  role="button"
+  tabindex="0"
+  ondblclick={() => data.onEnter?.(node.pid)}
+  onkeydown={(event) => { if (event.key === 'Enter') data.onEnter?.(node.pid) }}
   class={cardClass}
   style:width={`${GRAPH_NODE_WIDTH}px`}
   title={`${node.name} · pid ${node.pid}${node.groupName === null ? '' : ` · ${node.groupName}`}`}
   data-role={node.role}
   data-pid={node.pid}
 >
-  <Handle type="target" position={Position.Top} isConnectable={false} />
+  <Handle type="target" position={data.horizontal ? Position.Left : Position.Top} isConnectable={false} />
 
   <div class="flex items-center gap-1.5">
     <KindGlyph kind={node.kind} class="size-3.5 shrink-0 text-muted-foreground" />
@@ -70,5 +74,5 @@
     <div class="h-full rounded-full bg-primary/60" style:width={`${percent}%`}></div>
   </div>
 
-  <Handle type="source" position={Position.Bottom} isConnectable={false} />
+  <Handle type="source" position={data.horizontal ? Position.Right : Position.Bottom} isConnectable={false} />
 </div>

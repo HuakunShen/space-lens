@@ -56,6 +56,7 @@
   import { addToQuitList, type QuitListEntry, type TerminateOrigin } from './quit-list.ts'
   import { memoryPortFromService } from './memory-port.ts'
   import { createPoller } from './poller.ts'
+  import MemoryChart from './MemoryChart.svelte'
 
   /** The contract ships the enum as a literal array, so derive the union. */
   type TerminateMode = TerminatePlan['mode']
@@ -158,6 +159,12 @@
    * sets it; it is not the Quit selection, which stays on the checkboxes.
    */
   let focusPid = $state<number | null>(null)
+  let chartDepth = $state(2)
+  let selectedPid = $state<number | null>(null)
+  function enterProcess(pid: number | null): void {
+    focusPid = pid
+    selectedPid = pid
+  }
   let openGroup = $state<ProcessGroup | null>(null)
   /**
    * The process whose detail drawer is open, stored as its identity rather than
@@ -641,8 +648,8 @@
         </div>
       {/if}
 
-      <div class="flex flex-wrap items-start gap-4">
-        <div class="flex min-w-0 flex-1 basis-[32rem] flex-col gap-3">
+      <div class="memory-panels">
+        <div class="memory-table-panel flex min-w-0 flex-col gap-3">
           <div class="flex items-center gap-1" role="group" aria-label="Table or process tree">
             <Button.Root size="sm" variant={view === 'table' ? 'secondary' : 'ghost'} onclick={() => (view = 'table')}>
               By size
@@ -657,6 +664,8 @@
               {snapshot}
               {query}
               {selection}
+              {selectedPid}
+              onFocus={enterProcess}
               onSelect={toggleSelect}
               onOpen={openDrawer}
               onOpenProcess={openProcessDrawer}
@@ -682,8 +691,8 @@
               onSelect={toggleSelect}
               onOpen={openDrawer}
               onOpenProcess={openProcessDrawer}
-              onFocus={(pid) => (focusPid = pid)}
-              {focusPid}
+              onFocus={enterProcess}
+              focusPid={selectedPid}
               onStage={terminateAvailable ? stage : undefined}
               scope={treeScope}
               onScopeChange={(scope) => (treeScope = scope)}
@@ -691,15 +700,12 @@
           {/if}
         </div>
 
-        {#if focusPid !== null}
-          <ProcessGraph
-            {snapshot}
-            pid={focusPid}
-            onFocus={(pid) => (focusPid = pid)}
-            onClose={() => (focusPid = null)}
-            class="w-full self-start xl:sticky xl:top-4 xl:w-[36rem] xl:shrink-0"
-          />
-        {/if}
+        <MemoryChart {snapshot} {focusPid} {selectedPid} bind:depth={chartDepth} onSelect={(pid) => (selectedPid = pid)} onFocus={enterProcess} onDetails={openProcessDrawer} />
+        <div class="min-w-0" id="memory-flow">
+          {#if snapshot.processes.length > 0}
+            <ProcessGraph {snapshot} pid={selectedPid ?? focusPid ?? (snapshot.processes.find((process) => process.pid === 1)?.pid ?? snapshot.processes[0]!.pid)} maxDepth={chartDepth} onFocus={(pid) => (selectedPid = pid)} onEnter={enterProcess} onClose={selectedPid === null ? undefined : () => enterProcess(null)} class="w-full" />
+          {/if}
+        </div>
       </div>
 
       {#if !terminateAvailable}
@@ -808,3 +814,15 @@
     {measuredSeconds}
   />
 {/if}
+
+<style>
+  .memory-panels { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+  @media (min-width: 1000px) {
+    .memory-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .memory-table-panel { grid-column: 1 / -1; }
+  }
+  @media (min-width: 1600px) {
+    .memory-panels { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); }
+    .memory-table-panel { grid-column: auto; }
+  }
+</style>

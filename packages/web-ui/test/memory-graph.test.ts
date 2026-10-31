@@ -6,12 +6,7 @@ import type { MemorySnapshot, ProcessRow } from '@space-lens/contract'
 import { buildForest } from '../src/lib/memory/tree.ts'
 import { GRAPH_X_GAP, GRAPH_Y_GAP, buildProcessGraph } from '../src/lib/memory/graph.ts'
 
-function row(
-  pid: number,
-  name: string,
-  ppid: number | null,
-  footprintBytes: number | null = null,
-): ProcessRow {
+function row(pid: number, name: string, ppid: number | null, footprintBytes: number | null = null): ProcessRow {
   return {
     pid,
     ppid,
@@ -93,12 +88,20 @@ test('the chain above, the focus and the subtree below become one diagram', () =
   assert.equal(node(7).role, 'descendant')
   assert.equal(node(8).role, 'descendant')
   // vim is a sibling of cargo, not of the focus, so it stays out.
-  assert.equal(graph.nodes.some((candidate) => candidate.pid === 4), false)
-
-  assert.deepEqual(
-    graph.edges.map((edge) => `${edge.source}>${edge.target}:${edge.kind}`).sort(),
-    ['1>2:chain', '2>3:chain', '3>5:chain', '5>10:context', '5>6:chain', '6>7:branch', '6>8:branch'],
+  assert.equal(
+    graph.nodes.some((candidate) => candidate.pid === 4),
+    false,
   )
+
+  assert.deepEqual(graph.edges.map((edge) => `${edge.source}>${edge.target}:${edge.kind}`).sort(), [
+    '1>2:chain',
+    '2>3:chain',
+    '3>5:chain',
+    '5>10:context',
+    '5>6:chain',
+    '6>7:branch',
+    '6>8:branch',
+  ])
   assert.equal(graph.truncated, false)
   assert.equal(graph.hiddenProcesses, 0)
   assert.equal(graph.focusDescendantCount, 2)
@@ -134,7 +137,10 @@ test('sibling context is capped and the left-out children are counted', () => {
   const siblings = graph.nodes.filter((candidate) => candidate.role === 'sibling')
   assert.equal(siblings.length, 3)
   // The forest sorts children by memory, so the biggest three come along.
-  assert.deepEqual(siblings.map((candidate) => candidate.name), ['worker0', 'worker1', 'worker2'])
+  assert.deepEqual(
+    siblings.map((candidate) => candidate.name),
+    ['worker0', 'worker1', 'worker2'],
+  )
   const root = graph.nodes.find((candidate) => candidate.pid === 1)!
   assert.equal(root.hiddenChildren, 5)
   assert.equal(graph.truncated, true)
@@ -142,7 +148,10 @@ test('sibling context is capped and the left-out children are counted', () => {
 
 test('siblings can be switched off', () => {
   const graph = buildProcessGraph(rustcForest(), 6, { maxSiblings: 0 })!
-  assert.equal(graph.nodes.some((candidate) => candidate.role === 'sibling'), false)
+  assert.equal(
+    graph.nodes.some((candidate) => candidate.role === 'sibling'),
+    false,
+  )
   const cargo = graph.nodes.find((candidate) => candidate.pid === 5)!
   assert.equal(cargo.hiddenChildren, 1)
 })
@@ -211,4 +220,18 @@ test('the focus keeps a single position when its own subtree grows', () => {
   const withChild = buildProcessGraph(rustcForest(), 7)!
   assert.equal(small.focus.x, 0)
   assert.equal(withChild.focus.x, 0)
+})
+
+test('limits descendants by generation while keeping totals and hidden counts', () => {
+  const forest = buildForest(
+    snapshot([row(1, 'app', null, 10), row(2, 'child', 1, 20), row(3, 'grandchild', 2, 30), row(4, 'leaf', 3, 40)]),
+  )
+  const graph = buildProcessGraph(forest, 1, { maxDepth: 1 })!
+  assert.deepEqual(
+    graph.nodes.map((node) => node.pid),
+    [1, 2],
+  )
+  assert.equal(graph.focus.subtreeBytes, 100)
+  assert.equal(graph.nodes.find((node) => node.pid === 2)?.hiddenChildren, 1)
+  assert.equal(graph.hiddenProcesses, 2)
 })

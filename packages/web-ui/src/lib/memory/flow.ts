@@ -8,4 +8,7 @@
 import type { Node } from '@xyflow/svelte'
 import type { GraphNode } from './graph.ts'
 
-export type ProcessFlowNode = Node<{ node: GraphNode }, 'process'>
+export type ProcessFlowNode = Node<
+  { node: GraphNode; horizontal?: boolean; onEnter?: (pid: number) => void },
+  'process'
+>

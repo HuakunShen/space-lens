@@ -124,6 +124,8 @@
     onOpen: (group: ProcessGroup) => void
     /** Open the detail drawer for a member process row. */
     onOpenProcess?: (process: ProcessRow) => void
+    selectedPid?: number | null
+    onFocus?: (pid: number) => void
     /** Add a row to the client Quit list (never executes). */
     onStage?: (key: string, target: StageTarget) => void
     /** Build a graceful plan for the row (usually via the TerminateDialog). */
@@ -146,6 +148,8 @@
     onSelect,
     onOpen,
     onOpenProcess,
+    selectedPid = null,
+    onFocus,
     onStage,
     onQuit,
     onForceQuit,
@@ -365,7 +369,8 @@
       case 'Enter':
         if (row) {
           event.preventDefault()
-          openRow(row)
+          if (onFocus) onFocus(rowPid(row))
+          else openRow(row)
         }
         break
       case 'Delete':
@@ -413,7 +418,13 @@
   /** Click delegation: rows are not individually focusable; the grid owns focus. */
   function handleGridClick(event: MouseEvent): void {
     const index = rowIndexFromEvent(event)
-    if (index !== null) focusRow(index)
+    if (index !== null) {
+      focusRow(index)
+      const target = event.target
+      if (target instanceof HTMLElement && target.closest('button, input, [role="checkbox"]')) return
+      const row = rows[index]
+      if (row) onFocus?.(rowPid(row))
+    }
   }
 
   function handleGridDblClick(event: MouseEvent): void {
@@ -429,6 +440,18 @@
     if (next instanceof Node && viewportEl?.contains(next)) return
     frozen = false
   }
+
+  let revealedPid: number | null = null
+  $effect(() => {
+    if (selectedPid === null || selectedPid === revealedPid) return
+    revealedPid = selectedPid
+    const group = snapshot.groups.find((group) => group.pids.includes(selectedPid!))
+    if (group && group.mainPid !== selectedPid) expanded = new Set([...expanded, group.groupId])
+    queueMicrotask(() => {
+      const index = rows.findIndex((row) => rowPid(row) === selectedPid)
+      if (index >= 0 && viewportEl) viewportEl.scrollTop = Math.max(0, index * ROW_HEIGHT - viewportEl.clientHeight / 2)
+    })
+  })
 
   function memoryText(footprint: number | null, resident: number | null): string {
     if (footprint !== null && footprint > 0) return formatBytes(footprint)
@@ -807,6 +830,7 @@
 {/snippet}
 
 {#snippet dataRow(row: TableRow, index: number)}
+  {@const active = selectedPid !== null && rowPid(row) === selectedPid}
   {@const focused = index === focusIndex}
   {@const selected = selection.has(row.key)}
   {@const reason = protectionReason(rowProtection(row))}
@@ -819,10 +843,10 @@
         {...props}
         role="row"
         aria-rowindex={index + 2}
-        aria-selected={selected}
+        aria-selected={selected || active}
         data-focused={focused}
         data-row-index={index}
-        class={`absolute left-0 flex w-full items-center text-sm ${focused ? 'bg-muted/60' : ''}`}
+        class={`absolute left-0 flex w-full items-center text-sm ${active ? 'bg-primary/15 text-primary' : focused ? 'bg-muted/60' : ''}`}
         style={`top: ${index * ROW_HEIGHT}px; height: ${ROW_HEIGHT}px; min-width: ${rowWidth}px`}
       >
         <div role="gridcell" class="flex w-8 shrink-0 items-center justify-center">

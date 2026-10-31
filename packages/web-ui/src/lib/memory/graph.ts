@@ -11,13 +11,7 @@
  * `GraphEdge` are our own): the component adapts them, and swapping the
  * renderer later never touches the tree logic.
  */
-import {
-  ancestryOf,
-  type ProcessForest,
-  type TreeNode,
-  type TreeKind,
-  type TreeProtection,
-} from './tree.ts'
+import { ancestryOf, type ProcessForest, type TreeNode, type TreeKind, type TreeProtection } from './tree.ts'
 
 /** Node width in layout units; the rendered card uses the same width. */
 export const GRAPH_NODE_WIDTH = 168
@@ -113,6 +107,8 @@ export interface GraphOptions {
   readonly maxChildren?: number
   /** Nodes one generation may hold; a huge fan-out would be a wall of cards. */
   readonly maxPerLevel?: number
+  /** Maximum descendant generations, excluding the focus. */
+  readonly maxDepth?: number
 }
 
 /**
@@ -131,11 +127,7 @@ export interface GraphOptions {
  *
  * Returns `null` for a pid that is not in the forest.
  */
-export function buildProcessGraph(
-  forest: ProcessForest,
-  pid: number,
-  options: GraphOptions = {},
-): ProcessGraph | null {
+export function buildProcessGraph(forest: ProcessForest, pid: number, options: GraphOptions = {}): ProcessGraph | null {
   const focus = forest.byPid.get(pid)
   if (focus === undefined) return null
 
@@ -194,14 +186,17 @@ export function buildProcessGraph(
   // are the expensive ones; everything folded away is reported as `+N`.
   let frontier: Draft[] = [focusDraft]
   let drawnDescendants = 0
+  let generation = 0
+  const maxDepth = Math.max(0, Math.floor(options.maxDepth ?? Number.MAX_SAFE_INTEGER))
   while (frontier.length > 0) {
+    if (generation >= maxDepth) {
+      for (const node of frontier) node.hiddenChildren = node.node.children.length
+      break
+    }
     const next: Draft[] = []
     for (const current of frontier) {
       const children = current.node.children
-      const take = Math.max(
-        0,
-        Math.min(children.length, maxChildren, budget, maxPerLevel - next.length),
-      )
+      const take = Math.max(0, Math.min(children.length, maxChildren, budget, maxPerLevel - next.length))
       for (let index = 0; index < take; index += 1) {
         const child = draftOf(children[index]!, 'descendant')
         current.children.push(child)
@@ -212,6 +207,7 @@ export function buildProcessGraph(
       if (take < children.length) current.hiddenChildren = children.length - take
     }
     frontier = next
+    generation += 1
   }
 
   // Tidy layout: leaves get consecutive slots, a parent sits centred over its

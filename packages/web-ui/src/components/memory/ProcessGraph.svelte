@@ -42,14 +42,16 @@
     snapshot: MemorySnapshot
     /** The process to draw the neighbourhood of. */
     pid: number
+    maxDepth?: number
     /** Move the focus to another process (a card click). */
     onFocus?: (pid: number) => void
+    onEnter?: (pid: number) => void
     /** Close the panel. */
     onClose?: () => void
     class?: string
   }
 
-  let { snapshot, pid, onFocus, onClose, class: className = '' }: Props = $props()
+  let { snapshot, pid, maxDepth, onFocus, onEnter, onClose, class: className = '' }: Props = $props()
 
   /** The zoom the panel opens at: below ~0.75 the card text stops reading. */
   const VIEW_ZOOM = 0.82
@@ -67,6 +69,7 @@
     context: 'stroke: var(--border); stroke-width: 1; stroke-dasharray: 4 4; opacity: 0.6',
   }
 
+  let horizontal = $state(true)
   let dark = $state(false)
   let paneWidth = $state(0)
   let paneHeight = $state(0)
@@ -81,7 +84,7 @@
   })
 
   let forest = $derived(buildForest(snapshot))
-  let graph = $derived(buildProcessGraph(forest, pid))
+  let graph = $derived(buildProcessGraph(forest, pid, { maxDepth }))
 
   /** The chain from the topmost ancestor to the focus, for the header. */
   let chain = $derived(
@@ -98,8 +101,8 @@
     (graph?.nodes ?? []).map((node) => ({
       id: String(node.pid),
       type: 'process',
-      position: { x: node.x - GRAPH_NODE_WIDTH / 2, y: node.y },
-      data: { node },
+      position: horizontal ? { x: node.y * 2.4, y: node.x * 0.48 } : { x: node.x - GRAPH_NODE_WIDTH / 2, y: node.y },
+      data: { node, horizontal, onEnter },
       draggable: false,
       selectable: false,
     })),
@@ -127,6 +130,7 @@
     if (graph === null || paneWidth === 0 || paneHeight === 0) {
       return { x: 0, y: 0, zoom: VIEW_ZOOM }
     }
+    if (horizontal) return { x: paneWidth * 0.3 - graph.focus.y * 2.4 * VIEW_ZOOM, y: paneHeight / 2 - (graph.focus.x * 0.48 + CARD_CENTER) * VIEW_ZOOM, zoom: VIEW_ZOOM }
     const focusCenter = graph.focus.y + CARD_CENTER
     const minY = Math.min(...graph.nodes.map((node) => node.y))
     const maxY = Math.max(...graph.nodes.map((node) => node.y)) + CARD_CENTER * 2
@@ -168,6 +172,7 @@
           The process exited, or the snapshot no longer lists it.
         </p>
       </div>
+      <button class="shrink-0 rounded border px-2 py-1 text-xs hover:bg-muted" onclick={() => horizontal = !horizontal}>{horizontal ? 'Horizontal →' : 'Vertical ↓'}</button>
       {#if onClose}
         <Button variant="ghost" size="xs" aria-label="Close the process diagram" onclick={onClose}>
           <X class="size-3.5" />
@@ -201,6 +206,7 @@
           </span>
         </div>
       </div>
+      <button class="shrink-0 rounded border px-2 py-1 text-xs hover:bg-muted" onclick={() => horizontal = !horizontal}>{horizontal ? 'Horizontal →' : 'Vertical ↓'}</button>
       {#if onClose}
         <Button variant="ghost" size="xs" aria-label="Close the process diagram" onclick={onClose}>
           <X class="size-3.5" />
@@ -209,12 +215,12 @@
     </header>
 
     <div
-      class="relative h-[clamp(24rem,60vh,42rem)] w-full"
+      class="relative h-[clamp(22rem,55vh,38rem)] w-full"
       bind:clientWidth={paneWidth}
       bind:clientHeight={paneHeight}
     >
       {#if paneWidth > 0 && paneHeight > 0}
-        {#key pid}
+        {#key `${pid}:${horizontal}`}
           <SvelteFlow
             nodes={flowNodes}
             edges={flowEdges}
@@ -257,7 +263,7 @@
     <footer
       class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t px-3 py-2 text-[11px] text-muted-foreground"
     >
-      <span>Click a card to make it the focus · drag to pan, scroll to zoom</span>
+      <span>Click to select · double-click to explore · drag to pan</span>
       {#if graph.hiddenProcesses > 0}
         <span>{graph.hiddenProcesses} below not drawn</span>
       {:else}
