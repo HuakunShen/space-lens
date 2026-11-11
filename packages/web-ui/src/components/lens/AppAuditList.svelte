@@ -9,6 +9,8 @@
     purgeableTotal,
   } from '../../lib/app-audit'
   import { initialsFor } from '../../lib/app-audit'
+  import { SOFTWARE_PRESETS, summarizePresetStorage } from '../../lib/presets/index.ts'
+  import PresetStorageCard from './PresetStorageCard.svelte'
   import { ensureIcon, readIcon, subscribeIcons } from '../../lib/app-icon-cache'
   import LensSelect from './LensSelect.svelte'
   import AppAuditCard from './AppAuditCard.svelte'
@@ -83,7 +85,17 @@
   let grandTotal = $derived(report?.apps.reduce((total, app) => total + app.totalSize, 0) ?? 0)
   let reclaimable = $derived(report?.apps.flatMap((app) => app.locations) ?? [])
   let reclaimableTotal = $derived(purgeableTotal(reclaimable))
-  let filtered = $derived((report?.apps ?? []).filter((app) => matchesQuery(app, query)))
+  /** The preset card's selected program; its storage ids narrow the list. */
+  let presetPick = $state<{ presetId: string; ruleId: string } | null>(null)
+  let presetIds = $derived.by(() => {
+    if (presetPick === null) return null
+    const preset = SOFTWARE_PRESETS.find((candidate) => candidate.id === presetPick!.presetId)
+    const rule = preset?.rules.find((candidate) => candidate.id === presetPick!.ruleId)
+    return new Set(rule?.storage ?? [])
+  })
+  let filtered = $derived(
+    (report?.apps ?? []).filter((app) => matchesQuery(app, query) && (presetIds === null || presetIds.has(app.id))),
+  )
 
   function isStale(appId: string): boolean {
     if (staleByApp instanceof Map) return staleByApp.get(appId) === true
@@ -183,6 +195,21 @@
         ><RefreshCw size={14} /> Refresh</Button
       >
     </div>
+    {#if report}
+      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {#each SOFTWARE_PRESETS as preset (preset.id)}
+          {@const summary = summarizePresetStorage(report, preset)}
+          <PresetStorageCard
+            label={preset.label}
+            description={preset.description}
+            {summary}
+            ready={!loading}
+            selected={presetPick?.presetId === preset.id ? presetPick.ruleId : null}
+            onSelect={(ruleId) => (presetPick = ruleId === null ? null : { presetId: preset.id, ruleId })}
+          />
+        {/each}
+      </div>
+    {/if}
     {#if error}<div class="inline-error" role="alert">
         <p>{error}</p>
         <Button variant="outline" size="sm" onclick={onRefresh}>Try again</Button>

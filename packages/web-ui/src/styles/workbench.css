@@ -291,6 +291,16 @@
   .compact-workbench .explorer-layout.without-chart {
     grid-template-columns: minmax(0, 1fr);
   }
+  /* Chart focus: the map takes the whole layout and the contents list is
+     hidden. !important beats the orientation rules, which are more specific. */
+  .compact-workbench .explorer-layout.chart-focused {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+  }
+  .explorer-layout.chart-focused .explorer-divider,
+  .explorer-layout.chart-focused .explorer-sidebar {
+    display: none !important;
+  }
   /* Stacked mode: the chart rides on top and the divider resizes the
      contents list's height. Declared after the column rules so a narrow
      panel (DSH side panel, VS Code webview) can flip orientation without
