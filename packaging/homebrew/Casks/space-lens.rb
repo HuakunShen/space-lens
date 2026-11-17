@@ -19,9 +19,9 @@
 cask "space-lens" do
   arch arm: "aarch64", intel: "x64"
 
-  version "0.1.0"
-  sha256 arm:   "REPLACE_WITH_DMG_SHA256",
-         intel: "REPLACE_WITH_DMG_SHA256"
+  version "0.8.1"
+  sha256 arm:   "e5fa1c2f796193823aac9e0caf4bd7338278339054f84fa059e8d3aeb8926eb4",
+         intel: "a036dfc5ea3fe33bc53d4a0b2e4c73a372948b7f8e0235143eb73631bdb8e932"
 
   url "https://github.com/HuakunShen/space-lens/releases/download/app-v#{version}/Space.Lens_#{version}_#{arch}.dmg"
   name "Space Lens"
