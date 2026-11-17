@@ -147,6 +147,7 @@ docs
 /apps/web/build
 /apps/web/build-desktop
 /apps/web/build-embed
+/apps/site/build
 /apps/desktop/src-tauri/target
 /apps/desktop/src-tauri/gen
 # GPUI shell: standalone workspace, its target/ lives inside apps/gpui
