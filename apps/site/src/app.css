@@ -2,6 +2,16 @@
 @source '../../../packages/web-ui/src';
 @source './routes';
 
+/* The shared workbench CSS locks html/body to a viewport-sized app. A public
+   landing page needs the document itself to scroll past the embedded demo. */
+@layer base {
+  html, body {
+    height: auto;
+    min-height: 100%;
+    overflow-y: auto;
+  }
+}
+
 :root { color-scheme: dark; }
 html { scroll-behavior: smooth; }
 body { margin: 0; background: #080c11; color: #edf2f7; font-family: Inter,ui-sans-serif,system-ui,sans-serif; }

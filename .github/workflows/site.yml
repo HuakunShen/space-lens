@@ -42,6 +42,8 @@ jobs:
         run: SPACE_LENS_SITE_BASE='' GITHUB_PAGES=true yarn workspace @space-lens/site build
       - name: Verify custom-domain output
         run: node apps/site/scripts/verify-pages-output.mjs
+      - name: Verify landing page scroll styles
+        run: node apps/site/scripts/verify-page-scroll.mjs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
