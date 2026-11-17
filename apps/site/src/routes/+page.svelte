@@ -77,7 +77,7 @@
 <div class="site-shell" id="top">
   <div class="grid-haze" aria-hidden="true"></div>
   <header class="site-nav">
-    <a class="brand" href={`${base}/`} aria-label="Space Lens home"><span class="brand-mark"><span></span><span></span><span></span></span> Space<span>Lens</span><i>.</i></a>
+    <a class="brand" href={`${base}/`} aria-label="Space Lens home"><img class="brand-mark" src={`${base}/logo-mark.png`} alt="" width="38" height="38" /> Space<span>Lens</span><i>.</i></a>
     <nav aria-label="Main navigation">
       <a href="#demo">Live demo</a>
       <a href="#features">Features</a>
@@ -199,5 +199,5 @@
 
     <section class="closing"><p class="overline">/ SEE YOUR SYSTEM DIFFERENTLY</p><h2>Less guessing.<br/><em>More breathing room.</em></h2><p>Open source. Built with Rust and Svelte. Available across multiple frontends.</p><div class="hero-actions"><a class="action-primary" href={releaseUrl}>Download Space Lens ↗</a><a class="action-secondary" href="https://github.com/HuakunShen/space-lens">View source on GitHub ↗</a></div></section>
   </main>
-  <footer class="site-footer"><a class="brand" href={`${base}/`}><span class="brand-mark"><span></span><span></span><span></span></span> Space<span>Lens</span><i>.</i></a><span>Made for the curious, built for the careful.</span><div><a href="#demo">Demo</a><a href={releaseUrl}>Releases</a><a href="https://github.com/HuakunShen/space-lens">GitHub ↗</a></div></footer>
+  <footer class="site-footer"><a class="brand" href={`${base}/`}><img class="brand-mark" src={`${base}/logo-mark.png`} alt="" width="38" height="38" /> Space<span>Lens</span><i>.</i></a><span>Made for the curious, built for the careful.</span><div><a href="#demo">Demo</a><a href={releaseUrl}>Releases</a><a href="https://github.com/HuakunShen/space-lens">GitHub ↗</a></div></footer>
 </div>
