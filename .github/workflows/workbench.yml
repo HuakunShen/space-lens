@@ -134,6 +134,66 @@ jobs:
           targets: ${{ matrix.targets }}
       - name: Build the web desktop flavor first (the shell embeds it at compile time)
         run: yarn workspace @space-lens/web build:desktop
+
+      - name: Require the Apple Developer ID configuration
+        # Fail before the expensive build: Tauri only *warns* when notarization
+        # credentials are missing, which would publish a bundle Gatekeeper rejects.
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_API_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_NOTARY_API_KEY_P8_BASE64 APPLE_NOTARY_KEY_ID \
+                      APPLE_NOTARY_ISSUER_ID APPLE_TEAM_ID; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::required Apple signing secret $name is empty"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::refusing to build a macOS release without Developer ID signing and notarization credentials"
+            exit 1
+          fi
+
+          # notarytool reads the key through APPLE_API_KEY_PATH; Tauri does not
+          # write it for us, and its search paths are relative to $HOME.
+          PRIVATE_KEYS="$RUNNER_TEMP/private_keys"
+          mkdir -p "$PRIVATE_KEYS"
+          printf '%s' "$APPLE_NOTARY_API_KEY_P8_BASE64" \
+            | base64 -D > "$PRIVATE_KEYS/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+          chmod 600 "$PRIVATE_KEYS/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+
+          # Prove the certificate and its password work now, not after a long
+          # build. This keychain is only a probe; Tauri imports APPLE_CERTIFICATE
+          # into its own temporary keychain when it signs.
+          CERTIFICATE="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN="$RUNNER_TEMP/preflight.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$CERTIFICATE"
+          cleanup() {
+            security delete-keychain "$KEYCHAIN" >/dev/null 2>&1 || true
+            rm -f "$CERTIFICATE"
+          }
+          trap cleanup EXIT
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERTIFICATE" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -k "$KEYCHAIN"
+          security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep -F "$APPLE_SIGNING_IDENTITY" \
+            || { echo "::error::the imported certificate does not contain $APPLE_SIGNING_IDENTITY"; exit 1; }
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -141,6 +201,13 @@ jobs:
           # Create the minisign keypair once: `npx @tauri-apps/cli signer generate -w ~/.tauri/app.key`
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/private_keys/AuthKey_${{ secrets.APPLE_NOTARY_KEY_ID }}.p8
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: apps/desktop/src-tauri
           args: ${{ matrix.args }}
@@ -149,6 +216,54 @@ jobs:
           releaseBody: 'Desktop bundles (dmg / deb / AppImage / NSIS) built from the embedded web workbench.'
           releaseDraft: false
           prerelease: false
+
+      - name: Verify the signed and notarized bundle
+        # tauri-action has already attached the archives, so a failure here is
+        # loud rather than silent: the job goes red and the release is not
+        # considered shippable until the same checks pass.
+        if: runner.os == 'macOS'
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          BUNDLE_DIR="apps/desktop/src-tauri/target/${{ matrix.targets }}/release/bundle"
+          APP="$BUNDLE_DIR/macos/Space Lens.app"
+          DMG=""
+          if [ -d "$BUNDLE_DIR/dmg" ]; then
+            DMG="$(find "$BUNDLE_DIR/dmg" -maxdepth 1 -name '*.dmg' -print -quit)"
+          fi
+
+          [ -d "$APP" ] || { echo "::error::missing app bundle: $APP"; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+          DETAILS="$(codesign -dv --verbose=4 "$APP" 2>&1)"
+          printf '%s\n' "$DETAILS" | grep -Fqx "TeamIdentifier=$APPLE_TEAM_ID" \
+            || { echo "::error::unexpected Team ID (expected $APPLE_TEAM_ID)"; printf '%s\n' "$DETAILS"; exit 1; }
+          printf '%s\n' "$DETAILS" | grep -F "Authority=Developer ID Application" >/dev/null \
+            || { echo "::error::not signed with a Developer ID Application certificate"; printf '%s\n' "$DETAILS"; exit 1; }
+          printf '%s\n' "$DETAILS" | grep -F "Runtime Version=" >/dev/null \
+            || { echo "::error::the hardened runtime is not enabled"; printf '%s\n' "$DETAILS"; exit 1; }
+
+          spctl --assess --type execute --verbose=4 "$APP"
+          if [ -n "$DMG" ]; then
+            codesign --verify --strict --verbose=2 "$DMG"
+          fi
+
+          VALIDATED=false
+          for ATTEMPT in 1 2 3; do
+            if xcrun stapler validate "$APP"; then
+              VALIDATED=true
+              break
+            fi
+            if [ "$ATTEMPT" -lt 3 ]; then
+              echo "::warning::stapler validation failed; retrying ($ATTEMPT/3)"
+              sleep 5
+            fi
+          done
+          if [ "$VALIDATED" != true ]; then
+            echo "::error::the notarization ticket is not stapled to $APP"
+            exit 1
+          fi
 
   vsix:
     name: VS Code extension — vsix

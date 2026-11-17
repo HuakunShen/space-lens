@@ -1,0 +1,160 @@
+# Build, sign, and notarize the macOS desktop app without publishing anything.
+#
+# The tag release (workbench.yml, desktop-release) runs the same signing path;
+# this workflow exists so the Apple Developer ID configuration can be proven on
+# demand, and a failure here never creates a release or uploads an artifact.
+#
+# Run it from the Actions tab or:
+#   gh workflow run signing-preflight.yml --repo HuakunShen/space-lens
+name: signing-preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signing-preflight
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    name: Sign and notarize ${{ matrix.triple }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - triple: aarch64-apple-darwin
+          - triple: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - run: corepack enable
+
+      - name: Prepare workspace install
+        run: node scripts/prepare-ci-install.mjs strip
+
+      - run: yarn install --no-immutable
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Build the web desktop flavor first (the shell embeds it at compile time)
+        run: yarn workspace @space-lens/web build:desktop
+
+      - name: Require the Apple Developer ID configuration
+        # Tauri only warns when notarization credentials are missing, so the
+        # check is explicit and happens before the build.
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_API_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_P8_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                      APPLE_NOTARY_API_KEY_P8_BASE64 APPLE_NOTARY_KEY_ID \
+                      APPLE_NOTARY_ISSUER_ID APPLE_TEAM_ID; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::required Apple signing secret $name is empty"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::refusing to sign without Developer ID signing and notarization credentials"
+            exit 1
+          fi
+
+          PRIVATE_KEYS="$RUNNER_TEMP/private_keys"
+          mkdir -p "$PRIVATE_KEYS"
+          printf '%s' "$APPLE_NOTARY_API_KEY_P8_BASE64" \
+            | base64 -D > "$PRIVATE_KEYS/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+          chmod 600 "$PRIVATE_KEYS/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+
+          CERTIFICATE="$RUNNER_TEMP/developer-id.p12"
+          KEYCHAIN="$RUNNER_TEMP/preflight.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$CERTIFICATE"
+          cleanup() {
+            security delete-keychain "$KEYCHAIN" >/dev/null 2>&1 || true
+            rm -f "$CERTIFICATE"
+          }
+          trap cleanup EXIT
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERTIFICATE" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -k "$KEYCHAIN"
+          security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep -F "$APPLE_SIGNING_IDENTITY" \
+            || { echo "::error::the imported certificate does not contain $APPLE_SIGNING_IDENTITY"; exit 1; }
+
+      - name: Build, sign, and notarize the app bundle
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_API_KEY_PATH: ${{ runner.temp }}/private_keys/AuthKey_${{ secrets.APPLE_NOTARY_KEY_ID }}.p8
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          yarn workspace @space-lens/desktop build \
+            --target "${{ matrix.triple }}" \
+            --bundles app
+
+      - name: Verify signing, notarization, and the stapled ticket
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          APP="apps/desktop/src-tauri/target/${{ matrix.triple }}/release/bundle/macos/Space Lens.app"
+          [ -d "$APP" ] || { echo "::error::missing app bundle: $APP"; exit 1; }
+
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
+          DETAILS="$(codesign -dv --verbose=4 "$APP" 2>&1)"
+          printf '%s\n' "$DETAILS" | grep -Fqx "TeamIdentifier=$APPLE_TEAM_ID" \
+            || { echo "::error::unexpected Team ID (expected $APPLE_TEAM_ID)"; printf '%s\n' "$DETAILS"; exit 1; }
+          printf '%s\n' "$DETAILS" | grep -F "Authority=Developer ID Application" >/dev/null \
+            || { echo "::error::not signed with a Developer ID Application certificate"; printf '%s\n' "$DETAILS"; exit 1; }
+          printf '%s\n' "$DETAILS" | grep -F "Runtime Version=" >/dev/null \
+            || { echo "::error::the hardened runtime is not enabled"; printf '%s\n' "$DETAILS"; exit 1; }
+
+          spctl --assess --type execute --verbose=4 "$APP"
+
+          VALIDATED=false
+          for ATTEMPT in 1 2 3; do
+            if xcrun stapler validate "$APP"; then
+              VALIDATED=true
+              break
+            fi
+            if [ "$ATTEMPT" -lt 3 ]; then
+              echo "::warning::stapler validation failed; retrying ($ATTEMPT/3)"
+              sleep 5
+            fi
+          done
+          if [ "$VALIDATED" != true ]; then
+            echo "::error::the notarization ticket is not stapled to $APP"
+            exit 1
+          fi
