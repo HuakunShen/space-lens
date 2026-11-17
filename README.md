@@ -1,6 +1,6 @@
 # Space Lens
 
-[Website · interactive disk and memory demo](https://huakunshen.github.io/space-lens/) · [Desktop downloads](https://github.com/HuakunShen/space-lens/releases/latest)
+[Website · interactive disk and memory demo](https://space-lens.huakun.tech/) · [Desktop downloads](https://github.com/HuakunShen/space-lens/releases/latest)
 
 [![npm version](https://img.shields.io/npm/v/space-lens?logo=npm&label=npm)](https://www.npmjs.com/package/space-lens)
 [![npm downloads](https://img.shields.io/npm/dm/space-lens?logo=npm&label=downloads)](https://www.npmjs.com/package/space-lens)

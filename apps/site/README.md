@@ -15,9 +15,12 @@ corepack yarn install
 corepack yarn workspace @space-lens/site dev
 corepack yarn workspace @space-lens/site test
 corepack yarn workspace @space-lens/site check
-GITHUB_PAGES=true corepack yarn workspace @space-lens/site build
+SPACE_LENS_SITE_BASE='' GITHUB_PAGES=true corepack yarn workspace @space-lens/site build
 ```
 
-GitHub Pages uses the `/space-lens` base path and publishes `apps/site/build`. The separate Cloudflare workbench and desktop app remain unchanged.
+Production is published at **https://space-lens.huakun.tech/**, a custom domain served from `/`.
+The workflow sets `SPACE_LENS_SITE_BASE=''` explicitly, so links, JavaScript, CSS, and fonts resolve from the domain root.
+For a project Pages URL such as `huakunshen.github.io/space-lens/`, omit the override and build with `GITHUB_PAGES=true` instead.
+GitHub Pages publishes `apps/site/build`. The separate Cloudflare workbench and desktop app remain unchanged.
 
 Pages deployment is configured in `.github/workflows/site.yml`; the repository's Pages source must be set to **GitHub Actions** for the workflow to publish successfully.
