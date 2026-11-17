@@ -1,0 +1,56 @@
+name: Space Lens website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/site/**'
+      - 'packages/web-ui/**'
+      - 'packages/contract/**'
+      - 'package.json'
+      - 'yarn.lock'
+      - '.github/workflows/site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: space-lens-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: |
+          corepack enable
+          yarn install --immutable
+      - name: Test static sandbox fixtures
+        run: yarn workspace @space-lens/site test
+      - name: Check Svelte components
+        run: yarn workspace @space-lens/site check
+      - name: Build GitHub Pages site
+        run: GITHUB_PAGES=true yarn workspace @space-lens/site build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/site/build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

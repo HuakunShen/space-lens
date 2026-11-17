@@ -13,7 +13,8 @@
     "apps/vscode",
     "apps/desktop",
     "apps/dsh",
-    "apps/web"
+    "apps/web",
+    "apps/site"
   ],
   "scripts": {
     "artifacts": "yarn workspace space-lens artifacts",

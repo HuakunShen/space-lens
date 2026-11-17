@@ -3294,6 +3294,24 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@space-lens/site@workspace:apps/site":
+  version: 0.0.0-use.local
+  resolution: "@space-lens/site@workspace:apps/site"
+  dependencies:
+    "@space-lens/contract": "workspace:*"
+    "@space-lens/web-ui": "workspace:*"
+    "@sveltejs/adapter-static": "npm:^3.0.10"
+    "@sveltejs/kit": "npm:^2.63.0"
+    "@sveltejs/vite-plugin-svelte": "npm:^7.1.2"
+    "@tailwindcss/vite": "npm:^4.3.0"
+    svelte: "npm:^5.56.1"
+    svelte-check: "npm:^4.6.0"
+    tailwindcss: "npm:^4.3.0"
+    typescript: "npm:^6.0.3"
+    vite: "npm:^8.0.16"
+  languageName: unknown
+  linkType: soft
+
 "@space-lens/web-ui@workspace:*, @space-lens/web-ui@workspace:packages/web-ui":
   version: 0.0.0-use.local
   resolution: "@space-lens/web-ui@workspace:packages/web-ui"
