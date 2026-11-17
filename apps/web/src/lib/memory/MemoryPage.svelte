@@ -36,18 +36,22 @@
     ProcessDetailDialog,
     ProcessDrawer,
     ProcessGraph,
+    PresetMemoryCard,
     ProcessSegmentBar,
     ProcessTable,
     ProcessTree,
     QuitListPanel,
+    SOFTWARE_PRESETS,
     StaleProcessesPanel,
     StateBanner,
     TerminateDialog,
     detectStaleProcesses,
     formatBytes,
+    scopeSnapshot,
+    summarizePresetMemory,
   } from '@space-lens/web-ui'
   import type { MemorySection, StageTarget, TableQuery } from '@space-lens/web-ui'
-  import { ClockAlert } from '@lucide/svelte'
+  import { ClockAlert, Maximize2, Minimize2 } from '@lucide/svelte'
   import { memoryTerminateAvailable } from '../gates.ts'
   import { describeError } from '../workbench.svelte.ts'
   import { MEMORY_PRESETS, type AiChatPort, type MemoryPort } from '@space-lens/ai-advisor'
@@ -153,6 +157,14 @@
    * between them keeps the context.
    */
   let view = $state<'table' | 'tree'>('table')
+  /** A preset card's selected program; the table, tree and explorer show only its processes. */
+  let presetPick = $state<{ presetId: string; ruleId: string | null } | null>(null)
+  function scopedFor(current: MemorySnapshot): MemorySnapshot {
+    if (presetPick === null) return current
+    const pick = presetPick
+    const preset = SOFTWARE_PRESETS.find((candidate) => candidate.id === pick.presetId)
+    return preset === undefined ? current : scopeSnapshot(current, preset, pick.ruleId)
+  }
   let treeScope = $state<'all' | 'mine'>('mine')
   /**
    * The process the relationship diagram is open on. A row click in the tree
@@ -160,6 +172,9 @@
    */
   let focusPid = $state<number | null>(null)
   let chartDepth = $state(2)
+  /** One panel zoomed to fill the view; the others are hidden until it is restored. */
+  let expandedPanel = $state<'table' | 'explorer' | 'flow' | null>(null)
+  const toggleExpand = (panel: 'table' | 'explorer' | 'flow') => (expandedPanel = expandedPanel === panel ? null : panel)
   let selectedPid = $state<number | null>(null)
   function enterProcess(pid: number | null): void {
     focusPid = pid
@@ -622,12 +637,26 @@
         </ul>
       </section>
     {:else if section === 'processes'}
+      {@const scoped = scopedFor(snapshot)}
       <ProcessSegmentBar
         groups={snapshot.groups}
         usedBytes={snapshot.breakdown.usedBytes}
         {selection}
         onSelect={toggleSelect}
       />
+
+      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {#each SOFTWARE_PRESETS as preset (preset.id)}
+          <PresetMemoryCard
+            label={preset.label}
+            description={preset.description}
+            summary={summarizePresetMemory(snapshot, preset)}
+            usedBytes={snapshot.breakdown.usedBytes}
+            selected={presetPick?.presetId === preset.id ? presetPick.ruleId : null}
+            onSelect={(ruleId) => (presetPick = ruleId === null ? null : { presetId: preset.id, ruleId })}
+          />
+        {/each}
+      </div>
 
       {#if terminateAvailable && (selection.size > 0 || skippedProtected > 0)}
         <div
@@ -648,7 +677,16 @@
         </div>
       {/if}
 
-      <div class="memory-panels">
+      {#snippet flowPanel()}
+        <div class={`min-w-0 ${expandedPanel === 'flow' ? 'flex min-h-0 flex-1 flex-col' : ''}`} id="memory-flow">
+          {#if snapshot && snapshot.processes.length > 0}
+            <ProcessGraph {snapshot} pid={selectedPid ?? focusPid ?? (snapshot.processes.find((process) => process.pid === 1)?.pid ?? snapshot.processes[0]!.pid)} maxDepth={chartDepth} onFocus={(pid) => (selectedPid = pid)} onEnter={enterProcess} onClose={selectedPid === null ? undefined : () => enterProcess(null)} expanded={expandedPanel === 'flow'} onToggleExpand={() => toggleExpand('flow')} class={expandedPanel === 'flow' ? 'w-full min-h-[28rem] flex-1' : 'w-full'} />
+          {/if}
+        </div>
+      {/snippet}
+
+      <div class={`memory-panels ${expandedPanel === null ? '' : 'flex-1'}`}>
+        {#if expandedPanel === null || expandedPanel === 'table'}
         <div class="memory-table-panel flex min-w-0 flex-col gap-3">
           <div class="flex items-center gap-1" role="group" aria-label="Table or process tree">
             <Button.Root size="sm" variant={view === 'table' ? 'secondary' : 'ghost'} onclick={() => (view = 'table')}>
@@ -657,11 +695,14 @@
             <Button.Root size="sm" variant={view === 'tree' ? 'secondary' : 'ghost'} onclick={() => (view = 'tree')}>
               Process tree
             </Button.Root>
+            <Button.Root size="sm" variant="ghost" class="ml-auto" aria-label={expandedPanel === 'table' ? 'Restore the table size' : 'Expand the table to fill the view'} onclick={() => toggleExpand('table')}>
+              {#if expandedPanel === 'table'}<Minimize2 class="size-3.5" />{:else}<Maximize2 class="size-3.5" />{/if}
+            </Button.Root>
           </div>
 
           {#if view === 'table'}
             <ProcessTable
-              {snapshot}
+              snapshot={scoped}
               {query}
               {selection}
               {selectedPid}
@@ -684,7 +725,7 @@
             />
           {:else}
             <ProcessTree
-              {snapshot}
+              snapshot={scoped}
               search={query.search}
               onSearchChange={(search) => (query = { ...query, search })}
               {selection}
@@ -699,13 +740,14 @@
             />
           {/if}
         </div>
+        {/if}
 
-        <MemoryChart {snapshot} {focusPid} {selectedPid} bind:depth={chartDepth} onSelect={(pid) => (selectedPid = pid)} onFocus={enterProcess} onDetails={openProcessDrawer} />
-        <div class="min-w-0" id="memory-flow">
-          {#if snapshot.processes.length > 0}
-            <ProcessGraph {snapshot} pid={selectedPid ?? focusPid ?? (snapshot.processes.find((process) => process.pid === 1)?.pid ?? snapshot.processes[0]!.pid)} maxDepth={chartDepth} onFocus={(pid) => (selectedPid = pid)} onEnter={enterProcess} onClose={selectedPid === null ? undefined : () => enterProcess(null)} class="w-full" />
-          {/if}
-        </div>
+        {#if expandedPanel === null || expandedPanel === 'explorer'}
+          <MemoryChart snapshot={scoped} {focusPid} {selectedPid} bind:depth={chartDepth} expanded={expandedPanel === 'explorer'} onToggleExpand={() => toggleExpand('explorer')} onSelect={(pid) => (selectedPid = pid)} onFocus={enterProcess} onDetails={openProcessDrawer} />
+        {/if}
+        {#if expandedPanel === null || expandedPanel === 'flow'}
+          {@render flowPanel()}
+        {/if}
       </div>
 
       {#if !terminateAvailable}
@@ -816,13 +858,6 @@
 {/if}
 
 <style>
-  .memory-panels { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
-  @media (min-width: 1000px) {
-    .memory-panels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .memory-table-panel { grid-column: 1 / -1; }
-  }
-  @media (min-width: 1600px) {
-    .memory-panels { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); }
-    .memory-table-panel { grid-column: auto; }
-  }
+  /* One full-width row per panel: table, explorer, then the process diagram. */
+  .memory-panels { display: flex; flex-direction: column; gap: 1rem; }
 </style>

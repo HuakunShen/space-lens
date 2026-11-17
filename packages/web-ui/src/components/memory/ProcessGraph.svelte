@@ -24,7 +24,7 @@
   } from '@xyflow/svelte'
   import '@xyflow/svelte/dist/style.css'
   import type { MemorySnapshot } from '@space-lens/contract'
-  import { X } from '@lucide/svelte'
+  import { Maximize2, Minimize2, X } from '@lucide/svelte'
   import { Button } from '../ui/button/index'
   import { formatBytes } from '../../lib/memory/format.ts'
   import { buildForest } from '../../lib/memory/tree.ts'
@@ -48,10 +48,14 @@
     onEnter?: (pid: number) => void
     /** Close the panel. */
     onClose?: () => void
+    /** Whether the diagram fills the whole view; the page owns the layout. */
+    expanded?: boolean
+    /** Toggle the expanded state; the button is hidden when omitted. */
+    onToggleExpand?: () => void
     class?: string
   }
 
-  let { snapshot, pid, maxDepth, onFocus, onEnter, onClose, class: className = '' }: Props = $props()
+  let { snapshot, pid, maxDepth, onFocus, onEnter, onClose, expanded = false, onToggleExpand, class: className = '' }: Props = $props()
 
   /** The zoom the panel opens at: below ~0.75 the card text stops reading. */
   const VIEW_ZOOM = 0.82
@@ -173,6 +177,11 @@
         </p>
       </div>
       <button class="shrink-0 rounded border px-2 py-1 text-xs hover:bg-muted" onclick={() => horizontal = !horizontal}>{horizontal ? 'Horizontal →' : 'Vertical ↓'}</button>
+      {#if onToggleExpand}
+        <Button variant="ghost" size="xs" aria-label={expanded ? 'Restore the diagram size' : 'Expand the diagram to fill the view'} onclick={onToggleExpand}>
+          {#if expanded}<Minimize2 class="size-3.5" />{:else}<Maximize2 class="size-3.5" />{/if}
+        </Button>
+      {/if}
       {#if onClose}
         <Button variant="ghost" size="xs" aria-label="Close the process diagram" onclick={onClose}>
           <X class="size-3.5" />
@@ -207,6 +216,11 @@
         </div>
       </div>
       <button class="shrink-0 rounded border px-2 py-1 text-xs hover:bg-muted" onclick={() => horizontal = !horizontal}>{horizontal ? 'Horizontal →' : 'Vertical ↓'}</button>
+      {#if onToggleExpand}
+        <Button variant="ghost" size="xs" aria-label={expanded ? 'Restore the diagram size' : 'Expand the diagram to fill the view'} onclick={onToggleExpand}>
+          {#if expanded}<Minimize2 class="size-3.5" />{:else}<Maximize2 class="size-3.5" />{/if}
+        </Button>
+      {/if}
       {#if onClose}
         <Button variant="ghost" size="xs" aria-label="Close the process diagram" onclick={onClose}>
           <X class="size-3.5" />
@@ -215,12 +229,12 @@
     </header>
 
     <div
-      class="relative h-[clamp(22rem,55vh,38rem)] w-full"
+      class={`relative w-full ${expanded ? 'min-h-0 flex-1' : 'h-[clamp(22rem,55vh,38rem)]'}`}
       bind:clientWidth={paneWidth}
       bind:clientHeight={paneHeight}
     >
       {#if paneWidth > 0 && paneHeight > 0}
-        {#key `${pid}:${horizontal}`}
+        {#key `${pid}:${horizontal}:${expanded}`}
           <SvelteFlow
             nodes={flowNodes}
             edges={flowEdges}

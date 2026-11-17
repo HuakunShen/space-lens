@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FolderPlus, Inbox, PanelLeft, ChartPie, Settings, Menu, Columns3, Rows3, Sparkles } from '@lucide/svelte'
+  import { FolderPlus, Inbox, PanelLeft, ChartPie, Settings, Menu, Columns3, Rows3, Sparkles, Maximize2, Minimize2 } from '@lucide/svelte'
   const iconClass =
     'toolbar-icon macos:size-7 macos:rounded-md linux:size-9 linux:rounded-lg linux:bg-(--control) linux:text-foreground linux:shadow-xs windows:size-8 windows:rounded-[4px] focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none'
   interface Props {
@@ -11,6 +11,8 @@
     chromeInset?: string
     sidebarVisible?: boolean
     chartVisible?: boolean
+    /** The storage map fills the view, hiding the folder contents list. */
+    chartFocused?: boolean
     /** How the chart and the contents list are arranged. */
     orientation?: 'horizontal' | 'vertical'
     collectorCount?: number
@@ -20,6 +22,7 @@
     onNewScan?: () => void
     onToggleSidebar?: () => void
     onToggleChart?: () => void
+    onToggleChartFocus?: () => void
     onToggleOrientation?: () => void
     onOpenCollector?: () => void
     onOpenSettings?: () => void
@@ -33,6 +36,8 @@
     chromeInset = 'px-4',
     sidebarVisible = true,
     chartVisible = true,
+    chartFocused = false,
+    onToggleChartFocus,
     orientation = 'horizontal',
     collectorCount = 0,
     busy = false,
@@ -109,6 +114,18 @@
         aria-pressed={chartVisible}
         title="Toggle storage map"><ChartPie size={17} /></button
       >
+    {/if}
+    {#if onToggleChartFocus && chartVisible}
+      <button
+        class={[iconClass, 'windows:hidden']}
+        class:active={chartFocused}
+        type="button"
+        onclick={onToggleChartFocus}
+        aria-label={chartFocused ? 'Restore the folder contents' : 'Expand the storage map to fill the view'}
+        aria-pressed={chartFocused}
+        title={chartFocused ? 'Restore the folder contents' : 'Expand the storage map'}>
+        {#if chartFocused}<Minimize2 size={17} />{:else}<Maximize2 size={17} />{/if}
+      </button>
     {/if}
     {#if onToggleOrientation}
       <button

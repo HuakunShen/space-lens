@@ -808,7 +808,7 @@ mod tests {
     let catalog = macos_catalog();
     assert_eq!(catalog.schema_version, 1);
     assert_eq!(catalog.platform, "macos");
-    assert_eq!(catalog.entries.len(), 15);
+    assert_eq!(catalog.entries.len(), 16);
     // The audit rejects the same invalid shapes it asserts here.
     crate::catalog::load_catalog().expect("embedded catalog loads");
     let mut ids = HashSet::new();

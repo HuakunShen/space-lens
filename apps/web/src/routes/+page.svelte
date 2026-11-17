@@ -108,6 +108,8 @@
   let settingsOpen = $state(false)
   let sidebarVisible = $state(true)
   let chartVisible = $state(true)
+  /** The storage map fills the view and the folder contents list is hidden. */
+  let chartFocused = $state(false)
 
   /**
    * The contents panel's size, dragged by the divider between the chart and
@@ -1632,6 +1634,8 @@
       chromeInset={headerInset()}
       {sidebarVisible}
       {chartVisible}
+      {chartFocused}
+      onToggleChartFocus={() => (chartFocused = !chartFocused)}
       collectorCount={workbench.collector.length}
       busy={workbench.deleting || planning}
       onNewScan={() => newLocation()}
@@ -1772,6 +1776,7 @@
             data-chart-visible={chartVisible}
             data-orientation={orientation}
             class:without-chart={!chartVisible}
+            class:chart-focused={chartFocused && chartVisible}
             style={`--contents-width: ${contentsWidth}px; --contents-height: ${contentsHeight}px`}
             aria-busy={navigating}
             bind:this={layoutElement}

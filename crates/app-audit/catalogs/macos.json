@@ -83,6 +83,7 @@
         { "path": "~/.codex/archived", "label": "Archived sessions", "classification": "user-data", "purgeable": true, "comment": "Rotated older sessions; same nature as sessions/." },
         { "path": "~/.codex/packages/standalone/releases", "label": "Historical CLI releases", "classification": "versions", "purgeable": true, "comment": "Every release the updater ever kept (~250 MB each). Only the current one is used." },
         { "path": "~/.codex/worktrees", "label": "Agent worktrees", "classification": "user-data", "purgeable": true, "comment": "Git worktrees created by agent runs. May contain uncommitted work — review before deleting." },
+        { "path": "~/Library/Logs/com.openai.codex", "label": "Diagnostic logs", "classification": "logs", "purgeable": true, "comment": "Log output from the Codex app. Only needed to diagnose a problem." },
         { "path": "~/.codex", "label": "Codex data root", "classification": "support", "purgeable": false, "comment": "Config, auth and history databases; the itemized subfolders above are the big movers." }
       ]
     },
@@ -97,6 +98,21 @@
       "locations": [
         { "path": "~/.ollama/models", "label": "Model weights", "classification": "re-downloadable", "purgeable": true, "comment": "Downloaded model weights. Removing a model forces a full re-pull later." },
         { "path": "~/.ollama", "label": "Ollama data root", "classification": "support", "purgeable": false, "comment": null }
+      ]
+    },
+    {
+      "id": "caveman",
+      "name": "Caveman",
+      "kind": "cli",
+      "match": null,
+      "locations": [
+        { "path": "~/.caveman/ccr.db", "label": "Proxy database (ccr.db)", "classification": "user-data", "purgeable": false, "comment": "SQLite store written by the Caveman proxy. Not verified what it keeps; look before deleting." },
+        { "path": "~/.caveman/caveman.db", "label": "Caveman database", "classification": "user-data", "purgeable": false, "comment": "SQLite store for Caveman's own state. Not verified what it keeps; look before deleting." },
+        { "path": "~/.caveman/proxy.log.1", "label": "Rotated proxy log", "classification": "logs", "purgeable": true, "comment": null },
+        { "path": "~/.caveman/proxy.log", "label": "Proxy log", "classification": "logs", "purgeable": true, "comment": null },
+        { "path": "~/.caveman/bin", "label": "Helper binaries", "classification": "support", "purgeable": false, "comment": "Executables Caveman runs. Removing them breaks Caveman until it is reinstalled." },
+        { "path": "~/.caveman/runtime", "label": "Runtime files", "classification": "support", "purgeable": false, "comment": null },
+        { "path": "~/.caveman", "label": "Caveman data root", "classification": "support", "purgeable": false, "comment": "Databases, logs, helper binaries and settings. Keep intact; the itemized entries above are the big movers." }
       ]
     },
     { "id": "kimi-code", "name": "Kimi Code CLI", "kind": "cli", "match": null, "locations": [ { "path": "~/.kimi-code", "label": "Kimi Code data", "classification": "support", "purgeable": false, "comment": null } ] },

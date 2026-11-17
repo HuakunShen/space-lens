@@ -1,9 +1,10 @@
 <script lang="ts">
   import type { MemorySnapshot, ProcessRow } from '@space-lens/contract'
+  import { Maximize2, Minimize2 } from '@lucide/svelte'
   import { formatBytes } from '@space-lens/web-ui/lib/memory/format'
   import { buildMemorySlice, processLabel, type Branch } from './chart-model.ts'
 
-  let { snapshot, focusPid = null, selectedPid = null, onSelect, depth = $bindable(2), onFocus, onDetails }: { snapshot: MemorySnapshot; focusPid?: number | null; selectedPid?: number | null; onSelect: (pid: number) => void; depth?: number; onFocus: (pid: number | null) => void; onDetails: (row: ProcessRow) => void } = $props()
+  let { snapshot, focusPid = null, selectedPid = null, onSelect, depth = $bindable(2), onFocus, onDetails, expanded = false, onToggleExpand }: { snapshot: MemorySnapshot; focusPid?: number | null; selectedPid?: number | null; onSelect: (pid: number) => void; depth?: number; onFocus: (pid: number | null) => void; onDetails: (row: ProcessRow) => void; expanded?: boolean; onToggleExpand?: () => void } = $props()
   let merge = $state(true)
   let hovered = $state<Branch | null>(null)
   let selectedGroup = $state<Branch | null>(null)
@@ -68,6 +69,7 @@
   <div class="flex flex-wrap items-start gap-2">
     <div class="mr-auto min-w-0"><h2 class="text-sm font-semibold">Memory explorer</h2><p class="mt-1 text-xs text-muted-foreground">{focusedRow ? `${processLabel(focusedRow, focusedRow.name)} · PID ${focusedRow.pid}` : 'All processes'} · footprint, or resident if unavailable</p></div>
     {#if focusPid !== null}<button class="rounded-md border px-2 py-1 text-xs hover:bg-muted" onclick={() => { selectedGroup = null; onFocus(parent?.pid ?? null) }}>← {parent ? 'Parent' : 'All processes'}</button><button class="rounded-md border px-2 py-1 text-xs hover:bg-muted" onclick={() => { selectedGroup = null; onFocus(null) }}>All</button>{/if}
+    {#if onToggleExpand}<button class="rounded-md p-1 hover:bg-muted" aria-label={expanded ? 'Restore the explorer size' : 'Expand the explorer to fill the view'} onclick={onToggleExpand}>{#if expanded}<Minimize2 class="size-3.5" />{:else}<Maximize2 class="size-3.5" />{/if}</button>{/if}
   </div>
   <div class="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
     <label class="flex items-center gap-1.5">Depth <select class="rounded border bg-background px-2 py-1 text-foreground" bind:value={depth}><option value={1}>1 level</option><option value={2}>2 levels</option><option value={3}>3 levels</option></select></label>
