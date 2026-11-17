@@ -71,7 +71,7 @@
   <meta name="description" content="Explore disk usage, storage cleanup candidates, and memory pressure through interactive native-grade visualizations. Space Lens is an open-source, local-first workbench for macOS, Windows and Linux." />
   <meta property="og:title" content="Space Lens — Your disk and memory, in focus" />
   <meta property="og:description" content="A visual, local-first disk and memory workbench with a live, safely simulated Svelte demo." />
-  <link rel="canonical" href="https://huakunshen.github.io/space-lens/" />
+  <link rel="canonical" href="https://space-lens.huakun.tech/" />
 </svelte:head>
 
 <div class="site-shell" id="top">
