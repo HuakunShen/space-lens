@@ -44,9 +44,9 @@ use crate::server::{
   activate_agent_script, agent_health_script, agent_smoke_script, byte_count_script,
   file_exists_script, host_install_script, host_install_script_pwsh, host_install_tarball_script,
   host_install_tarball_script_pwsh, kill_script, kill_script_pwsh, mkdir_script,
-  parse_readiness_line, remove_file_script, remove_tree_script, serve_script, serve_script_pwsh,
-  ssh_exec_shell, ssh_probe_shell, ssh_transfer_shell, ssh_tunnel, scp_transfer, staging_dir_script,
-  ReadinessLine, RemotePolicy, RemoteShell, ServeReadiness, SshCommand,
+  parse_readiness_line, remove_file_script, remove_tree_script, scp_transfer, serve_script,
+  serve_script_pwsh, ssh_exec_shell, ssh_probe_shell, ssh_transfer_shell, ssh_tunnel,
+  staging_dir_script, ReadinessLine, RemotePolicy, RemoteShell, ServeReadiness, SshCommand,
 };
 use crate::target::SshTarget;
 use crate::RemoteError;
@@ -215,12 +215,14 @@ impl RemoteHost {
     )?;
     ensure_agent(
       source,
-      &target,
-      manifest,
-      resolved.triple,
-      &agent,
-      shell,
-      platform,
+      &AgentInstall {
+        target: &target,
+        manifest,
+        triple: resolved.triple,
+        layout: &agent,
+        shell,
+        platform,
+      },
       progress,
     )?;
 
@@ -799,7 +801,12 @@ fn transfer_bytes(
       std::fs::write(&local, bytes)?;
       let moved = (|| {
         let command = scp_transfer(target, &local.to_string_lossy(), remote_path, shell)?;
-        run_captured(&command.program, &command.args, None, AGENT_TRANSFER_TIMEOUT)
+        run_captured(
+          &command.program,
+          &command.args,
+          None,
+          AGENT_TRANSFER_TIMEOUT,
+        )
       })();
       let _ = std::fs::remove_file(&local);
       match moved {
@@ -814,16 +821,30 @@ fn transfer_bytes(
   }
 }
 
+/// Everything one agent install needs, resolved once by `connect_with`.
+#[derive(Clone, Copy)]
+struct AgentInstall<'a> {
+  target: &'a SshTarget,
+  manifest: &'a AgentManifest,
+  triple: &'a str,
+  layout: &'a AgentLayout,
+  shell: RemoteShell,
+  platform: &'a str,
+}
+
 fn ensure_agent(
   source: AgentSource<'_>,
-  target: &SshTarget,
-  manifest: &AgentManifest,
-  triple: &str,
-  layout: &AgentLayout,
-  shell: RemoteShell,
-  platform: &str,
+  install: &AgentInstall<'_>,
   progress: &mut dyn FnMut(InstallProgress),
 ) -> Result<(), RemoteError> {
+  let AgentInstall {
+    target,
+    manifest,
+    triple,
+    layout,
+    shell,
+    platform,
+  } = *install;
   if agent_healthy(target, &layout.binary, shell, platform)? {
     return Ok(());
   }
@@ -849,7 +870,13 @@ fn ensure_agent(
 
   let result = (|| -> Result<(), RemoteError> {
     let remote_binary = format!("{staging}/{}", agent_binary_name(shell));
-    transfer_bytes(target, shell, &remote_binary, &bytes, InstallStage::AgentInstall)?;
+    transfer_bytes(
+      target,
+      shell,
+      &remote_binary,
+      &bytes,
+      InstallStage::AgentInstall,
+    )?;
     let wc = run_ssh(
       target,
       &ssh_exec_shell(target, &byte_count_script(&remote_binary, shell)?, shell)?,
@@ -1068,9 +1095,7 @@ fn agent_healthy(
     return Ok(false);
   }
   match AgentInfo::parse(&String::from_utf8_lossy(&output.stdout)) {
-    Ok(info) => Ok(
-      info.agent_protocol == AGENT_PROTOCOL && info.require(required).is_ok(),
-    ),
+    Ok(info) => Ok(info.agent_protocol == AGENT_PROTOCOL && info.require(required).is_ok()),
     Err(_) => Ok(false),
   }
 }

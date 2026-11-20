@@ -9,8 +9,8 @@
 //! Other platforms: enumeration returns an empty list; the catalog CLI
 //! entries are still measured against the audit home.
 
-use std::path::Path;
 use super::DiscoveredApp;
+use std::path::Path;
 
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;
