@@ -89,12 +89,14 @@ pub struct RemoteCleanupArgs {
   /// An alias from ~/.ssh/config, or `user@host[:port]`.
   #[arg(value_name = "TARGET")]
   pub target: String,
-  /// The scan id from `remote scan`.
-  #[arg(long, value_name = "ID")]
-  pub scan_id: String,
-  /// Nodes to clean, as printed by `remote scan --json` (field `id`).
-  #[arg(long = "node-id", value_name = "ID")]
-  pub node_ids: Vec<String>,
+  /// Folder on the remote to scan for cleanup candidates; defaults to the
+  /// first root the host reports.
+  #[arg(long, value_name = "PATH")]
+  pub path: Option<String>,
+  /// Where candidates come from; `caches` finds node_modules, Cargo target
+  /// and friends, `gitignored` finds ignored paths.
+  #[arg(long, value_enum, default_value_t = DiscoveryKindArg::Caches)]
+  pub kind: DiscoveryKindArg,
   /// Move the planned nodes to the remote trash. Without this flag the
   /// command only prints the plan.
   #[arg(long)]
@@ -104,10 +106,11 @@ pub struct RemoteCleanupArgs {
   pub json: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub enum DiscoveryKindArg {
   #[value(name = "large-files")]
   LargeFiles,
+  #[default]
   #[value(name = "caches")]
   Caches,
   #[value(name = "gitignored")]
@@ -244,31 +247,7 @@ fn scan(args: RemoteScanArgs) -> Result<()> {
     ..ScanStart::default()
   }))?;
   let scan_id = text(&scan, "scanId")?.to_string();
-
-  let mut last_state = String::new();
-  loop {
-    let status = host(remote.scan_status(&scan_id))?;
-    let state = status["state"].as_str().unwrap_or_default().to_string();
-    if state != last_state {
-      last_state = state.clone();
-      if !args.json {
-        eprintln!("scan {scan_id}: {state}");
-      }
-    }
-    match state.as_str() {
-      "ready" | "failed" | "cancelled" => break,
-      _ => {
-        if !args.json {
-          eprintln!(
-            "  {} in {} entries",
-            format_bytes(status["bytesScanned"].as_u64().unwrap_or(0)),
-            status["entriesScanned"].as_u64().unwrap_or(0)
-          );
-        }
-        std::thread::sleep(STATUS_POLL);
-      }
-    }
-  }
+  wait_ready(&remote, &scan_id, args.json)?;
 
   if args.json {
     let children = host(remote.tree_children(&scan_id, "root", 0, args.limit, "size"))?;
@@ -310,6 +289,35 @@ fn scan(args: RemoteScanArgs) -> Result<()> {
 
 fn status_of(remote: &Arc<RemoteHost>, scan_id: &str) -> Result<Value> {
   host(remote.scan_status(scan_id))
+}
+
+/// Polls one scan until it leaves the `scanning` state, printing progress
+/// unless quiet. Returns the terminal status.
+fn wait_ready(remote: &Arc<RemoteHost>, scan_id: &str, quiet: bool) -> Result<Value> {
+  let mut last_state = String::new();
+  loop {
+    let status = host(remote.scan_status(scan_id))?;
+    let state = status["state"].as_str().unwrap_or_default().to_string();
+    if state != last_state {
+      last_state = state.clone();
+      if !quiet {
+        eprintln!("scan {scan_id}: {state}");
+      }
+    }
+    match state.as_str() {
+      "ready" | "failed" | "cancelled" => return Ok(status),
+      _ => {
+        if !quiet {
+          eprintln!(
+            "  {} in {} entries",
+            format_bytes(status["bytesScanned"].as_u64().unwrap_or(0)),
+            status["entriesScanned"].as_u64().unwrap_or(0)
+          );
+        }
+        std::thread::sleep(STATUS_POLL);
+      }
+    }
+  }
 } // --------------------------------------------------------------- discovery
 
 fn discovery(args: RemoteDiscoveryArgs) -> Result<()> {
@@ -357,11 +365,6 @@ fn discovery(args: RemoteDiscoveryArgs) -> Result<()> {
 // ------------------------------------------------------------------ cleanup
 
 fn cleanup(args: RemoteCleanupArgs) -> Result<()> {
-  if args.node_ids.is_empty() {
-    return Err(anyhow!(
-      "cleanup needs at least one --node-id; take ids from `remote scan --json`"
-    ));
-  }
   // The policy is granted per command, not per config file: the serve process
   // only ever sees --allow-cleanup when the operator typed --execute.
   let policy = RemotePolicy {
@@ -370,7 +373,45 @@ fn cleanup(args: RemoteCleanupArgs) -> Result<()> {
   let remote = connect(&args.target, policy)?;
   let _guard = StopOnDrop(remote.clone());
 
-  let plan = host(remote.cleanup_plan(&args.scan_id, &args.node_ids))?;
+  // A scan session lives and dies with the remote host process, so the plan is
+  // derived in this one session: scan, discover, plan, optionally execute.
+  let path = match &args.path {
+    Some(path) => path.clone(),
+    None => {
+      let roots = host(remote.roots())?;
+      roots["roots"]
+        .get(0)
+        .and_then(|root| root.get("path"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("the remote host reported no scan roots"))?
+    }
+  };
+  if !args.json {
+    eprintln!("scanning {path} on {} …", args.target);
+  }
+  let scan = host(remote.scan_start(&ScanStart {
+    paths: vec![path.clone()],
+    ..ScanStart::default()
+  }))?;
+  let scan_id = text(&scan, "scanId")?.to_string();
+  wait_ready(&remote, &scan_id, args.json)?;
+
+  let page = host(remote.discovery(&scan_id, args.kind.wire(), 0, 0, 1000))?;
+  let items = page["items"].as_array().cloned().unwrap_or_default();
+  let node_ids: Vec<String> = items
+    .iter()
+    .filter_map(|item| item["node"]["id"].as_str().map(str::to_string))
+    .collect();
+  if node_ids.is_empty() {
+    println!(
+      "no {} candidates under {path}; nothing to plan",
+      args.kind.wire()
+    );
+    return Ok(());
+  }
+
+  let plan = host(remote.cleanup_plan(&scan_id, &node_ids))?;
   if args.json {
     if args.execute {
       let outcome =
