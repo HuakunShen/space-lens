@@ -23,6 +23,7 @@ use crate::engine::{
 };
 use crate::events::{EventSink, ScopedEventFrame, SubscriptionAck};
 use crate::memory::MemoryState;
+use crate::remote::RemoteHost;
 use spacelens_memory::{TerminateExecuteRequest, TerminatePlanRequest};
 use spacelens_storage_usage::{storage_breakdown, ScannedRoot};
 
@@ -34,6 +35,18 @@ pub const SERVICE_INSTANCE_ID: &str = "inst_desktop";
 /// One connected frontend session: its own engine store and event sink.
 pub struct SessionBundle {
   window_label: String,
+  /// `local` for this machine, `remote:<destination>` for an SSH device.
+  pub device_id: String,
+  pub device_label: String,
+  /// The service instance the session's data belongs to. The frontend scopes
+  /// its cache by this value, so switching devices never reuses a scan tree.
+  pub service_instance_id: String,
+  pub backend_label: String,
+  /// Bumped on every device connect; the UI resets per-device state when it
+  /// changes without waiting for a manual reload.
+  pub generation: u64,
+  /// Present only for a remote session; every read and submit routes there.
+  pub remote: Option<Arc<RemoteHost>>,
   pub engine: Mutex<EngineStore>,
   pub events: EventSink,
   // Only discovery requests wait here; ordinary reads never acquire it.
@@ -65,16 +78,22 @@ pub struct AppAuditState {
 
 pub struct AppState {
   pub sessions: Mutex<std::collections::HashMap<String, Arc<SessionBundle>>>,
+  /// Connected remote devices, keyed by `device_id`. A remote outlives a
+  /// renderer reload so switching back does not provision again.
+  pub remotes: Mutex<std::collections::HashMap<String, Arc<RemoteHost>>>,
   pub roots: Vec<PathBuf>,
   pub next_session: std::sync::atomic::AtomicU64,
+  pub next_generation: std::sync::atomic::AtomicU64,
 }
 
 impl AppState {
   pub fn new(roots: Vec<PathBuf>) -> Self {
     Self {
       sessions: Mutex::new(std::collections::HashMap::new()),
+      remotes: Mutex::new(std::collections::HashMap::new()),
       roots,
       next_session: std::sync::atomic::AtomicU64::new(1),
+      next_generation: std::sync::atomic::AtomicU64::new(1),
     }
   }
 }
@@ -82,19 +101,48 @@ impl AppState {
 // ------------------------------------------------------------------- connect
 
 #[tauri::command]
-pub fn sl_connect(window: Window, state: State<'_, AppState>) -> Result<Value, Value> {
-  Ok(connect_window_session(window.label(), &state))
+pub fn sl_connect(
+  window: Window,
+  device_id: Option<String>,
+  state: State<'_, AppState>,
+) -> Result<Value, Value> {
+  let device_id = device_id.unwrap_or_else(|| LOCAL_DEVICE_ID.to_string());
+  if device_id == LOCAL_DEVICE_ID {
+    return Ok(connect_window_session(
+      window.label(),
+      LOCAL_DEVICE_ID,
+      &state,
+    ));
+  }
+  // A remote session is created by `sl_remote_connect`; this only re-attaches
+  // after a renderer reload and resumes its event stream.
+  let remote = state
+    .remotes
+    .lock()
+    .unwrap()
+    .get(&device_id)
+    .cloned()
+    .ok_or_else(|| {
+      problem_value(
+        "NotFound",
+        format!("remote device {device_id} is not connected"),
+      )
+    })?;
+  let metadata = bind_session(window.label(), &device_id, Some(remote), &state);
+  Ok(metadata)
 }
 
-fn connect_window_session(window_label: &str, state: &AppState) -> Value {
+pub const LOCAL_DEVICE_ID: &str = "local";
+
+fn connect_window_session(window_label: &str, device_id: &str, state: &AppState) -> Value {
   // Serialize lookup + creation so parallel adapter calls and renderer
   // refreshes cannot allocate a second engine for the same native window.
   let mut sessions = state.sessions.lock().unwrap();
   if let Some((session_id, _)) = sessions
     .iter()
-    .find(|(_, bundle)| bundle.window_label == window_label)
+    .find(|(_, bundle)| bundle.window_label == window_label && bundle.device_id == device_id)
   {
-    return session_metadata(session_id);
+    return session_metadata(session_id, &sessions[session_id]);
   }
   let session_id = format!(
     "sess_{}",
@@ -103,10 +151,19 @@ fn connect_window_session(window_label: &str, state: &AppState) -> Value {
       .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
   );
   let engine = EngineStore::new(state.roots.clone());
+  let generation = state
+    .next_generation
+    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
   sessions.insert(
     session_id.clone(),
     Arc::new(SessionBundle {
       window_label: window_label.to_string(),
+      device_id: LOCAL_DEVICE_ID.to_string(),
+      device_label: "This machine".to_string(),
+      service_instance_id: SERVICE_INSTANCE_ID.to_string(),
+      backend_label: "Native host".to_string(),
+      generation,
+      remote: None,
       engine: Mutex::new(engine),
       events: EventSink::new(),
       discovery: Mutex::new(()),
@@ -114,15 +171,93 @@ fn connect_window_session(window_label: &str, state: &AppState) -> Value {
       app_cleanup: Mutex::new(AppCleanupState::default()),
     }),
   );
-  session_metadata(&session_id)
+  session_metadata(&session_id, &sessions[&session_id])
 }
 
-fn session_metadata(session_id: &str) -> Value {
+/// Binds a remote device to a window. The session carries its own engine
+/// (never used remotely) so the rest of the IPC surface — ownership, events,
+/// subscriptions — is identical to a local one.
+fn bind_remote_session(window_label: &str, remote: Arc<RemoteHost>, state: &AppState) -> Value {
+  let device_id = remote.device_id.clone();
+  bind_session(window_label, &device_id, Some(remote), state)
+}
+
+fn bind_session(
+  window_label: &str,
+  device_id: &str,
+  remote: Option<Arc<RemoteHost>>,
+  state: &AppState,
+) -> Value {
+  let mut sessions = state.sessions.lock().unwrap();
+  if let Some((session_id, bundle)) = sessions
+    .iter()
+    .find(|(_, bundle)| bundle.window_label == window_label && bundle.device_id == device_id)
+  {
+    let session_id = session_id.clone();
+    let bundle = bundle.clone();
+    drop(sessions);
+    if let Some(remote) = &bundle.remote {
+      remote.start_events(bundle.events.clone());
+    }
+    return session_metadata(&session_id, &bundle);
+  }
+
+  let session_id = format!(
+    "sess_{}",
+    state
+      .next_session
+      .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+  );
+  let generation = match &remote {
+    Some(remote) => remote.generation,
+    None => state
+      .next_generation
+      .fetch_add(1, std::sync::atomic::Ordering::SeqCst),
+  };
+  let (device_label, service_instance_id, backend_label) = match &remote {
+    Some(remote) => (
+      remote.label.clone(),
+      remote.service_instance_id.clone(),
+      format!("Space Lens on {}", remote.label),
+    ),
+    None => (
+      "This machine".to_string(),
+      SERVICE_INSTANCE_ID.to_string(),
+      "Native host".to_string(),
+    ),
+  };
+  let bundle = Arc::new(SessionBundle {
+    window_label: window_label.to_string(),
+    device_id: device_id.to_string(),
+    device_label,
+    service_instance_id,
+    backend_label,
+    generation,
+    remote,
+    engine: Mutex::new(EngineStore::new(state.roots.clone())),
+    events: EventSink::new(),
+    discovery: Mutex::new(()),
+    app_audit: Mutex::new(AppAuditState::default()),
+    app_cleanup: Mutex::new(AppCleanupState::default()),
+  });
+  sessions.insert(session_id.clone(), bundle.clone());
+  drop(sessions);
+  if let Some(remote) = &bundle.remote {
+    remote.start_events(bundle.events.clone());
+  }
+  session_metadata(&session_id, &bundle)
+}
+
+fn session_metadata(session_id: &str, bundle: &SessionBundle) -> Value {
   json!({
       "sessionId": session_id,
-      "serviceInstanceId": SERVICE_INSTANCE_ID,
-      "cacheNamespace": format!("native/{SERVICE_INSTANCE_ID}/{session_id}"),
-      "backendLabel": "Native host",
+      "serviceInstanceId": bundle.service_instance_id,
+      "cacheNamespace": format!("native/{}/{}/{}", bundle.service_instance_id, session_id, bundle.generation),
+      "backendLabel": bundle.backend_label,
+      "deviceId": bundle.device_id,
+      "deviceLabel": bundle.device_label,
+      "deviceGeneration": bundle.generation,
+      "remote": bundle.remote.is_some(),
   })
 }
 
@@ -210,6 +345,21 @@ pub fn disconnect_window(window_label: &str, state: &AppState) {
   for bundle in bundles {
     cancel_session_scans(&bundle);
   }
+  // Nothing can reach a remote device after its window is gone, so close the
+  // SSH sessions promptly. Stopping takes a network round trip; never run it
+  // on the Tauri main thread.
+  let remotes: Vec<Arc<RemoteHost>> = state
+    .remotes
+    .lock()
+    .unwrap()
+    .drain()
+    .map(|(_, remote)| remote)
+    .collect();
+  for remote in remotes {
+    let _ = std::thread::Builder::new()
+      .name(format!("sl-remote-stop-{}", remote.device_id))
+      .spawn(move || remote.stop());
+  }
 }
 
 fn cancel_session_scans(bundle: &SessionBundle) {
@@ -228,6 +378,147 @@ fn cancel_session_scans(bundle: &SessionBundle) {
         .publish(json!({ "kind": "scan.updated", "status": status }));
     }
   }
+}
+
+// -------------------------------------------------------------- remote hosts
+
+/// Concrete OpenSSH hosts for the picker. Reading the config never runs
+/// `ssh` and never expands a `Match`; a partial listing says so instead of
+/// claiming the file has no hosts.
+#[tauri::command]
+pub fn sl_remote_ssh_hosts(app: AppHandle) -> Result<Value, Value> {
+  let home = app
+    .path()
+    .home_dir()
+    .map_err(|error| problem_value("InternalError", error))?;
+  let listing = spacelens_remote::ssh_config::load(&home);
+  serde_json::to_value(listing).map_err(|error| problem_value("InternalError", error))
+}
+
+/// Every device the workbench can switch to: this machine, plus each live
+/// SSH connection. A remote present here owns a tunnel and a host process.
+#[tauri::command]
+pub fn sl_remote_devices(state: State<'_, AppState>) -> Result<Value, Value> {
+  let mut devices = vec![json!({
+    "deviceId": LOCAL_DEVICE_ID,
+    "label": "This machine",
+    "kind": "local",
+    "platform": crate::reveal::host_platform(),
+    "serviceInstanceId": SERVICE_INSTANCE_ID,
+    "generation": 0,
+  })];
+  let remotes = state.remotes.lock().unwrap();
+  let mut ids: Vec<&String> = remotes.keys().collect();
+  ids.sort();
+  for id in ids {
+    if let Some(remote) = remotes.get(id) {
+      devices.push(json!({
+        "deviceId": remote.device_id,
+        "label": remote.label,
+        "kind": "remote",
+        "platform": remote.platform,
+        "serviceInstanceId": remote.service_instance_id,
+        "generation": remote.generation,
+      }));
+    }
+  }
+  Ok(json!({ "devices": devices }))
+}
+
+/// Provisions a remote over the user's OpenSSH, then binds it to this window.
+/// Progress rides one channel; the final answer rides another so the invoke
+/// response body is never needed (see the macOS custom-protocol note above).
+#[tauri::command]
+pub async fn sl_remote_connect(
+  app: AppHandle,
+  window: Window,
+  target: spacelens_remote::SshTarget,
+  progress: Channel<Value>,
+  reply: Channel<Value>,
+) -> Result<(), Value> {
+  let label = window.label().to_string();
+  let handle = tauri::async_runtime::spawn_blocking(move || {
+    if let Err(error) = target.validate() {
+      let _ = reply.send(json!({ "ok": false, "problem": { "problem": error.problem() } }));
+      return Ok(());
+    }
+    let mut report = |stage: spacelens_remote::InstallProgress| {
+      let _ = progress.send(json!({
+        "kind": "progress",
+        "stage": stage.stage,
+        "code": stage.code,
+        "retryable": stage.retryable,
+        "message": stage.message,
+      }));
+    };
+    let remote = match RemoteHost::connect(&app, target, &mut report) {
+      Ok(remote) => remote,
+      Err(error) => {
+        let _ = reply.send(json!({ "ok": false, "problem": { "problem": error.problem() } }));
+        return Ok(());
+      }
+    };
+    let state = app.state::<AppState>();
+    let device_id = remote.device_id.clone();
+    // Provision first, then replace: a failed reconnect leaves the working
+    // connection in place.
+    let previous = state
+      .remotes
+      .lock()
+      .unwrap()
+      .insert(device_id.clone(), remote.clone());
+    if let Some(previous) = previous {
+      previous.stop();
+    }
+    for bundle in take_device_sessions(&state, &device_id) {
+      cancel_session_scans(&bundle);
+    }
+    let metadata = bind_remote_session(&label, remote, &state);
+    let _ = reply.send(json!({ "ok": true, "result": metadata }));
+    Ok(())
+  });
+  handle
+    .await
+    .map_err(|error| problem_value("InternalError", error))?
+}
+
+/// Explicitly closes a remote: the tunnel, the remote server process, and
+/// every session bound to the device.
+#[tauri::command]
+pub async fn sl_remote_disconnect(app: AppHandle, device_id: String) -> Result<Value, Value> {
+  let handle = tauri::async_runtime::spawn_blocking(move || {
+    if device_id == LOCAL_DEVICE_ID {
+      return Err(problem_value(
+        "InvalidRequest",
+        "the local device cannot be disconnected",
+      ));
+    }
+    let state = app.state::<AppState>();
+    let remote = state.remotes.lock().unwrap().remove(&device_id);
+    if let Some(remote) = remote {
+      remote.stop();
+    }
+    for bundle in take_device_sessions(&state, &device_id) {
+      cancel_session_scans(&bundle);
+    }
+    Ok(json!({ "disconnected": true }))
+  });
+  handle
+    .await
+    .map_err(|error| problem_value("InternalError", error))?
+}
+
+fn take_device_sessions(state: &AppState, device_id: &str) -> Vec<Arc<SessionBundle>> {
+  let mut sessions = state.sessions.lock().unwrap();
+  let ids: Vec<String> = sessions
+    .iter()
+    .filter(|(_, bundle)| bundle.device_id == device_id)
+    .map(|(id, _)| id.clone())
+    .collect();
+  ids
+    .into_iter()
+    .filter_map(|id| sessions.remove(&id))
+    .collect()
 }
 
 // --------------------------------------------------------------- closed union
@@ -395,6 +686,11 @@ pub async fn sl_read(
             .cloned()
             .ok_or_else(|| json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}))?;
       drop(sessions);
+      // A remote device answers from its own host over HTTP; the local engine,
+      // audit state, icon allow-list, and memory service are never consulted.
+      if let Some(remote) = bundle.remote.clone() {
+        return remote.read(&request);
+      }
       if let ReadRequest::Discovery {
         scan_id,
         kind,
@@ -739,10 +1035,22 @@ pub async fn sl_submit(
             .cloned()
             .ok_or_else(|| json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}))?;
     drop(sessions);
+    // Remote v1 is read-only: allowed submits map onto host routes, and every
+    // cleanup/app-scan/terminate arm is refused before a socket is opened.
+    if let Some(remote) = bundle.remote.clone() {
+      let outcome = remote.submit(&request);
+      let _ = reply.send(match outcome {
+        Ok(value) => json!({ "ok": true, "result": value }),
+        Err(problem) => json!({ "ok": false, "problem": problem }),
+      });
+      return Ok(());
+    }
     match request {
       // Where the guarded scanner cannot walk (Windows), a localOnly request
       // falls through to the regular scan below rather than finishing empty.
-      SubmitRequest::ScanStart { request } if request.local_only && crate::engine::protected_scan_supported() => {
+      SubmitRequest::ScanStart { request }
+        if request.local_only && crate::engine::protected_scan_supported() =>
+      {
         let prepared = bundle.engine.lock().unwrap().prepare_local_scan(request);
         match prepared {
           Ok((session, task)) => {
@@ -1148,6 +1456,15 @@ pub async fn sl_host_request(
       || json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}),
     )?;
     drop(sessions);
+    // Dialogs and file-manager actions belong to this machine. A remote path
+    // is not this machine's path, so the whole arm is refused.
+    if bundle.remote.is_some() {
+      let _ = reply.send(json!({
+        "ok": false,
+        "problem": problem_value("Forbidden", "host actions are disabled for remote devices"),
+      }));
+      return Ok(());
+    }
     let value: Result<Value, Value> = match request {
       HostRequest::PickDirectory { title } => {
         use tauri_plugin_dialog::DialogExt;
@@ -1208,15 +1525,17 @@ pub fn sl_events_subscribe(
   let bundle = sessions.get(&session_id).ok_or_else(
     || json!({"problem": {"code": "NotFound", "message": "session vanished", "retryable": false}}),
   )?;
+  // A remote session reports the remote host's instance, not this app's.
+  let service_instance_id = bundle.service_instance_id.clone();
   // The channel registers before the replay snapshot, so every event
   // published after this call is queued for the window; the synchronous
   // replay below overlaps that channel and the client's sequence watermark
   // deduplicates the overlap.
   let (subscription_id, mut ack, receiver) = bundle.events.subscribe_channel(after_sequence);
-  ack.service_instance_id = SERVICE_INSTANCE_ID.to_string();
+  ack.service_instance_id = service_instance_id.clone();
   let frames: Vec<ScopedEventFrame> = bundle
     .events
-    .frames_for(&session_id, &subscription_id, SERVICE_INSTANCE_ID)
+    .frames_for(&session_id, &subscription_id, &service_instance_id)
     .into_iter()
     .filter(|frame| after_sequence.is_none_or(|since| frame.event.sequence > since))
     .collect();
@@ -1231,6 +1550,7 @@ pub fn sl_events_subscribe(
   // the loop — so a closed window never leaks a thread or subscription.
   let forward_session_id = session_id.clone();
   let forward_subscription_id = subscription_id.clone();
+  let forward_service_instance_id = service_instance_id.clone();
   let label = window.label().to_string();
   let app_handle = app.clone();
   let forwarder = std::thread::Builder::new()
@@ -1240,7 +1560,7 @@ pub fn sl_events_subscribe(
         let frame = ScopedEventFrame {
           session_id: forward_session_id.clone(),
           subscription_id: forward_subscription_id.clone(),
-          service_instance_id: SERVICE_INSTANCE_ID.to_string(),
+          service_instance_id: forward_service_instance_id.clone(),
           event: envelope,
         };
         if app_handle.emit_to(&label, EVENT_NAME, frame).is_err() {
@@ -1296,7 +1616,7 @@ mod tests {
   fn reconnecting_the_same_window_preserves_its_session_and_running_worker_slot() {
     let path = std::env::temp_dir().join("sl-window-registry-no-filesystem-access");
     let state = super::AppState::new(vec![path.clone()]);
-    let first = super::connect_window_session("main", &state);
+    let first = super::connect_window_session("main", super::LOCAL_DEVICE_ID, &state);
     let session_id = first["sessionId"].as_str().unwrap();
     let bundle = state
       .sessions
@@ -1313,7 +1633,7 @@ mod tests {
       .unwrap()
       .prepare_local_scan(request)
       .unwrap();
-    let reconnect = super::connect_window_session("main", &state);
+    let reconnect = super::connect_window_session("main", super::LOCAL_DEVICE_ID, &state);
     assert_eq!(
       reconnect["sessionId"], first["sessionId"],
       "a refreshed renderer must recover the original engine"
@@ -1329,7 +1649,7 @@ mod tests {
         .state,
       "scanning"
     );
-    let other = super::connect_window_session("other", &state);
+    let other = super::connect_window_session("other", super::LOCAL_DEVICE_ID, &state);
     assert_ne!(other["sessionId"], first["sessionId"]);
   }
 
@@ -1337,8 +1657,8 @@ mod tests {
   fn disconnect_and_window_destroy_cancel_only_owned_scans_without_releasing_running_slots() {
     let path = std::env::temp_dir().join("sl-window-disconnect-no-filesystem-access");
     let state = super::AppState::new(vec![path.clone()]);
-    let main = super::connect_window_session("main", &state);
-    let other = super::connect_window_session("other", &state);
+    let main = super::connect_window_session("main", super::LOCAL_DEVICE_ID, &state);
+    let other = super::connect_window_session("other", super::LOCAL_DEVICE_ID, &state);
     let main_id = main["sessionId"].as_str().unwrap();
     let other_id = other["sessionId"].as_str().unwrap();
     let main_bundle = state.sessions.lock().unwrap().get(main_id).unwrap().clone();
@@ -1388,7 +1708,7 @@ mod tests {
       "scanning"
     );
     assert_eq!(
-      super::connect_window_session("main", &state)["sessionId"],
+      super::connect_window_session("main", super::LOCAL_DEVICE_ID, &state)["sessionId"],
       main["sessionId"]
     );
     assert_eq!(
@@ -1454,7 +1774,9 @@ mod tests {
     let handles: Vec<_> = (0..8)
       .map(|_| {
         let state = state.clone();
-        std::thread::spawn(move || super::connect_window_session("main", &state))
+        std::thread::spawn(move || {
+          super::connect_window_session("main", super::LOCAL_DEVICE_ID, &state)
+        })
       })
       .collect();
     let replies: Vec<_> = handles
@@ -1480,6 +1802,12 @@ mod tests {
     let (session, task) = engine.prepare_local_scan(request).unwrap();
     let bundle = super::SessionBundle {
       window_label: "fixture".into(),
+      device_id: super::LOCAL_DEVICE_ID.to_string(),
+      device_label: "This machine".into(),
+      service_instance_id: super::SERVICE_INSTANCE_ID.into(),
+      backend_label: "Native host".into(),
+      generation: 0,
+      remote: None,
       engine: std::sync::Mutex::new(engine),
       events: crate::events::EventSink::new(),
       discovery: std::sync::Mutex::new(()),
@@ -1609,6 +1937,12 @@ mod tests {
     };
     let bundle = Arc::new(super::SessionBundle {
       window_label: "fixture".into(),
+      device_id: super::LOCAL_DEVICE_ID.to_string(),
+      device_label: "This machine".into(),
+      service_instance_id: super::SERVICE_INSTANCE_ID.into(),
+      backend_label: "Native host".into(),
+      generation: 0,
+      remote: None,
       engine: Mutex::new(engine),
       events: crate::events::EventSink::new(),
       discovery: Mutex::new(()),
@@ -1804,6 +2138,12 @@ mod tests {
     let probe = std::fs::canonicalize(&probe).unwrap();
     let bundle = super::SessionBundle {
       window_label: "fixture".into(),
+      device_id: super::LOCAL_DEVICE_ID.to_string(),
+      device_label: "This machine".into(),
+      service_instance_id: super::SERVICE_INSTANCE_ID.into(),
+      backend_label: "Native host".into(),
+      generation: 0,
+      remote: None,
       engine: std::sync::Mutex::new(crate::engine::EngineStore::new(Vec::new())),
       events: crate::events::EventSink::new(),
       discovery: std::sync::Mutex::new(()),
@@ -1843,6 +2183,12 @@ mod tests {
   fn app_cleanup_bundle() -> super::SessionBundle {
     super::SessionBundle {
       window_label: "fixture".into(),
+      device_id: super::LOCAL_DEVICE_ID.to_string(),
+      device_label: "This machine".into(),
+      service_instance_id: super::SERVICE_INSTANCE_ID.into(),
+      backend_label: "Native host".into(),
+      generation: 0,
+      remote: None,
       engine: std::sync::Mutex::new(crate::engine::EngineStore::new(Vec::new())),
       events: crate::events::EventSink::new(),
       discovery: std::sync::Mutex::new(()),

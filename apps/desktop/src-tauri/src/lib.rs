@@ -7,6 +7,7 @@ pub mod events;
 pub mod memory;
 mod native_material;
 pub mod permissions;
+pub mod remote;
 pub mod reveal;
 
 use std::path::PathBuf;
@@ -48,6 +49,10 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       commands::sl_connect,
       commands::sl_disconnect,
+      commands::sl_remote_ssh_hosts,
+      commands::sl_remote_connect,
+      commands::sl_remote_disconnect,
+      commands::sl_remote_devices,
       commands::sl_read,
       commands::sl_submit,
       commands::sl_host_request,

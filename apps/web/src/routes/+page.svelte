@@ -45,7 +45,7 @@
   import { CHART_MODE_KEY, TREEMAP_DENSITY_KEY, parseChartMode, parseTreemapDensity } from '../lib/chart-mode'
   import { checkForAppUpdate, currentAppVersion, installAppUpdate } from '../lib/updater'
   import type { UpdateStatus } from '../lib/updater'
-  import { ServiceError, type TauriPorts } from '@space-lens/client'
+  import { ServiceError, createTauriRemotes, createTauriService, type RemoteDevices, type RemoteDevice, type RemoteInstallProgress, type RemoteSshListing, type SshTarget, type TauriPorts } from '@space-lens/client'
   import {
     clearToken,
     describeError,
@@ -90,6 +90,10 @@
   } from '../lib/recent-apps'
   import { auditFixtureActive, installAuditFixture, sanitizeFixtureAttributes } from '../lib/audit-fixture'
   import { startDesktopEventStream } from '../lib/desktop-events'
+  import DeviceDialog from '../lib/devices/DeviceDialog.svelte'
+
+  /** The native shell's own machine; every other device is an SSH host. */
+  const LOCAL_DEVICE_ID = 'local'
 
   let ticketInput = $state('')
   let passwordInput = $state('')
@@ -110,6 +114,23 @@
   let chartVisible = $state(true)
   /** The storage map fills the view and the folder contents list is hidden. */
   let chartFocused = $state(false)
+
+  // Remote devices. The native shell owns the SSH processes and the remote
+  // session; the page only picks which device every service call targets.
+  let desktopPorts = $state<TauriPorts | null>(null)
+  let remotes = $state<RemoteDevices | null>(null)
+  let devices = $state<RemoteDevice[]>([])
+  let activeDeviceId = $state(LOCAL_DEVICE_ID)
+  let deviceDialogOpen = $state(false)
+  let deviceBusy = $state(false)
+  let deviceProgress = $state<RemoteInstallProgress | null>(null)
+  let deviceError = $state<string | null>(null)
+  let sshHosts = $state<RemoteSshListing | null>(null)
+  let sshHostsLoading = $state(false)
+  const activeDeviceLabel = $derived(
+    devices.find((device) => device.deviceId === activeDeviceId)?.label ??
+      (activeDeviceId === LOCAL_DEVICE_ID ? 'This machine' : activeDeviceId),
+  )
 
   /**
    * The contents panel's size, dragged by the divider between the chart and
@@ -270,6 +291,7 @@
   // the same location (keyed by the scan label the host echoes back).
   $effect(() => {
     const status = workbench.status
+    if (activeDeviceId !== LOCAL_DEVICE_ID) return
     if (status?.state !== 'ready' || !status.coverage || status.app || !status.label) return
     if (scanSizes[status.label]?.at === status.updatedAt) return
     rememberScanSize(status.label, {
@@ -287,7 +309,7 @@
   /** A6: late planning responses are discarded when the scan moved on. */
   let planSequence = 0
   /** Filesystem inputs per path session (virtual ids are never stored). */
-  let pathsByScan = new Map<string, string[]>()
+  let pathsByScan = $state(new Map<string, string[]>())
   let appearance = $state(parseAppearance(null))
   let appVersion = $state<string | null>(null)
   let updateStatus = $state<UpdateStatus>({ state: 'idle' })
@@ -648,6 +670,10 @@
   let desktopHome: string | null = null
   function expandTilde(path: string): string {
     const trimmed = path.trim()
+    // A remote device has its own home; expanding `~` with this machine's
+    // home would name a path the remote host has never seen. The picker
+    // supplies absolute remote paths, so leave anything else untouched.
+    if (activeDeviceId !== LOCAL_DEVICE_ID) return trimmed
     if (desktopHome === null) return trimmed
     if (trimmed === '~') return desktopHome
     if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) return `${desktopHome}${trimmed.slice(1)}`
@@ -661,17 +687,105 @@
     pollTimer = null
   }
 
+  /**
+   * Clears everything that belongs to one host. Scan ids, tree slices,
+   * collection entries, audit generations, and remembered paths are all
+   * device-scoped: carrying them across a switch would point the UI at data
+   * the new backend has never seen.
+   */
+  function resetDeviceState(deviceId: string): void {
+    stopStreams()
+    workbench.service = null
+    workbench.capabilities = null
+    workbench.targets = []
+    workbench.volumes = []
+    workbench.status = null
+    workbench.activeScanId = null
+    workbench.slice = null
+    workbench.items = []
+    workbench.childrenTotal = 0
+    workbench.hoveredId = null
+    workbench.collector = []
+    workbench.deleting = false
+    workbench.error = null
+    workbench.streamState = 'idle'
+    workbench.closingScanIds = []
+    workbench.connectMessage = null
+    pickerOpen = false
+    pickerPath = ''
+    startingScan = false
+    startingAppId = null
+    rescanning = false
+    planning = false
+    cleanupPlan = null
+    cleanupOutcome = null
+    cleanupError = null
+    notice = null
+    scannedPaths = []
+    pathsByScan = new Map()
+    appSessions = []
+    pinnedReports = new Map()
+    appAuditReport = null
+    appAuditLoading = false
+    appAuditError = null
+    appAuditSequence++
+    appIconCache.clear()
+    discoveryPage = null
+    discoveryItems = []
+    discoveryLoading = false
+    discoveryError = null
+    discoverySequence++
+    navigationRequest++
+    navigating = false
+    view = 'browse'
+    browseSearch = ''
+    collectorOpen = false
+    aiOpen = false
+    memorySnapshot = null
+    // Recent locations and size baselines are host-local preferences. A
+    // remote session gets a clean slate instead of local paths it cannot read.
+    recentTargets = deviceId === LOCAL_DEVICE_ID ? loadRecentTargets() : []
+    scanSizes = deviceId === LOCAL_DEVICE_ID ? loadScanSizes() : {}
+    recentAppScans = deviceId === LOCAL_DEVICE_ID ? loadRecentAppScans() : []
+  }
+
+  async function loadDesktopPorts(): Promise<TauriPorts> {
+    if (desktopPorts !== null) return desktopPorts
+    const { loadTauriPorts } = await import('../lib/tauri-ports')
+    const ports = await loadTauriPorts()
+    desktopPorts = ports
+    aiPorts = ports
+    desktopHome = (await ports.homeDir?.().catch(() => null)) ?? null
+    return ports
+  }
+
   async function connectDesktop(): Promise<void> {
+    try {
+      const ports = await loadDesktopPorts()
+      remotes = createTauriRemotes(ports)
+      devices = await remotes.list()
+      if (!devices.some((device) => device.deviceId === activeDeviceId)) {
+        activeDeviceId = LOCAL_DEVICE_ID
+      }
+      await activateDevice(activeDeviceId)
+    } catch (error) {
+      workbench.phase = 'failed'
+      workbench.connectMessage = `desktop IPC failed: ${describeError(error)}`
+    }
+  }
+
+  /**
+   * Opens one device. Every call goes through `createTauriService(ports,
+   * deviceId)`, so local and remote share the exact same adapter contract;
+   * the native side decides whether the session is an engine or an SSH host.
+   */
+  async function activateDevice(deviceId: string): Promise<void> {
+    resetDeviceState(deviceId)
+    activeDeviceId = deviceId
     workbench.phase = 'connecting'
     try {
-      const [{ createTauriService }, { loadTauriPorts }] = await Promise.all([
-        import('@space-lens/client'),
-        import('../lib/tauri-ports'),
-      ])
-      const ports = await loadTauriPorts()
-      aiPorts = ports
-      desktopHome = (await ports.homeDir?.().catch(() => null)) ?? null
-      const service = createTauriService(ports)
+      const ports = await loadDesktopPorts()
+      const service = createTauriService(ports, deviceId)
       workbench.capabilities = await service.capabilities()
       const rootsResponse = await service.roots()
       workbench.targets = Array.isArray(rootsResponse?.roots) ? rootsResponse.roots : []
@@ -681,7 +795,7 @@
       // Live push first; if the stream cannot start, the 2s polling below
       // stays as the fallback for the whole session.
       try {
-        stream = await startDesktopEventStream(ports, {
+        stream = await startDesktopEventStream(ports, deviceId, {
           activeScanId: () => workbench.activeScanId,
           onStatus: (status) => {
             workbench.status = status
@@ -724,6 +838,103 @@
     } catch (error) {
       workbench.phase = 'failed'
       workbench.connectMessage = `desktop IPC failed: ${describeError(error)}`
+      throw error
+    }
+  }
+
+  async function refreshDevices(): Promise<void> {
+    if (remotes === null) return
+    try {
+      devices = await remotes.list()
+      if (!devices.some((device) => device.deviceId === activeDeviceId)) {
+        activeDeviceId = LOCAL_DEVICE_ID
+      }
+    } catch (error) {
+      deviceError = describeError(error)
+    }
+  }
+
+  async function refreshSshHosts(): Promise<void> {
+    if (remotes === null) return
+    sshHostsLoading = true
+    try {
+      sshHosts = await remotes.sshHosts()
+    } catch (error) {
+      deviceError = describeError(error)
+      sshHosts = null
+    } finally {
+      sshHostsLoading = false
+    }
+  }
+
+  function openDevices(): void {
+    deviceDialogOpen = true
+    deviceError = null
+    deviceProgress = null
+    void refreshDevices()
+    void refreshSshHosts()
+  }
+
+  async function switchDevice(deviceId: string): Promise<void> {
+    if (deviceId === activeDeviceId && workbench.phase === 'ready') {
+      deviceDialogOpen = false
+      return
+    }
+    const previous = activeDeviceId
+    deviceBusy = true
+    deviceError = null
+    deviceProgress = null
+    try {
+      await activateDevice(deviceId)
+      deviceDialogOpen = false
+    } catch (error) {
+      deviceError = describeError(error)
+      // Never strand the workbench on a host that failed: reopen the machine
+      // that was working before the switch when there is one.
+      if (previous !== deviceId) {
+        try {
+          await activateDevice(previous)
+        } catch {
+          // Both devices are down; the failure banner above says why.
+        }
+      }
+    } finally {
+      deviceBusy = false
+    }
+  }
+
+  async function connectDevice(target: SshTarget): Promise<void> {
+    if (remotes === null || deviceBusy) return
+    deviceBusy = true
+    deviceError = null
+    deviceProgress = null
+    try {
+      const session = await remotes.connect(target, (progress) => {
+        deviceProgress = progress
+      })
+      deviceProgress = null
+      await refreshDevices()
+      await switchDevice(session.deviceId)
+    } catch (error) {
+      deviceProgress = null
+      deviceError = describeError(error)
+    } finally {
+      deviceBusy = false
+    }
+  }
+
+  async function disconnectDevice(deviceId: string): Promise<void> {
+    if (remotes === null || deviceBusy) return
+    deviceBusy = true
+    deviceError = null
+    try {
+      await remotes.disconnect(deviceId)
+      if (deviceId === activeDeviceId) await activateDevice(LOCAL_DEVICE_ID)
+      await refreshDevices()
+    } catch (error) {
+      deviceError = describeError(error)
+    } finally {
+      deviceBusy = false
     }
   }
 
@@ -879,8 +1090,12 @@
         ignoredMode: 'summarize',
         label: paths.includes('/') && paths.includes('/System/Volumes/Data') ? 'Macintosh HD' : paths[0],
       })
-      for (const path of paths) rememberRecentTarget(path)
-      recentTargets = loadRecentTargets()
+      // Recent locations are stored on this machine; a remote path would be a
+      // broken entry the next local session tries to rescan.
+      if (activeDeviceId === LOCAL_DEVICE_ID) {
+        for (const path of paths) rememberRecentTarget(path)
+        recentTargets = loadRecentTargets()
+      }
       scannedPaths = paths.map(expandTilde)
       pathsByScan.set(session.scanId, scannedPaths)
       if (workbench.activeScanId && workbench.activeScanId !== session.scanId) {
@@ -1503,6 +1718,8 @@
       mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
       chromeInset={headerInset()}
       {sidebarVisible}
+      deviceLabel={__SPACLENS_DESKTOP__ ? activeDeviceLabel : undefined}
+      onOpenDevices={__SPACLENS_DESKTOP__ ? openDevices : undefined}
       onToggleSidebar={() => (sidebarVisible = !sidebarVisible)}
       onOpenSettings={() => (settingsOpen = true)}
     />
@@ -1531,6 +1748,8 @@
         mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
         chromeInset={headerInset()}
         sidebarVisible={false}
+        deviceLabel={__SPACLENS_DESKTOP__ ? activeDeviceLabel : undefined}
+        onOpenDevices={__SPACLENS_DESKTOP__ ? openDevices : undefined}
         onOpenSettings={() => (settingsOpen = true)}
         logo={`${base}/logo-mark.png`}
       />
@@ -1575,6 +1794,8 @@
         mode={__SPACLENS_DESKTOP__ ? 'desktop' : 'browser'}
         folderPicker={workbench.capabilities?.host.folderPicker ?? false}
         onSettings={() => (settingsOpen = true)}
+        deviceLabel={__SPACLENS_DESKTOP__ ? activeDeviceLabel : undefined}
+        onOpenDevices={__SPACLENS_DESKTOP__ ? openDevices : undefined}
         onPickFolder={() => workbench.service?.pickFolder?.() ?? Promise.resolve(null)}
         chromeInset={headerInset()}
         logo={`${base}/logo-mark.png`}
@@ -1588,7 +1809,7 @@
               ? 'Scan cancelled. Choose a location to start again.'
               : null)}
         status={workbench.status}
-        sidebarFooter={__SPACLENS_DESKTOP__ ? fdaNotice : undefined}
+        sidebarFooter={__SPACLENS_DESKTOP__ && activeDeviceId === LOCAL_DEVICE_ID ? fdaNotice : undefined}
         progressBaseline={workbench.status?.state === 'scanning'
           ? scanBaseline(
               workbench.status.label,
@@ -1636,6 +1857,8 @@
       {chartVisible}
       {chartFocused}
       onToggleChartFocus={() => (chartFocused = !chartFocused)}
+      deviceLabel={__SPACLENS_DESKTOP__ ? activeDeviceLabel : undefined}
+      onOpenDevices={__SPACLENS_DESKTOP__ ? openDevices : undefined}
       collectorCount={workbench.collector.length}
       busy={workbench.deleting || planning}
       onNewScan={() => newLocation()}
@@ -1673,7 +1896,7 @@
           onSelectApp={(appId) => void startAppScan(appId)}
           onForgetApp={forgetRecentApp}
           switchingBlocked={workbench.deleting || planning}
-          footer={__SPACLENS_DESKTOP__ ? fdaNotice : undefined}
+          footer={__SPACLENS_DESKTOP__ && activeDeviceId === LOCAL_DEVICE_ID ? fdaNotice : undefined}
           onSettings={() => (settingsOpen = true)}
           volume={scanVolume}
           scanBytes={workbench.status?.bytesScanned ?? 0}
@@ -1957,9 +2180,11 @@
           workbench.status.bytesScanned,
         )} scanned <span class="status-separator">·</span>
         {workbench.status.coverage
-          ? __SPACLENS_DESKTOP__
-            ? 'Local cleanup enabled'
-            : 'Read-only local scan'
+          ? cleanupAvailable
+            ? __SPACLENS_DESKTOP__ && activeDeviceId === LOCAL_DEVICE_ID
+              ? 'Local cleanup enabled'
+              : 'Cleanup enabled'
+            : 'Read-only scan'
           : workbench.capabilities?.cleanup.execute
             ? 'Local cleanup enabled'
             : 'Read-only connection'}</span
@@ -2035,3 +2260,20 @@
   onCheckUpdates={__SPACLENS_DESKTOP__ ? () => void checkForAppUpdate((status) => (updateStatus = status)) : undefined}
   onInstallUpdate={__SPACLENS_DESKTOP__ ? () => void installAppUpdate((status) => (updateStatus = status)) : undefined}
 />
+{#if __SPACLENS_DESKTOP__}
+  <DeviceDialog
+    open={deviceDialogOpen}
+    {devices}
+    {activeDeviceId}
+    {sshHosts}
+    sshLoading={sshHostsLoading}
+    connecting={deviceBusy}
+    progress={deviceProgress}
+    error={deviceError}
+    onClose={() => (deviceDialogOpen = false)}
+    onRefresh={() => void refreshSshHosts()}
+    onSwitch={(deviceId) => void switchDevice(deviceId)}
+    onDisconnect={(deviceId) => void disconnectDevice(deviceId)}
+    onConnect={(target) => void connectDevice(target)}
+  />
+{/if}

@@ -70,19 +70,24 @@ export async function startDesktopEventStream(
     invoke(cmd: string, payload?: Record<string, unknown>): Promise<unknown>
     listen?(event: string, handler: (event: unknown) => void): Promise<() => void>
   },
+  deviceId: string,
   hooks: DesktopEventHooks,
 ): Promise<DesktopEventStreamHandle> {
   if (typeof ports.listen !== 'function') {
     throw new Error('event push requires the tauri listen port; polling remains the fallback')
   }
-  // sl_connect is idempotent per window: it returns the existing session
-  // instead of allocating a second engine.
-  const metadata = (await ports.invoke('sl_connect', {})) as { sessionId?: string }
+  // sl_connect is idempotent per (window, device): it returns the existing
+  // session instead of allocating a second engine.
+  const metadata = (await ports.invoke('sl_connect', { deviceId })) as { sessionId?: string }
   const sessionId = metadata.sessionId
   let watermark = 0
   const unlisten = await ports.listen(DESKTOP_EVENT_NAME, (raw) => {
-    const frame = raw as { event?: DesktopEventEnvelope }
+    const frame = raw as { sessionId?: string; event?: DesktopEventEnvelope }
     if (!frame?.event) return
+    // One listener receives frames only for this window, but a switch can
+    // overlap two sessions briefly. Never let another session's status reach
+    // this device's reducer, even when scan ids happen to coincide.
+    if (frame.sessionId !== undefined && frame.sessionId !== sessionId) return
     const decision = reduceScanEvent(watermark, hooks.activeScanId(), frame.event)
     watermark = decision.watermark
     if (decision.status) hooks.onStatus(decision.status)

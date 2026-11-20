@@ -118,27 +118,132 @@ function invokeWithReply<T>(
   })
 }
 
+/** Session metadata returned by `sl_connect` / `sl_remote_connect`. */
+export interface DesktopSession {
+  sessionId: string
+  serviceInstanceId: string
+  /** Scope for the page cache; distinct per device and generation. */
+  cacheNamespace: string
+  backendLabel: string
+  deviceId: string
+  deviceLabel: string
+  deviceGeneration: number
+  /** True when this session is served by a remote SSH host. */
+  remote: boolean
+}
+
+/** A concrete entry from the user's `~/.ssh/config`, for the picker. */
+export interface RemoteSshHost {
+  alias: string
+  hostName?: string
+  user?: string
+  port?: number
+  source: string
+}
+
+export interface RemoteSshListing {
+  configPath: string
+  hosts: RemoteSshHost[]
+  /** False when a limit or unreadable include means aliases may be missing. */
+  complete: boolean
+  problems: string[]
+}
+
+export interface RemoteDevice {
+  deviceId: string
+  label: string
+  kind: 'local' | 'remote'
+  platform: string
+  serviceInstanceId: string
+  generation: number
+}
+
+/** One validated destination. The native side rejects anything else. */
+export type SshTarget =
+  | { kind: 'alias'; alias: string }
+  | { kind: 'host'; user: string; host: string; port?: number | null }
+
+export interface RemoteInstallProgress {
+  stage:
+    | 'probe'
+    | 'resolve'
+    | 'download'
+    | 'verify'
+    | 'agent-install'
+    | 'host-check'
+    | 'serve-start'
+    | 'tunnel'
+    | 'pair'
+    | 'ready'
+  code: string
+  retryable: boolean
+  message: string
+}
+
+export interface RemoteDevices {
+  list(): Promise<RemoteDevice[]>
+  sshHosts(): Promise<RemoteSshListing>
+  /** Provisions and connects; progress arrives before the resolved session. */
+  connect(
+    target: SshTarget,
+    onProgress?: (progress: RemoteInstallProgress) => void,
+  ): Promise<DesktopSession>
+  disconnect(deviceId: string): Promise<void>
+}
+
+const REMOTE_CONNECT_TIMEOUT_MS = 30 * 60_000
+
+function problemFromReply(message: unknown, fallback: string): Error {
+  const reply = message as Reply<unknown>
+  const raw = reply?.problem
+  if (raw !== undefined && raw !== null) {
+    const problem = 'problem' in raw ? raw.problem : raw
+    return new TauriProblemError(problem)
+  }
+  return new Error(fallback)
+}
+
 /**
  * Desktop adapter: closed sl_* commands over Tauri IPC, session bound to the
- * calling window, replies via Channel.
+ * calling window, replies via Channel. `deviceId` selects which session the
+ * adapter talks to; `local` is this machine, everything else is a connected
+ * SSH host.
  */
-export function createTauriService(ports: TauriPorts): WorkbenchService {
-  let sessionId = ''
+export function createTauriService(
+  ports: TauriPorts,
+  deviceId: string = 'local',
+): WorkbenchService & { readonly deviceId: string; session(): Promise<DesktopSession> } {
+  let pending: Promise<DesktopSession> | null = null
+
+  /**
+   * One session per adapter. A rejected connect is not cached: the next call
+   * retries instead of pinning the failure for the lifetime of the page.
+   */
+  const session = (): Promise<DesktopSession> => {
+    if (pending === null) {
+      pending = (ports.invoke('sl_connect', { deviceId }) as Promise<DesktopSession>).catch(
+        (error: unknown) => {
+          pending = null
+          throw error
+        },
+      )
+    }
+    return pending
+  }
 
   const invokeReply = async <T>(
     cmd: string,
     payload: Record<string, unknown>,
     timeoutMs = REPLY_TIMEOUT_MS,
   ): Promise<T> => {
-    if (sessionId === '') {
-      const metadata = (await ports.invoke('sl_connect', {})) as { sessionId: string }
-      sessionId = metadata.sessionId
-    }
-    return invokeWithReply<T>(ports, cmd, { sessionId, ...payload }, timeoutMs)
+    const metadata = await session()
+    return invokeWithReply<T>(ports, cmd, { sessionId: metadata.sessionId, ...payload }, timeoutMs)
   }
 
   return {
     baseUrl: 'tauri://local',
+    deviceId,
+    session,
     async health() {
       return invokeReply<Health>('sl_read', { request: { method: 'health' } })
     },
@@ -295,6 +400,51 @@ export function createTauriService(ports: TauriPorts): WorkbenchService {
       return invokeReply<{ reopened: boolean }>('sl_host_request', {
         request: { kind: 'reopenApp', auditId: body.auditId },
       })
+    },
+  }
+}
+
+
+/**
+ * Device management for the desktop shell. Kept outside `WorkbenchService`:
+ * connecting over SSH is a host concern, not part of the scan/tree contract
+ * every adapter must implement.
+ */
+export function createTauriRemotes(ports: TauriPorts): RemoteDevices {
+  return {
+    async list() {
+      const reply = (await ports.invoke('sl_remote_devices', {})) as { devices: RemoteDevice[] }
+      return Array.isArray(reply?.devices) ? reply.devices : []
+    },
+    async sshHosts() {
+      return (await ports.invoke('sl_remote_ssh_hosts', {})) as RemoteSshListing
+    },
+    connect(target, onProgress) {
+      return new Promise<DesktopSession>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('remote provisioning timed out')),
+          REMOTE_CONNECT_TIMEOUT_MS,
+        )
+        const progress = ports.createChannel((message) => {
+          const value = message as { kind?: string } & RemoteInstallProgress
+          if (value?.kind === 'progress') onProgress?.(value)
+        })
+        const reply = ports.createChannel((message) => {
+          clearTimeout(timer)
+          const value = message as Reply<DesktopSession>
+          if (value?.ok === true && value.result !== undefined) resolve(value.result)
+          else reject(problemFromReply(message, 'remote provisioning failed'))
+        })
+        ports
+          .invoke('sl_remote_connect', { target, progress, reply })
+          .catch((error: unknown) => {
+            clearTimeout(timer)
+            reject(error instanceof Error ? error : new Error(String(error)))
+          })
+      })
+    },
+    async disconnect(deviceId: string) {
+      await ports.invoke('sl_remote_disconnect', { deviceId })
     },
   }
 }

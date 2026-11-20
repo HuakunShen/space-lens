@@ -118,7 +118,7 @@ test('stream listens before subscribing, applies frames, and close() truly unsub
   const statuses: string[] = []
   let readyCalls = 0
   let activeScanId: string | null = null
-  const stream = await startDesktopEventStream(h.ports, {
+  const stream = await startDesktopEventStream(h.ports, 'remote:refyard', {
     activeScanId: () => activeScanId,
     onStatus: (fresh) => statuses.push(fresh.state),
     onReady: () => {
@@ -129,6 +129,7 @@ test('stream listens before subscribing, applies frames, and close() truly unsub
     h.invokes().map((call) => call.cmd),
     ['sl_connect', 'sl_events_subscribe'],
   )
+  assert.equal(h.invokes()[0].payload.deviceId, 'remote:refyard')
   h.emit(frame(1, { kind: 'scan.updated', status: status('scan_1', 'scanning') }))
   assert.deepEqual(statuses, [], 'events for the inactive scan are ignored')
   activeScanId = 'scan_1'
@@ -138,6 +139,24 @@ test('stream listens before subscribing, applies frames, and close() truly unsub
   h.emit(frame(3, { kind: 'scan.completed', status: status('scan_1', 'ready') }))
   assert.deepEqual(statuses, ['scanning', 'ready'])
   assert.equal(readyCalls, 1)
+  // A frame emitted for another session in the same window must not advance
+  // this reducer's watermark or apply its status.
+  h.emit({
+    sessionId: 'sess_2',
+    event: {
+      sequence: 4,
+      payload: { kind: 'scan.updated', status: status('scan_1', 'failed') },
+    },
+  })
+  assert.deepEqual(statuses, ['scanning', 'ready'])
+  h.emit({
+    sessionId: 'sess_1',
+    event: {
+      sequence: 4,
+      payload: { kind: 'scan.updated', status: status('scan_1', 'cancelled') },
+    },
+  })
+  assert.deepEqual(statuses, ['scanning', 'ready', 'cancelled'])
   await stream.close()
   const closeCalls = h.invokes().filter((call) => call.cmd === 'sl_events_unsubscribe')
   assert.equal(closeCalls.length, 1)
@@ -148,7 +167,7 @@ test('stream listens before subscribing, applies frames, and close() truly unsub
 test('late frames after close produce no side effects', async () => {
   const h = harness()
   let statuses = 0
-  const stream = await startDesktopEventStream(h.ports, {
+  const stream = await startDesktopEventStream(h.ports, 'local', {
     activeScanId: () => 'scan_1',
     onStatus: () => {
       statuses += 1

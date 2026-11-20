@@ -31,6 +31,9 @@
     onScan: (paths: string[]) => void
     onCancel: () => void
     onSettings?: () => void
+    /** Machine this workbench is reading; absent hides the device switcher. */
+    deviceLabel?: string
+    onOpenDevices?: () => void
     onForget?: (path: string) => Promise<void> | void
     /**
      * Whether the host offers a native folder picker (desktop: the Tauri
@@ -75,6 +78,8 @@
     onScan,
     onCancel,
     onSettings,
+    deviceLabel,
+    onOpenDevices,
     onForget,
     folderPicker = false,
     onPickFolder = undefined,
@@ -219,6 +224,8 @@
     {mode}
     chromeInset={chromeInset ?? (mode === 'kunkun' || mode === 'desktop' ? 'pl-[88px] pr-4' : 'px-4')}
     {sidebarVisible}
+    {deviceLabel}
+    {onOpenDevices}
     onToggleSidebar={() => (sidebarVisible = !sidebarVisible)}
     onOpenSettings={onSettings}
     {logo}

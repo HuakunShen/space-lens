@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "host": {
+    "package": "@space-lens/cli",
+    "version": "0.4.0",
+    "apiMajor": 1,
+    "minNode": 20
+  },
+  "agent": {
+    "version": "0.4.0",
+    "protocol": 1,
+    "features": [
+      "scan.stream",
+      "scan.progress",
+      "scan.cancel",
+      "discovery.protected",
+      "storage-usage",
+      "memory.stdio",
+      "app-audit",
+      "app-icon"
+    ],
+    "targets": {}
+  }
+}

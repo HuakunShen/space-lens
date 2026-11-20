@@ -146,7 +146,7 @@ pub fn protected_scan_supported() -> bool {
   cfg!(unix)
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanStartRequest {
   pub paths: Vec<String>,
@@ -162,7 +162,7 @@ pub struct ScanStartRequest {
   pub label: Option<String>,
 }
 
-#[derive(Deserialize, Default, Debug)]
+#[derive(Deserialize, Serialize, Default, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum WireIgnoredMode {
   #[default]

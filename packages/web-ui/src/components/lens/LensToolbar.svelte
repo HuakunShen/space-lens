@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FolderPlus, Inbox, PanelLeft, ChartPie, Settings, Menu, Columns3, Rows3, Sparkles, Maximize2, Minimize2 } from '@lucide/svelte'
+  import { FolderPlus, Inbox, PanelLeft, ChartPie, Settings, Menu, Columns3, Rows3, Sparkles, Server, Maximize2, Minimize2 } from '@lucide/svelte'
   const iconClass =
     'toolbar-icon macos:size-7 macos:rounded-md linux:size-9 linux:rounded-lg linux:bg-(--control) linux:text-foreground linux:shadow-xs windows:size-8 windows:rounded-[4px] focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none'
   interface Props {
@@ -19,6 +19,9 @@
     busy?: boolean
     /** Shown only when the host provides the AI advisor. */
     aiOpen?: boolean
+    /** Machine this workbench is reading; absent hides the device switcher. */
+    deviceLabel?: string
+    onOpenDevices?: () => void
     onNewScan?: () => void
     onToggleSidebar?: () => void
     onToggleChart?: () => void
@@ -42,6 +45,8 @@
     collectorCount = 0,
     busy = false,
     aiOpen = false,
+    deviceLabel,
+    onOpenDevices,
     onNewScan,
     onToggleSidebar,
     onToggleChart,
@@ -81,6 +86,19 @@
   </div>
   <div class="toolbar-spacer" data-tauri-drag-region></div>
   <div class="toolbar-actions glass-controls macos:gap-2 linux:gap-2">
+    {#if onOpenDevices}
+      <button
+        class="toolbar-button device-button"
+        type="button"
+        onclick={onOpenDevices}
+        aria-label={`Switch device (${deviceLabel ?? 'This machine'})`}
+        title="Switch device"
+      >
+        <Server size={16} />
+        <span class="max-w-[11rem] truncate">{deviceLabel ?? 'This machine'}</span>
+      </button>
+      <span class="toolbar-divider linux:hidden windows:hidden" aria-hidden="true"></span>
+    {/if}
     {#if onNewScan}
       <button
         class="toolbar-button windows:hidden macos:h-7 macos:border-transparent macos:bg-transparent linux:h-9 linux:rounded-lg linux:border-transparent linux:bg-primary linux:px-3 linux:text-primary-foreground linux:font-semibold"
