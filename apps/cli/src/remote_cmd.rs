@@ -44,6 +44,12 @@ pub enum RemoteCommand {
   Discovery(RemoteDiscoveryArgs),
   /// Plan (and optionally execute) a trash-only cleanup for remote nodes.
   Cleanup(RemoteCleanupArgs),
+  /// Connect and print a browser URL for the remote workbench.
+  Open {
+    /// An alias from ~/.ssh/config, or `user@host[:port]`.
+    #[arg(value_name = "TARGET")]
+    target: String,
+  },
 }
 
 #[derive(Debug, Args)]
@@ -134,6 +140,7 @@ pub fn run(command: RemoteCommand) -> Result<()> {
     RemoteCommand::Scan(args) => scan(args),
     RemoteCommand::Discovery(args) => discovery(args),
     RemoteCommand::Cleanup(args) => cleanup(args),
+    RemoteCommand::Open { target } => open(&target),
   }
 }
 
@@ -453,6 +460,39 @@ fn cleanup(args: RemoteCleanupArgs) -> Result<()> {
     eprintln!("failed: {}", failure);
   }
   Ok(())
+}
+
+// ------------------------------------------------------------------- open
+
+/// Connects one device and prints the URL that opens its workbench in a
+/// browser through the tunnel. The session stays alive until interrupted;
+/// a ticket minted for the tunnel's own loopback origin is what lets the
+/// browser pair even though the host gates every other origin.
+fn open(spec: &str) -> Result<()> {
+  let remote = connect(spec, RemotePolicy::read_only())?;
+  let origin = format!("http://127.0.0.1:{}", remote.local_port());
+  let ticket = host(remote.mint_browser_ticket(&origin))?;
+  let url = match ticket.get("url").and_then(Value::as_str) {
+    Some(url) => url.to_string(),
+    None => format!("{origin}/?pair={}", text(&ticket, "ticket")?),
+  };
+  println!("Open this URL in a browser (the ticket is single-use):");
+  println!();
+  println!("  {url}");
+  println!();
+  println!(
+    "This window holds the SSH tunnel. Close it (Ctrl-C) when done; the\n\
+     remote host is reaped automatically on the next connect."
+  );
+  // stdout is block-buffered away from a terminal; the URL must be visible
+  // the moment it exists, not when the next buffer fills.
+  use std::io::Write as _;
+  std::io::stdout().flush().ok();
+  // Park until the operator closes the window; the process dying with the
+  // terminal is the expected end, and connect reaps the remote pid next time.
+  loop {
+    std::thread::sleep(Duration::from_secs(3600));
+  }
 }
 
 // ---------------------------------------------------------------- plumbing
