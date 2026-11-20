@@ -1,13 +1,14 @@
 import { Hono } from 'hono'
 import { basename } from 'node:path'
 
-import type { Capabilities, DiscoveryRequest, Health, Session } from '@space-lens/contract'
+import type { BrowserTicketRequest, Capabilities, DiscoveryRequest, Health, Session } from '@space-lens/contract'
 import {
   AiChatRequestSchema,
   AppAuditReportSchema,
   AppAuditRequestSchema,
   AppIconRequestSchema,
   AuditLogSchema,
+  BrowserTicketRequestSchema,
   CandidatesRequestSchema,
   ChildrenPageRequestSchema,
   CleanupExecuteRequestSchema,
@@ -81,7 +82,11 @@ export interface HostDeps {
 
 type AppEnv = { Variables: { session: SessionRecord } }
 
-export type HonoApp = Hono<AppEnv> & { rebindGate: (port: number) => void }
+export type HonoApp = Hono<AppEnv> & {
+  rebindGate: (port: number) => void
+  /** Admits one loopback origin into the browser gate (see session/ticket). */
+  admitPairingOrigin: (origin: string) => void
+}
 
 const EXCHANGE_RATE_LIMIT = 10
 const EXCHANGE_RATE_WINDOW_MS = 60_000
@@ -116,6 +121,13 @@ export function buildApp(deps: HostDeps): HonoApp {
   app.rebindGate = (port: number) => {
     const authorities = authoritiesFor(config.bind.address, port)
     policy = { authorities, allowedOrigins: [...originsForAuthorities(authorities), ...config.uiOrigins] }
+  }
+  // A supervisor (the CLI over an SSH tunnel) mints browser tickets for its
+  // own loopback origin; that origin joins the gate only through this call,
+  // never from a request body.
+  app.admitPairingOrigin = (origin: string) => {
+    if (policy.allowedOrigins.includes(origin)) return
+    policy = { ...policy, allowedOrigins: [...policy.allowedOrigins, origin] }
   }
 
   const remoteAddress = (c: { env: unknown; req: { header: (name: string) => string | undefined } }): string | null => {
@@ -261,6 +273,18 @@ export function buildApp(deps: HostDeps): HonoApp {
     if (!ScanIdSchema.safeParse(value).success) throw Problems.invalid(`invalid ${what}`)
     return value
   }
+
+  // 4a. A paired supervisor may mint one browser ticket for a loopback
+  // origin: the CLI behind an SSH tunnel hands the returned URL to the
+  // user's browser, and the workbench pairs with the host like any
+  // configured UI would. The origin joins the browser gate only through this
+  // route, and the contract limits it to plain loopback HTTP.
+  app.post('/api/v1/session/ticket', async (c) => {
+    const request = await parseBody<BrowserTicketRequest>(c, BrowserTicketRequestSchema)
+    app.admitPairingOrigin(request.origin)
+    const ticket = auth.mintTicket(request.origin, config.hostedPassword !== null)
+    return c.json({ ticket, url: `${request.origin}/?pair=${ticket}` })
+  })
 
   app.get('/api/v1/capabilities', (c) => {
     ensureScope(c.get('session'), 'scan:read')

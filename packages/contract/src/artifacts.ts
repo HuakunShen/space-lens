@@ -58,7 +58,7 @@ import {
 import { ProblemSchema } from './problem.ts'
 import { RevealPathRequestSchema, RevealPathResultSchema } from './reveal.ts'
 import { ScanStartRequestSchema, ScanStatusSchema, TreeSliceSchema, TreeSliceRequestSchema } from './scan.ts'
-import { SessionExchangeRequestSchema, SessionSchema } from './session.ts'
+import { BrowserTicketRequestSchema, BrowserTicketSchema, SessionExchangeRequestSchema, SessionSchema } from './session.ts'
 import { API_MAJOR, CONTRACT_VERSION } from './version.ts'
 
 /**
@@ -102,6 +102,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   AppCleanupPlan: AppCleanupPlanSchema,
   AppCleanupExecuteRequest: AppCleanupExecuteRequestSchema,
   SessionExchangeRequest: SessionExchangeRequestSchema,
+  BrowserTicketRequest: BrowserTicketRequestSchema,
+  BrowserTicket: BrowserTicketSchema,
   Session: SessionSchema,
   EventEnvelope: EventEnvelopeSchema,
   Problem: ProblemSchema,
