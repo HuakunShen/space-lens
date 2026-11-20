@@ -240,6 +240,67 @@ import { scanDirectory } from 'space-lens'
 npx space-lens ~/Dev --preset rust
 ```
 
+## Remote SSH hosts
+
+Any machine you can reach with your own OpenSSH — a Linux server, a Mac, a
+Windows box — can be scanned, inspected and cleaned from the CLI, from an AI
+client over MCP, or in the desktop workbench. Nothing is installed globally
+and no sudo is used: the first connection provisions
+`~/.space-lens/agents/<version>` (the pinned Rust agent) and
+`~/.space-lens/host/<version>` (the npm host) under the remote user's home,
+starts `spacelens serve` bound to the remote loopback, and reaches it through
+an SSH local forward. Every disconnect reaps the remote server.
+
+The remote host needs Node.js 20+ and npm (nvm/Homebrew/user-local installs
+are found by the probe even without an interactive PATH). Hosts are matched
+strictly: `BatchMode` and `StrictHostKeyChecking=yes`, so connect once with
+plain `ssh <target>` first to trust the key. Remote cleanup is always
+trash-only — the host refuses permanent deletion by construction.
+
+```bash
+spacelens remote list                       # concrete hosts from ~/.ssh/config
+spacelens remote probe ufo                  # os, arch, node, resolved agent
+spacelens remote scan ufo --path ~         # largest entries, live progress
+spacelens remote discovery ufo --scan-id …  # large files, caches, gitignored
+spacelens remote cleanup ufo --path ~/dev   # dry-run plan of dev caches
+spacelens remote cleanup ufo --path ~/dev --execute   # move them to trash
+spacelens remote open ufo                   # print a browser URL for the workbench
+```
+
+Windows hosts are reached through PowerShell (their OpenSSH default shell is
+cmd.exe, so every command travels as one base64 `-EncodedCommand` token; file
+transfers use scp because a stdin pipe never sees EOF there). Windows remotes
+serve without the memory view — the memory bridge is macOS/Linux only.
+
+Before a pinned release exists, the same pipeline runs against local
+artifacts with `SPACELENS_REMOTE_AGENT=<binary>`,
+`SPACELENS_REMOTE_HOST_TARBALL=<npm pack tarball>` and optionally
+`SPACLENS_REMOTE_MANIFEST=<path>`.
+
+## MCP for AI clients
+
+`spacelens mcp` speaks MCP over stdio. Long scans never block a tool call:
+`space_lens_scan` returns a scan id immediately (local scans run in a
+background thread, remote scans on the provisioned host), the AI polls
+`space_lens_scan_status`, and navigates with `space_lens_ls` — one folder
+level at a time, sorted by size, paginated. The same device model works for
+both sides: omit `device` (or pass `"local"`) for this machine, or pass an
+`~/.ssh/config` alias / `user@host[:port]`.
+
+```jsonc
+// space_lens_scan        → {"scanId": "scan_…", "state": "scanning"}  (fast)
+// space_lens_scan_status → {"state": "ready", …}
+// space_lens_ls          → children of one folder, size-sorted, paginated
+// space_lens_devices     → this machine + every ~/.ssh/config host
+```
+
+The adapter is read-only by default. `spacelens mcp --allow-cleanup` unlocks
+`space_lens_cleanup_execute` (local paths) and the remote pair
+`space_lens_remote_cleanup_plan` / `space_lens_remote_cleanup_execute`,
+which move remote nodes to the remote machine's trash — never a permanent
+delete. The desktop embeds the same contract; an MCP session holds its SSH
+connections for its lifetime and reaps every remote server on exit.
+
 ## space-lens TUI CLI
 
 The `space-lens` package remains importable as a native library and also exposes the Solid/Uniview TUI as a `space-lens` executable. It has two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. In Scan mode, `d` deletes the current file or directory after confirmation, while `A` deletes all discovered preset candidates at once. Preset candidates are highlighted in red, and scan rows support mouse focus and folder expansion. It runs on Node.js 20 or newer:

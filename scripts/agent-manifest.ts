@@ -20,7 +20,16 @@ const TARGETS = [
   'aarch64-unknown-linux-musl',
   'x86_64-apple-darwin',
   'aarch64-apple-darwin',
+  // The release workflow ships the Windows agent as a zip (cargo-binstall's
+  // documented override for msvc targets); the manifest accepts both forms.
+  'x86_64-pc-windows-msvc',
 ]
+
+/** The archive extension one release target ships with. */
+function archiveName(target: string, version: string): string {
+  const extension = target.endsWith('-msvc') && target.startsWith('x86_64-pc-windows') ? 'zip' : 'tar.gz'
+  return `spacelens-${target}-v${version}.${extension}`
+}
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 const DEFAULT_MANIFEST = join(repoRoot, 'crates/remote/agents/manifest.json')
@@ -68,7 +77,7 @@ const available = new Set(readdirSync(dist))
 const targets = {}
 const missing = []
 for (const target of TARGETS) {
-  const archive = `spacelens-${target}-v${version}.tar.gz`
+  const archive = archiveName(target, version)
   if (!available.has(archive)) {
     missing.push(target)
     continue
@@ -83,7 +92,7 @@ for (const target of TARGETS) {
 }
 
 if (Object.keys(targets).length === 0) {
-  console.error(`agent-manifest: no spacelens-*-v${version}.tar.gz archives in ${dist}`)
+  console.error(`agent-manifest: no spacelens-*-v${version} archives in ${dist}`)
   process.exit(1)
 }
 
