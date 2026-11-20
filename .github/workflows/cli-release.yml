@@ -94,13 +94,21 @@ jobs:
           merge-multiple: true
       - name: List archives
         run: ls -la dist
+      - name: Write SHA256SUMS
+        working-directory: dist
+        # Published next to the archives so a manual install can verify what it
+        # downloaded. The desktop embeds its own hashes and never trusts this
+        # file; it is for humans and mirrors.
+        run: sha256sum -- * > SHA256SUMS
       - name: Create the release and attach archives
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # No --clobber: a published release is immutable. Re-running the
+          # workflow on an existing tag fails here instead of silently
+          # replacing bytes that shipped builds already pinned.
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "spacelens ${GITHUB_REF_NAME#cli-v}" \
             --generate-notes \
-            dist/* \
-          || gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+            dist/*

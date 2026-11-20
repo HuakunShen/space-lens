@@ -48,6 +48,9 @@ enum Command {
   AppIcon(AppIconArgs),
   #[command(name = "storage-usage")]
   StorageUsage(StorageUsageArgs),
+  /// Machine-readable agent contract: protocol, platform, features.
+  #[command(name = "agent-info")]
+  AgentInfo(AgentInfoArgs),
   #[command(subcommand)]
   Memory(MemoryCommand),
   #[cfg(feature = "mcp")]
@@ -228,6 +231,7 @@ fn main() -> Result<()> {
     Command::AppAudit(args) => run_app_audit(args),
     Command::AppIcon(args) => run_app_icon(args),
     Command::StorageUsage(args) => run_storage_usage(args),
+    Command::AgentInfo(args) => run_agent_info(args),
     Command::Memory(command) => memory_cmd::run(command),
     #[cfg(feature = "mcp")]
     Command::Mcp => mcp::run(),
@@ -560,6 +564,78 @@ fn new_audit_id() -> String {
   )
 }
 
+#[derive(Debug, Args)]
+struct AgentInfoArgs {
+  #[arg(long, help = "Emit the agent contract as JSON")]
+  json: bool,
+}
+
+/// The remote-agent handshake. `agentProtocol` is the compatibility number;
+/// `features` is additive, so an older agent can still serve the intersection.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentInfo {
+  agent_protocol: u32,
+  version: &'static str,
+  platform: &'static str,
+  arch: &'static str,
+  home: Option<String>,
+  path_separator: String,
+  shell: Option<String>,
+  features: Vec<&'static str>,
+}
+
+const AGENT_PROTOCOL: u32 = 1;
+
+fn agent_info() -> AgentInfo {
+  let home = std::env::var("HOME")
+    .or_else(|_| std::env::var("USERPROFILE"))
+    .ok()
+    .filter(|value| !value.is_empty());
+  let shell = std::env::var("SHELL")
+    .ok()
+    .filter(|value| !value.is_empty());
+  let mut features = vec![
+    "scan.stream",
+    "scan.progress",
+    "scan.cancel",
+    "discovery.protected",
+    "storage-usage",
+  ];
+  #[cfg(unix)]
+  features.push("memory.stdio");
+  #[cfg(target_os = "macos")]
+  {
+    features.push("app-audit");
+    features.push("app-icon");
+  }
+  AgentInfo {
+    agent_protocol: AGENT_PROTOCOL,
+    version: env!("CARGO_PKG_VERSION"),
+    platform: std::env::consts::OS,
+    arch: std::env::consts::ARCH,
+    home,
+    path_separator: std::path::MAIN_SEPARATOR.to_string(),
+    shell,
+    features,
+  }
+}
+
+fn run_agent_info(args: AgentInfoArgs) -> Result<()> {
+  let info = agent_info();
+  if args.json {
+    print_json(&info)?;
+  } else {
+    println!("spacelens agent {} ({})", info.version, info.agent_protocol);
+    println!("platform: {}/{}", info.platform, info.arch);
+    if let Some(home) = &info.home {
+      println!("home: {home}");
+    }
+    println!("features: {}", info.features.join(", "));
+  }
+  Ok(())
+}
+
 fn run_storage_usage(args: StorageUsageArgs) -> Result<()> {
   if args.roots.len() != args.scanned_bytes.len() {
     anyhow::bail!("storage-usage needs one --scanned-bytes per --root");
@@ -711,7 +787,7 @@ impl From<PresetArg> for CleanupPreset {
 
 #[cfg(test)]
 mod tests {
-  use super::{format_bytes, new_audit_id, Cli, Command, ICloudCommand};
+  use super::{agent_info, format_bytes, new_audit_id, Cli, Command, ICloudCommand};
   use clap::Parser;
   use std::path::Path;
 
@@ -803,6 +879,23 @@ mod tests {
       Command::AppIcon(args) if args.path == Path::new("/Applications/Foo.app")
     ));
     assert!(Cli::try_parse_from(["spacelens", "app-icon"]).is_err());
+  }
+
+  #[test]
+  fn agent_info_is_a_parseable_contract() {
+    let cli = Cli::try_parse_from(["spacelens", "agent-info", "--json"]).unwrap();
+    assert!(matches!(cli.command, Command::AgentInfo(args) if args.json));
+
+    let info = agent_info();
+    assert_eq!(info.agent_protocol, 1);
+    assert!(info.features.contains(&"scan.stream"));
+    assert!(info.features.contains(&"scan.progress"));
+    #[cfg(unix)]
+    assert!(info.features.contains(&"memory.stdio"));
+    let value = serde_json::to_value(&info).unwrap();
+    assert_eq!(value["agentProtocol"], 1);
+    assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+    assert!(value["pathSeparator"].as_str().is_some());
   }
 
   #[test]
