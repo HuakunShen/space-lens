@@ -27,7 +27,7 @@ pub mod target;
 
 pub use error::RemoteError;
 pub use install::{AgentLayout, HostLayout, InstallProgress, InstallStage};
-pub use server::RemotePolicy;
+pub use server::{RemotePolicy, RemoteShell};
 pub use target::SshTarget;
 
 #[cfg(feature = "runtime")]

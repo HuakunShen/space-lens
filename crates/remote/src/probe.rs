@@ -1,9 +1,11 @@
 //! The one fixed probe command, and the parser for its answer.
 //!
-//! The probe is a constant POSIX script. No user value is interpolated into it,
+//! The probe is a constant script. No user value is interpolated into it,
 //! so there is nothing for a hostile home directory or host name to influence.
 //! Every line is prefixed with [`SENTINEL`], which lets a user's shell profile
-//! print banners without corrupting the answer.
+//! print banners without corrupting the answer. There is one script per
+//! command channel: [`PROBE_SCRIPT`] for POSIX login shells and
+//! [`PROBE_SCRIPT_PWSH`] for Windows, whose default ssh shell is cmd.exe.
 
 use std::path::Component;
 
@@ -17,17 +19,74 @@ const MAX_VALUE: usize = 4096;
 const MAX_HOME: usize = 4096;
 
 /// Fixed probe script. Kept free of interpolation on purpose.
+///
+/// `node`/`npm` fall back to the install locations a non-interactive SSH
+/// shell misses (nvm, Homebrew, volta, pnpm, user-local trees): remote
+/// provisioning must not depend on an interactive PATH the login shell never
+/// sourced.
 pub const PROBE_SCRIPT: &str = r#"p() { printf 'SPACELENS-PROBE\t%s=%s\n' "$1" "$2"; }
 p os "$(uname -s 2>/dev/null)"
 p arch "$(uname -m 2>/dev/null)"
 p home "$HOME"
 p shell "$SHELL"
 p writable "$([ -w "$HOME" ] && printf yes || printf no)"
-p node "$(command -v node 2>/dev/null)"
-p node_version "$(node --version 2>/dev/null)"
-p npm "$(command -v npm 2>/dev/null)"
+n="$(command -v node 2>/dev/null)"
+m="$(command -v npm 2>/dev/null)"
+if [ -z "$n" ]; then
+  for d in "$HOME"/.nvm/versions/node/*/bin /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin" "$HOME/.local/share/vite-plus/bin" "$HOME/.volta/bin" "$HOME/Library/pnpm"; do
+    if [ -x "$d/node" ]; then
+      n="$d/node"
+      [ -n "$m" ] || m="$d/npm"
+      break
+    fi
+  done
+fi
+p node "$n"
+p node_version "$("$n" --version 2>/dev/null)"
+p npm "$m"
 p npx "$(command -v npx 2>/dev/null)"
 p agent "$(ls -1 "$HOME/.space-lens/agents" 2>/dev/null | tail -n 1)"
+"#;
+
+/// Fixed probe script for the Windows command channel. Kept free of
+/// interpolation on purpose, exactly like [`PROBE_SCRIPT`].
+///
+/// Every path this script reports is normalized to the crate's canonical
+/// forward-slash form (`C:/Users/shenh`): the runtime, the layouts, and every
+/// later remote script share that one form, and node, npm, `[IO.*]` and the
+/// PowerShell cmdlets all accept it. `$lensHome` is deliberately not `$home`:
+/// PowerShell variable names are case-insensitive, so `$home` would collide
+/// with the automatic `$HOME` variable.
+pub const PROBE_SCRIPT_PWSH: &str = r#"function p([string]$key, [string]$value) {
+  Write-Output "SPACELENS-PROBE`t$key=$value"
+}
+$lensHome = $env:USERPROFILE.Replace('\', '/')
+p os 'Windows'
+p arch $env:PROCESSOR_ARCHITECTURE
+p home $lensHome
+p shell 'powershell'
+$probeDir = if ($env:TEMP) { $env:TEMP } else { $env:USERPROFILE }
+$probeFile = [IO.Path]::Combine($probeDir, 'space-lens-probe.tmp')
+try {
+  [IO.File]::WriteAllText($probeFile, 'probe')
+  [IO.File]::Delete($probeFile)
+  p writable 'yes'
+} catch {
+  p writable 'no'
+}
+$node = Get-Command node -ErrorAction SilentlyContinue
+$npm = Get-Command npm -ErrorAction SilentlyContinue
+$npx = Get-Command npx -ErrorAction SilentlyContinue
+$nodePath = if ($node) { $node.Source.Replace('\', '/') } else { '' }
+$npmPath = if ($npm) { $npm.Source.Replace('\', '/') } else { '' }
+$npxPath = if ($npx) { $npx.Source.Replace('\', '/') } else { '' }
+p node $nodePath
+p node_version (if ($node) { & $nodePath --version })
+p npm $npmPath
+p npx $npxPath
+$agentsDir = [IO.Path]::Combine($lensHome, '.space-lens/agents')
+$agentLatest = if (Test-Path -LiteralPath $agentsDir) { (Get-ChildItem -LiteralPath $agentsDir -Directory | Sort-Object Name -Descending | Select-Object -First 1).Name }
+p agent $agentLatest
 "#;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -55,6 +114,7 @@ impl RemoteProbe {
     match self.os.to_ascii_lowercase().as_str() {
       "linux" => "linux",
       "darwin" => "macos",
+      "windows" => "windows",
       _ => "unknown",
     }
   }
@@ -83,9 +143,11 @@ pub struct RemoteTarget {
   pub arch: String,
 }
 
-/// Maps `uname -s` / `uname -m` onto a release target triple. Windows is
-/// deliberately absent: Windows OpenSSH defaults to `cmd.exe`, so the POSIX
-/// command contract cannot hold there.
+/// Maps the probe's `os`/`arch` onto a release target triple. Windows is
+/// reached only through the PowerShell command channel: the probe that
+/// answers `Windows` is the one already wrapped in
+/// [`PROBE_SCRIPT_PWSH`](crate::probe::PROBE_SCRIPT_PWSH), so the runtime
+/// knows the shell flavor that produced this answer.
 pub fn resolve_target(os: &str, arch: &str) -> Result<RemoteTarget, RemoteError> {
   let os = os.trim().to_ascii_lowercase();
   let arch = arch.trim().to_ascii_lowercase();
@@ -101,15 +163,24 @@ pub fn resolve_target(os: &str, arch: &str) -> Result<RemoteTarget, RemoteError>
     ("linux", "armv7") => "armv7-unknown-linux-musleabihf",
     ("darwin", "x86_64") => "x86_64-apple-darwin",
     ("darwin", "aarch64") => "aarch64-apple-darwin",
+    ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+    ("windows", "aarch64") => "aarch64-pc-windows-msvc",
     _ => {
       return Err(RemoteError::UnsupportedTarget(format!(
         "no Space Lens agent for {os}/{arch}"
       )))
     }
   };
+  // The triple match above is exhaustive over linux/darwin/windows, so the
+  // fallback arm is reached only for linux.
+  let os = match os.as_str() {
+    "darwin" => "macos",
+    "windows" => "windows",
+    _ => "linux",
+  };
   Ok(RemoteTarget {
     triple,
-    os: if os == "darwin" { "macos" } else { "linux" },
+    os,
     arch: arch.to_string(),
   })
 }
@@ -167,7 +238,14 @@ pub fn parse_probe(stdout: &str) -> Result<RemoteProbe, RemoteError> {
       )))
     }
   };
-  validate_absolute_path(&home, "home")?;
+  // The home is validated with the rules of the platform the probe itself
+  // declared: a Windows home is the canonical `C:/…` form, and a POSIX
+  // answer can never claim to be Windows (its script prints `uname`).
+  if os.eq_ignore_ascii_case("windows") {
+    validate_windows_path(&home, "home")?;
+  } else {
+    validate_absolute_path(&home, "home")?;
+  }
 
   Ok(RemoteProbe {
     os,
@@ -247,6 +325,46 @@ pub fn validate_absolute_path(path: &str, what: &str) -> Result<(), RemoteError>
   Ok(())
 }
 
+/// Lexical validation for a Windows path in the crate's canonical
+/// forward-slash form (`C:/Users/shenh`).
+///
+/// The runtime stores every Windows path this way — node, npm, `[IO.*]` and
+/// the PowerShell cmdlets all accept it — so backslashes are refused outright
+/// rather than tolerated and half-normalized. Beyond that the rules mirror
+/// [`validate_absolute_path`]: a drive-letter root, no `.`/`..`, no empty
+/// components, no control characters, and no trailing separator except the
+/// drive root `C:/` itself.
+pub fn validate_windows_path(path: &str, what: &str) -> Result<(), RemoteError> {
+  let invalid = |message: String| Err(RemoteError::InvalidPath(format!("{what} {message}")));
+  if path.is_empty() || path.len() > MAX_HOME {
+    return invalid(format!("must be 1-{MAX_HOME} bytes"));
+  }
+  if path.len() < 3 {
+    return invalid(format!("is not a drive-absolute path: {path:?}"));
+  }
+  let bytes = path.as_bytes();
+  if !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' || bytes[2] != b'/' {
+    return invalid(format!("is not a drive-absolute path: {path:?}"));
+  }
+  if path.chars().any(char::is_control) {
+    return invalid("contains a control character".into());
+  }
+  if path.contains('\\') {
+    return invalid(format!("must use forward slashes only: {path:?}"));
+  }
+  if path.len() > 3 && path.ends_with('/') {
+    return invalid(format!("has a trailing separator: {path:?}"));
+  }
+  if path.len() > 3
+    && path[3..]
+      .split('/')
+      .any(|component| component.is_empty() || component == "." || component == "..")
+  {
+    return invalid(format!("has an unsafe component: {path:?}"));
+  }
+  Ok(())
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -283,6 +401,59 @@ mod tests {
     assert!(probe.shell_supported());
   }
 
+  fn windows_output() -> Vec<(&'static str, &'static str)> {
+    vec![
+      ("os", "Windows"),
+      ("arch", "AMD64"),
+      ("home", "C:/Users/shenh"),
+      ("shell", "powershell"),
+      ("writable", "yes"),
+      ("node", "C:/Program Files/nodejs/node.exe"),
+      ("node_version", "v26.5.0"),
+      ("npm", "C:/Program Files/nodejs/npm.cmd"),
+      ("npx", "C:/Program Files/nodejs/npx.cmd"),
+    ]
+  }
+
+  #[test]
+  fn parses_a_windows_probe() {
+    let probe = parse_probe(&probe_output(&windows_output())).unwrap();
+    assert_eq!(probe.platform(), "windows");
+    assert_eq!(probe.home, "C:/Users/shenh");
+    assert_eq!(probe.node_major(), Some(26));
+    assert!(probe.shell_supported());
+    assert!(probe.supports_node(20));
+
+    let target = resolve_target(&probe.os, &probe.arch).unwrap();
+    assert_eq!(target.triple, "x86_64-pc-windows-msvc");
+    assert_eq!(target.os, "windows");
+    assert_eq!(target.arch, "x86_64");
+  }
+
+  #[test]
+  fn windows_probe_lines_tolerate_crlf() {
+    // PowerShell 5.1 writes CRLF; the probe answers through it.
+    let raw: String = probe_output(&windows_output())
+      .lines()
+      .map(|line| format!("{line}\r\n"))
+      .collect();
+    let probe = parse_probe(&raw).unwrap();
+    assert_eq!(probe.home, "C:/Users/shenh");
+  }
+
+  #[test]
+  fn windows_home_validation_is_stricter_than_posix() {
+    for invalid in ["C:\\Users\\shenh", "shenh", "/home/alice", "C:/Users/"] {
+      let mut rows = windows_output();
+      rows.retain(|(key, _)| *key != "home");
+      rows.push(("home", invalid));
+      assert!(
+        parse_probe(&probe_output(&rows)).is_err(),
+        "accepted home {invalid:?}"
+      );
+    }
+  }
+
   #[test]
   fn profile_noise_is_ignored() {
     let noisy = format!("Welcome to Ubuntu!\n{}last line\n", probe_output(&base()));
@@ -315,11 +486,20 @@ mod tests {
       ("Linux", "arm64", "aarch64-unknown-linux-musl"),
       ("Darwin", "arm64", "aarch64-apple-darwin"),
       ("Darwin", "x86_64", "x86_64-apple-darwin"),
+      ("Windows", "AMD64", "x86_64-pc-windows-msvc"),
+      ("Windows", "ARM64", "aarch64-pc-windows-msvc"),
     ] {
       assert_eq!(resolve_target(os, arch).unwrap().triple, triple);
+      let expected_os = match os {
+        "Darwin" => "macos",
+        "Windows" => "windows",
+        _ => "linux",
+      };
+      assert_eq!(resolve_target(os, arch).unwrap().os, expected_os);
     }
     assert!(resolve_target("FreeBSD", "x86_64").is_err());
     assert!(resolve_target("Linux", "riscv64").is_err());
+    assert!(resolve_target("Windows", "riscv64").is_err());
   }
 
   #[test]
@@ -344,9 +524,56 @@ mod tests {
   }
 
   #[test]
+  fn windows_paths_are_lexically_strict() {
+    for valid in [
+      "C:/",
+      "C:/Users/shenh",
+      "C:/Users/al ice",
+      "D:/x",
+      "c:/Users/shenh",
+    ] {
+      validate_windows_path(valid, "root").unwrap_or_else(|error| panic!("{valid}: {error}"));
+    }
+    for invalid in [
+      "",
+      "C:",
+      "C",
+      "C:\\Users\\shenh",
+      "C:/Users//shenh",
+      "C:/Users/../Windows",
+      "C:/Users/.",
+      "C:/Users/",
+      "C:/Users/sh\u{0}enh",
+      "C://",
+      "/home/alice",
+      "1:/x",
+      "Cä:/x",
+    ] {
+      assert!(
+        validate_windows_path(invalid, "root").is_err(),
+        "accepted {invalid:?}"
+      );
+    }
+  }
+
+  #[test]
   fn the_probe_script_has_no_interpolation_points() {
     assert!(PROBE_SCRIPT.contains(r"SPACELENS-PROBE\t"));
     assert!(!PROBE_SCRIPT.contains("{}"));
     assert!(!PROBE_SCRIPT.contains("$1="));
+  }
+
+  #[test]
+  fn the_powershell_probe_script_reports_the_windows_contract() {
+    // The same constant-script rule as the POSIX probe: no user value is
+    // interpolated, and every answer line goes through the sentinel.
+    assert!(PROBE_SCRIPT_PWSH.contains("SPACELENS-PROBE"));
+    assert!(PROBE_SCRIPT_PWSH.contains("p os 'Windows'"));
+    assert!(PROBE_SCRIPT_PWSH.contains("p shell 'powershell'"));
+    assert!(PROBE_SCRIPT_PWSH.contains("$env:PROCESSOR_ARCHITECTURE"));
+    // Paths are normalized to the canonical forward-slash form at the source.
+    assert!(PROBE_SCRIPT_PWSH.contains(".Replace('\\', '/')"));
+    assert!(PROBE_SCRIPT_PWSH.contains("'.space-lens/agents'"));
+    assert!(!PROBE_SCRIPT_PWSH.contains("{}"));
   }
 }

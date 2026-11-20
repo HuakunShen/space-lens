@@ -130,7 +130,9 @@ impl AgentManifest {
         || archive.contains('\\')
         || archive.contains("..")
         || archive.chars().any(char::is_whitespace)
-        || !archive.ends_with(".tar.gz")
+        // cli-release.yml ships `.tar.gz` on POSIX targets and `.zip` on
+        // Windows; both are extracted locally under the same security rules.
+        || !(archive.ends_with(".tar.gz") || archive.ends_with(".zip"))
       {
         return Err(RemoteError::Manifest(format!(
           "{target}: unsafe archive name {archive:?}"
@@ -238,11 +240,30 @@ mod tests {
             "archive": "spacelens-x86_64-unknown-linux-musl-v0.4.0.tar.gz",
             "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "size": 4
+          },
+          "x86_64-pc-windows-msvc": {
+            "archive": "spacelens-x86_64-pc-windows-msvc-v0.4.0.zip",
+            "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size": 4
           }
         }
       }
     }"#
       .to_string()
+  }
+
+  #[test]
+  fn windows_targets_pin_zip_archives() {
+    let manifest = AgentManifest::parse(&manifest_json()).unwrap();
+    let artifact = manifest.artifact("x86_64-pc-windows-msvc").unwrap();
+    assert_eq!(
+      artifact.archive,
+      "spacelens-x86_64-pc-windows-msvc-v0.4.0.zip"
+    );
+    assert_eq!(
+      manifest.download_url(artifact),
+      "https://github.com/HuakunShen/space-lens/releases/download/cli-v0.4.0/spacelens-x86_64-pc-windows-msvc-v0.4.0.zip"
+    );
   }
 
   #[test]
@@ -289,6 +310,14 @@ mod tests {
       (
         r#""archive": "spacelens-x86_64-unknown-linux-musl-v0.4.0.tar.gz""#,
         r#""archive": "../escape.tar.gz""#,
+      ),
+      (
+        r#""archive": "spacelens-x86_64-pc-windows-msvc-v0.4.0.zip""#,
+        r#""archive": "../escape.zip""#,
+      ),
+      (
+        r#""archive": "spacelens-x86_64-pc-windows-msvc-v0.4.0.zip""#,
+        r#""archive": "spacelens-x86_64-pc-windows-msvc-v0.4.0.rar""#,
       ),
       (r#""sha256": "aaaa"#, r#""sha256": "zzzz"#),
     ] {

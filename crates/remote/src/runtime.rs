@@ -37,14 +37,16 @@ use serde_json::{json, Value};
 
 use crate::agent::{AgentInfo, AGENT_PROTOCOL};
 use crate::archive;
-use crate::install::{AgentLayout, HostLayout, InstallProgress, InstallStage};
+use crate::install::{agent_binary_name, AgentLayout, HostLayout, InstallProgress, InstallStage};
 use crate::manifest::AgentManifest;
-use crate::probe::{parse_probe, resolve_target, validate_absolute_path, RemoteProbe};
-use crate::quote::{quote_posix, shell_script};
+use crate::probe::{parse_probe, resolve_target, RemoteProbe};
 use crate::server::{
-  host_install_script, host_install_tarball_script, kill_script, parse_readiness_line,
-  serve_script, ssh_exec, ssh_probe, ssh_transfer, ssh_tunnel, ReadinessLine, RemotePolicy,
-  ServeReadiness, SshCommand,
+  activate_agent_script, agent_health_script, agent_smoke_script, byte_count_script,
+  file_exists_script, host_install_script, host_install_script_pwsh, host_install_tarball_script,
+  host_install_tarball_script_pwsh, kill_script, kill_script_pwsh, mkdir_script,
+  parse_readiness_line, remove_file_script, remove_tree_script, serve_script, serve_script_pwsh,
+  ssh_exec_shell, ssh_probe_shell, ssh_transfer_shell, ssh_tunnel, staging_dir_script,
+  ReadinessLine, RemotePolicy, RemoteShell, ServeReadiness, SshCommand,
 };
 use crate::target::SshTarget;
 use crate::RemoteError;
@@ -124,6 +126,9 @@ pub struct RemoteHost {
   /// host's own authority in its `Host` header or be refused.
   authority: String,
   pid_file: String,
+  /// The command channel this host speaks; the stop path needs it long after
+  /// provisioning, so it is part of the connection, not a parameter.
+  shell: RemoteShell,
   base_url: String,
   token: Mutex<String>,
   client: reqwest::blocking::Client,
@@ -155,20 +160,15 @@ impl RemoteHost {
     target.validate()?;
     install_crypto_provider();
 
-    // 1. Probe: fixed script, no user value interpolated.
+    // 1. Probe: fixed script, no user value interpolated. The POSIX probe is
+    // the first and only attempt for every POSIX host; a Windows host cannot
+    // parse it at all (its default shell is cmd.exe), so the PowerShell probe
+    // is the fallback that discovers it.
     progress(InstallProgress::new(
       InstallStage::Probe,
       format!("Checking {target} over SSH"),
     ));
-    let probe_output = run_ssh(&target, &ssh_probe(&target)?, None, PROBE_TIMEOUT)?;
-    if !probe_output.success {
-      return Err(RemoteError::Probe(format!(
-        "ssh probe failed: {}",
-        tail(&probe_output.stderr)
-      )));
-    }
-    let probe = parse_probe(&String::from_utf8_lossy(&probe_output.stdout))
-      .map_err(|error| RemoteError::Probe(error.to_string()))?;
+    let probe = probe_remote(&target)?;
     if !probe.shell_supported() {
       return Err(RemoteError::UnsupportedShell(format!(
         "remote login shell {:?} is not POSIX-compatible",
@@ -181,16 +181,16 @@ impl RemoteHost {
         format!("{} is not writable by this user", probe.home),
       ));
     }
-    validate_absolute_path(&probe.home, "home")?;
     let platform = probe.platform();
-    if !matches!(platform, "linux" | "macos") {
-      // The agent is built for Linux and macOS; Windows remote support is a
-      // separate shell contract (cmd.exe) and is not enabled here.
+    if !matches!(platform, "linux" | "macos" | "windows") {
       return Err(RemoteError::UnsupportedTarget(format!(
         "remote {} hosts are not supported yet",
         platform
       )));
     }
+    // One command channel per platform, chosen from the probe's own answer
+    // and threaded through every command below.
+    let shell = RemoteShell::for_platform(platform)?;
     if !probe.supports_node(manifest.host.min_node) {
       return Err(RemoteError::UnsupportedTarget(format!(
         "remote needs Node.js >= {} and npm; found node {:?} npm {:?}",
@@ -206,12 +206,25 @@ impl RemoteHost {
     let resolved = resolve_target(&probe.os, &probe.arch)?;
 
     // 3. Install the Rust agent (protected scan, memory stdio, audit).
-    let agent = AgentLayout::new(&probe.home, &manifest.agent.version, &staging_suffix())?;
-    ensure_agent(source, &target, manifest, resolved.triple, &agent, progress)?;
+    let agent = AgentLayout::for_shell(
+      &probe.home,
+      &manifest.agent.version,
+      &staging_suffix(),
+      shell,
+    )?;
+    ensure_agent(
+      source,
+      &target,
+      manifest,
+      resolved.triple,
+      &agent,
+      shell,
+      progress,
+    )?;
 
     // 4. Install or verify the pinned host package.
-    let host = HostLayout::new(&probe.home, &manifest.host.version)?;
-    ensure_host(&target, &probe, &host, progress)?;
+    let host = HostLayout::for_shell(&probe.home, &manifest.host.version, shell)?;
+    ensure_host(&target, &probe, &host, shell, progress)?;
 
     // 5. Start `spacelens serve --machine`; readiness on stdout, ticket on stderr.
     progress(InstallProgress::new(
@@ -220,8 +233,8 @@ impl RemoteHost {
     ));
     // A previous client run can leave a server behind (the pid file outlives
     // the tunnel). Stop it first so provisioning does not stack orphaned hosts.
-    if let Ok(command) = kill_script(&host.pid_file) {
-      if let Ok(command) = ssh_exec(&target, &command) {
+    if let Ok(body) = kill_body(&host.pid_file, shell) {
+      if let Ok(command) = ssh_exec_shell(&target, &body, shell) {
         let _ = run_ssh(&target, &command, None, Duration::from_secs(10));
       }
     }
@@ -229,8 +242,15 @@ impl RemoteHost {
       .node
       .as_deref()
       .ok_or_else(|| RemoteError::UnsupportedTarget("node was not found".into()))?;
-    let (mut server, readiness) =
-      start_serve(&target, &host, &agent.binary, node, &probe.home, &policy)?;
+    let (mut server, readiness) = start_serve(
+      &target,
+      &host,
+      &agent.binary,
+      node,
+      &probe.home,
+      &policy,
+      shell,
+    )?;
 
     // 6. Tunnel to the remote loopback.
     progress(InstallProgress::new(
@@ -316,6 +336,7 @@ impl RemoteHost {
       policy,
       authority,
       pid_file: host.pid_file.clone(),
+      shell,
       base_url,
       token: Mutex::new(token),
       client,
@@ -434,9 +455,8 @@ impl RemoteHost {
     // Closing the tunnel unblocks the SSE reader.
     self.stop_local_children();
     self.join_events();
-    let command = kill_script(&self.pid_file).ok();
-    if let Some(command) = command {
-      if let Ok(command) = ssh_exec(&self.target, &command) {
+    if let Ok(body) = kill_body(&self.pid_file, self.shell) {
+      if let Ok(command) = ssh_exec_shell(&self.target, &body, self.shell) {
         let _ = run_ssh(&self.target, &command, None, Duration::from_secs(10));
       }
     }
@@ -670,20 +690,56 @@ impl Drop for RemoteHost {
 
 /// Runs the fixed probe script and returns the parsed answer. This is the
 /// diagnostic surface for CLI shells; [`RemoteHost::connect_with`] performs
-/// the same probe as its first stage.
+/// the same probe as its first stage. Windows hosts are discovered here too:
+/// their cmd.exe cannot parse the POSIX script, so the PowerShell probe
+/// answers instead.
 pub fn probe(target: &SshTarget) -> Result<RemoteProbe, RemoteError> {
   target.validate()?;
-  let output = run_ssh(target, &ssh_probe(target)?, None, PROBE_TIMEOUT)?;
+  probe_remote(target)
+}
+
+/// Probes a target over the platform's command channel, in order.
+///
+/// The POSIX probe is the first and only attempt for every POSIX host — its
+/// argv and failure text are exactly what they have always been. Only when
+/// that probe cannot run does the PowerShell probe answer (a Windows host's
+/// cmd.exe rejects the POSIX script outright), and only when both fail is
+/// the original error reported, so an unreachable POSIX host keeps its own
+/// diagnostics.
+fn probe_remote(target: &SshTarget) -> Result<RemoteProbe, RemoteError> {
+  let posix = try_probe(target, RemoteShell::Posix);
+  if posix.is_ok() {
+    return posix;
+  }
+  match try_probe(target, RemoteShell::WindowsPwsh) {
+    Ok(probe) => Ok(probe),
+    Err(_) => posix,
+  }
+}
+
+fn try_probe(target: &SshTarget, shell: RemoteShell) -> Result<RemoteProbe, RemoteError> {
+  let output = run_ssh(
+    target,
+    &ssh_probe_shell(target, shell)?,
+    None,
+    PROBE_TIMEOUT,
+  )?;
   if !output.success {
     return Err(RemoteError::Probe(format!(
       "ssh probe failed: {}",
       tail(&output.stderr)
     )));
   }
-  let probe = parse_probe(&String::from_utf8_lossy(&output.stdout))
-    .map_err(|error| RemoteError::Probe(error.to_string()))?;
-  validate_absolute_path(&probe.home, "home")?;
-  Ok(probe)
+  parse_probe(&String::from_utf8_lossy(&output.stdout))
+    .map_err(|error| RemoteError::Probe(error.to_string()))
+}
+
+/// Picks the stop script for one platform's pid file.
+fn kill_body(pid_file: &str, shell: RemoteShell) -> Result<String, RemoteError> {
+  match shell {
+    RemoteShell::Posix => kill_script(pid_file),
+    RemoteShell::WindowsPwsh => kill_script_pwsh(pid_file),
+  }
 }
 
 fn ensure_agent(
@@ -692,9 +748,10 @@ fn ensure_agent(
   manifest: &AgentManifest,
   triple: &str,
   layout: &AgentLayout,
+  shell: RemoteShell,
   progress: &mut dyn FnMut(InstallProgress),
 ) -> Result<(), RemoteError> {
-  if agent_healthy(target, &layout.binary)? {
+  if agent_healthy(target, &layout.binary, shell)? {
     return Ok(());
   }
   let bytes = source(manifest, triple, progress)?;
@@ -704,14 +761,9 @@ fn ensure_agent(
   ));
 
   let staging = &layout.staging_dir;
-  let mkdir = format!(
-    "mkdir -p {} && chmod 700 {}",
-    quote(staging)?,
-    quote(staging)?
-  );
   let created = run_ssh(
     target,
-    &ssh_exec(target, &script(&mkdir)?)?,
+    &ssh_exec_shell(target, &staging_dir_script(staging, shell)?, shell)?,
     None,
     PROBE_TIMEOUT,
   )?;
@@ -723,10 +775,10 @@ fn ensure_agent(
   }
 
   let result = (|| -> Result<(), RemoteError> {
-    let remote_binary = format!("{staging}/spacelens");
+    let remote_binary = format!("{staging}/{}", agent_binary_name(shell));
     let transfer = run_ssh(
       target,
-      &ssh_transfer(target, &remote_binary)?,
+      &ssh_transfer_shell(target, &remote_binary, shell)?,
       Some(bytes.clone()),
       AGENT_TRANSFER_TIMEOUT,
     )?;
@@ -738,10 +790,7 @@ fn ensure_agent(
     }
     let wc = run_ssh(
       target,
-      &ssh_exec(
-        target,
-        &script(&format!("wc -c < {}", quote(&remote_binary)?))?,
-      )?,
+      &ssh_exec_shell(target, &byte_count_script(&remote_binary, shell)?, shell)?,
       None,
       PROBE_TIMEOUT,
     )?;
@@ -759,13 +808,9 @@ fn ensure_agent(
       ));
     }
 
-    let smoke_script = format!(
-      "chmod 755 {binary} && exec {binary} agent-info --json",
-      binary = quote(&remote_binary)?
-    );
     let smoke = run_ssh(
       target,
-      &ssh_exec(target, &script(&smoke_script)?)?,
+      &ssh_exec_shell(target, &agent_smoke_script(&remote_binary, shell)?, shell)?,
       None,
       PROBE_TIMEOUT,
     )?;
@@ -778,16 +823,19 @@ fn ensure_agent(
     let info = AgentInfo::parse(&String::from_utf8_lossy(&smoke.stdout))?;
     info.require(crate::agent::REQUIRED_FEATURES)?;
 
-    let activate = format!(
-      "mkdir -p {version_dir} && mv {staged} {final_binary} && rmdir {staging}",
-      version_dir = quote(&layout.version_dir)?,
-      staged = quote(&remote_binary)?,
-      final_binary = quote(&layout.binary)?,
-      staging = quote(staging)?,
-    );
     let activated = run_ssh(
       target,
-      &ssh_exec(target, &script(&activate)?)?,
+      &ssh_exec_shell(
+        target,
+        &activate_agent_script(
+          &layout.version_dir,
+          &remote_binary,
+          &layout.binary,
+          staging,
+          shell,
+        )?,
+        shell,
+      )?,
       None,
       PROBE_TIMEOUT,
     )?;
@@ -803,7 +851,7 @@ fn ensure_agent(
   if result.is_err() {
     let _ = run_ssh(
       target,
-      &ssh_exec(target, &script(&format!("rm -rf {}", quote(staging)?))?)?,
+      &ssh_exec_shell(target, &remove_tree_script(staging, shell)?, shell)?,
       None,
       PROBE_TIMEOUT,
     );
@@ -815,15 +863,25 @@ fn ensure_host(
   target: &SshTarget,
   probe: &RemoteProbe,
   host: &HostLayout,
+  shell: RemoteShell,
   progress: &mut dyn FnMut(InstallProgress),
 ) -> Result<(), RemoteError> {
-  if host_entry_present(target, &host.entry)? {
+  if host_entry_present(target, &host.entry, shell)? {
     return Ok(());
   }
   let npm = probe
     .npm
     .as_deref()
     .ok_or_else(|| RemoteError::UnsupportedTarget("npm was not found".into()))?;
+  // npm's shebang resolves `node` from PATH, which a non-interactive SSH
+  // session does not have when node lives in nvm or a user-local tree.
+  let node_dir = probe
+    .node
+    .as_deref()
+    .and_then(|node| Path::new(node).parent())
+    .map(|dir| dir.to_string_lossy().into_owned())
+    .ok_or_else(|| RemoteError::UnsupportedTarget("node was not found".into()))?;
+  shell.validate_path(&node_dir, "node directory")?;
 
   // Development and acceptance testing can point the client at a local
   // `npm pack` tarball, so a remote can be exercised before the pinned
@@ -845,10 +903,13 @@ fn ensure_host(
         crate::install::HOST_DIR,
         staging_suffix()
       );
-      let mkdir = format!("mkdir -p {}", quote(&parent_of(&remote_tarball)?)?);
       let created = run_ssh(
         target,
-        &ssh_exec(target, &script(&mkdir)?)?,
+        &ssh_exec_shell(
+          target,
+          &mkdir_script(&parent_of(&remote_tarball, shell)?, shell)?,
+          shell,
+        )?,
         None,
         PROBE_TIMEOUT,
       )?;
@@ -860,7 +921,7 @@ fn ensure_host(
       }
       let transfer = run_ssh(
         target,
-        &ssh_transfer(target, &remote_tarball)?,
+        &ssh_transfer_shell(target, &remote_tarball, shell)?,
         Some(bytes),
         AGENT_TRANSFER_TIMEOUT,
       )?;
@@ -870,19 +931,21 @@ fn ensure_host(
           tail(&transfer.stderr)
         )));
       }
-      let command = host_install_tarball_script(host, npm, &remote_tarball)?;
+      let body = match shell {
+        RemoteShell::Posix => host_install_tarball_script(host, npm, &remote_tarball, &node_dir)?,
+        RemoteShell::WindowsPwsh => {
+          host_install_tarball_script_pwsh(host, npm, &remote_tarball, &node_dir)?
+        }
+      };
       let output = run_ssh(
         target,
-        &ssh_exec(target, &command)?,
+        &ssh_exec_shell(target, &body, shell)?,
         None,
         HOST_INSTALL_TIMEOUT,
       )?;
       let _ = run_ssh(
         target,
-        &ssh_exec(
-          target,
-          &script(&format!("rm -f {}", quote(&remote_tarball)?))?,
-        )?,
+        &ssh_exec_shell(target, &remove_file_script(&remote_tarball, shell)?, shell)?,
         None,
         PROBE_TIMEOUT,
       );
@@ -892,7 +955,7 @@ fn ensure_host(
           tail(&output.stderr)
         )));
       }
-      if !host_entry_present(target, &host.entry)? {
+      if !host_entry_present(target, &host.entry, shell)? {
         return Err(RemoteError::HostUnavailable(format!(
           "npm reported success but {} is missing",
           host.entry
@@ -906,10 +969,13 @@ fn ensure_host(
     InstallStage::HostCheck,
     format!("Installing @space-lens/cli@{}", host.version),
   ));
-  let command = host_install_script(host, npm)?;
+  let body = match shell {
+    RemoteShell::Posix => host_install_script(host, npm, &node_dir)?,
+    RemoteShell::WindowsPwsh => host_install_script_pwsh(host, npm, &node_dir)?,
+  };
   let output = run_ssh(
     target,
-    &ssh_exec(target, &command)?,
+    &ssh_exec_shell(target, &body, shell)?,
     None,
     HOST_INSTALL_TIMEOUT,
   )?;
@@ -919,7 +985,7 @@ fn ensure_host(
       tail(&output.stderr)
     )));
   }
-  if !host_entry_present(target, &host.entry)? {
+  if !host_entry_present(target, &host.entry, shell)? {
     return Err(RemoteError::HostUnavailable(format!(
       "npm reported success but {} is missing",
       host.entry
@@ -928,11 +994,14 @@ fn ensure_host(
   Ok(())
 }
 
-fn agent_healthy(target: &SshTarget, binary: &str) -> Result<bool, RemoteError> {
-  let command = format!("exec {} agent-info --json", quote(binary)?);
+fn agent_healthy(
+  target: &SshTarget,
+  binary: &str,
+  shell: RemoteShell,
+) -> Result<bool, RemoteError> {
   let output = run_ssh(
     target,
-    &ssh_exec(target, &script(&command)?)?,
+    &ssh_exec_shell(target, &agent_health_script(binary, shell)?, shell)?,
     None,
     PROBE_TIMEOUT,
   )?;
@@ -948,11 +1017,14 @@ fn agent_healthy(target: &SshTarget, binary: &str) -> Result<bool, RemoteError> 
   }
 }
 
-fn host_entry_present(target: &SshTarget, entry: &str) -> Result<bool, RemoteError> {
-  let command = format!("test -f {}", quote(entry)?);
+fn host_entry_present(
+  target: &SshTarget,
+  entry: &str,
+  shell: RemoteShell,
+) -> Result<bool, RemoteError> {
   let output = run_ssh(
     target,
-    &ssh_exec(target, &script(&command)?)?,
+    &ssh_exec_shell(target, &file_exists_script(entry, shell)?, shell)?,
     None,
     PROBE_TIMEOUT,
   )?;
@@ -987,12 +1059,13 @@ pub fn download_agent(
 
   // The manifest pins the archive, so the cache holds the archive and the
   // binary is extracted again on every use. Never verify the extracted file
-  // against the archive's digest.
-  let cached = cache_dir.map(|dir| dir.join("agent.tar.gz"));
+  // against the archive's digest. The cache name's extension follows the
+  // artifact, because extraction dispatches on it.
+  let cached = cache_dir.map(|dir| dir.join(cache_archive_name(artifact)));
   if let Some(cached) = cached {
     if let Ok(bytes) = std::fs::read(&cached) {
       if manifest.verify_artifact(artifact, &bytes).is_ok() {
-        return Ok(archive::extract_agent(&bytes)?.bytes);
+        return Ok(archive::extract_agent(&artifact.archive, &bytes)?.bytes);
       }
       let _ = std::fs::remove_file(&cached);
     }
@@ -1024,12 +1097,22 @@ pub fn download_agent(
     "Verifying the agent checksum",
   ));
   manifest.verify_artifact(artifact, &bytes)?;
-  let extracted = archive::extract_agent(&bytes)?;
+  let extracted = archive::extract_agent(&artifact.archive, &bytes)?;
   if let Some(cache_dir) = cache_dir {
     std::fs::create_dir_all(cache_dir)?;
-    std::fs::write(cache_dir.join("agent.tar.gz"), &bytes)?;
+    std::fs::write(cache_dir.join(cache_archive_name(artifact)), &bytes)?;
   }
   Ok(extracted.bytes)
+}
+
+/// The cache file name for one artifact: the same bytes, under the
+/// extension that names their format.
+fn cache_archive_name(artifact: &crate::manifest::AgentArtifact) -> String {
+  if artifact.archive.ends_with(".zip") {
+    "agent.zip".into()
+  } else {
+    "agent.tar.gz".into()
+  }
 }
 
 fn start_serve(
@@ -1039,9 +1122,13 @@ fn start_serve(
   node: &str,
   home: &str,
   policy: &RemotePolicy,
+  shell: RemoteShell,
 ) -> Result<(Child, ServeReadiness), RemoteError> {
-  let command = serve_script(host, agent_binary, node, home, policy)?;
-  let ssh = ssh_exec(target, &command)?;
+  let body = match shell {
+    RemoteShell::Posix => serve_script(host, agent_binary, node, home, policy)?,
+    RemoteShell::WindowsPwsh => serve_script_pwsh(host, agent_binary, node, home, policy)?,
+  };
+  let ssh = ssh_exec_shell(target, &body, shell)?;
   let mut child = spawn(&ssh)?;
   let stdout = child
     .stdout
@@ -1374,21 +1461,15 @@ fn staging_suffix() -> String {
   )
 }
 
-fn parent_of(path: &str) -> Result<String, RemoteError> {
+fn parent_of(path: &str, shell: RemoteShell) -> Result<String, RemoteError> {
   let parent = Path::new(path)
     .parent()
     .map(|value| value.to_string_lossy().into_owned())
-    .unwrap_or_else(|| "/".into());
-  validate_absolute_path(&parent, "host staging directory")?;
+    .ok_or_else(|| {
+      RemoteError::InvalidPath(format!("host staging directory has no parent: {path:?}"))
+    })?;
+  shell.validate_path(&parent, "host staging directory")?;
   Ok(parent)
-}
-
-fn script(body: &str) -> Result<String, RemoteError> {
-  shell_script(body)
-}
-
-fn quote(value: &str) -> Result<String, RemoteError> {
-  quote_posix(value)
 }
 
 fn tail(bytes: &[u8]) -> String {
@@ -1491,5 +1572,20 @@ mod tests {
     assert_eq!(code_for_status(403), "Forbidden");
     assert_eq!(code_for_status(409), "StalePlan");
     assert_eq!(code_for_status(500), "InternalError");
+  }
+
+  #[test]
+  fn the_agent_cache_keeps_the_artifacts_extension() {
+    let zip = crate::manifest::AgentArtifact {
+      archive: "spacelens-x86_64-pc-windows-msvc-v0.4.0.zip".into(),
+      sha256: "0".repeat(64),
+      size: 4,
+    };
+    let tar_gz = crate::manifest::AgentArtifact {
+      archive: "spacelens-x86_64-unknown-linux-musl-v0.4.0.tar.gz".into(),
+      ..zip.clone()
+    };
+    assert_eq!(cache_archive_name(&zip), "agent.zip");
+    assert_eq!(cache_archive_name(&tar_gz), "agent.tar.gz");
   }
 }

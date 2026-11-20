@@ -403,12 +403,17 @@ mod unix {
     // The real host answers only for its own authority; the tunnel remaps the
     // port, so a client that did not pin the Host header is refused here
     // exactly like `packages/host` refuses it.
-    let expected_authority =
-      format!("127.0.0.1:{}", std::env::var("FAKE_HOST_PORT").unwrap_or_default());
+    let expected_authority = format!(
+      "127.0.0.1:{}",
+      std::env::var("FAKE_HOST_PORT").unwrap_or_default()
+    );
     if header("host").as_deref() != Some(expected_authority.as_str()) {
       append_log(
         log,
-        &format!("{method} {path} refused-host header={}", header("host").unwrap_or_default()),
+        &format!(
+          "{method} {path} refused-host header={}",
+          header("host").unwrap_or_default()
+        ),
       );
       respond_json(
         &mut stream,

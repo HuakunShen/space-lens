@@ -6,11 +6,21 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::RemoteError;
-use crate::probe::validate_absolute_path;
+use crate::server::RemoteShell;
 
 pub const AGENT_DIR: &str = ".space-lens/agents";
 pub const HOST_DIR: &str = ".space-lens/host";
 pub const REMOTE_DIR: &str = ".space-lens/remote";
+
+/// The agent binary's file name on one platform. Windows ships `spacelens.exe`
+/// in its release archive, and the install layout must land on that exact
+/// name or the smoke test would look for a binary that was never there.
+pub fn agent_binary_name(shell: RemoteShell) -> &'static str {
+  match shell {
+    RemoteShell::Posix => "spacelens",
+    RemoteShell::WindowsPwsh => "spacelens.exe",
+  }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -84,7 +94,9 @@ impl InstallProgress {
   }
 }
 
-/// Absolute remote paths for one agent version.
+/// Absolute remote paths for one agent version. The shape is per-platform:
+/// POSIX homes are `/`-rooted and the binary is `spacelens`; Windows homes are
+/// canonical drive paths (`C:/Users/…`) and the binary is `spacelens.exe`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentLayout {
   pub home: String,
@@ -95,15 +107,31 @@ pub struct AgentLayout {
 }
 
 impl AgentLayout {
+  /// POSIX layout: `/`-rooted home and the `spacelens` binary.
   pub fn new(home: &str, version: &str, staging_suffix: &str) -> Result<Self, RemoteError> {
-    validate_absolute_path(home, "home")?;
+    Self::for_shell(home, version, staging_suffix, RemoteShell::Posix)
+  }
+
+  /// Windows layout: canonical `C:/` home and the `spacelens.exe` binary.
+  pub fn windows(home: &str, version: &str, staging_suffix: &str) -> Result<Self, RemoteError> {
+    Self::for_shell(home, version, staging_suffix, RemoteShell::WindowsPwsh)
+  }
+
+  /// Builds the layout for one platform's path rules and binary name.
+  pub fn for_shell(
+    home: &str,
+    version: &str,
+    staging_suffix: &str,
+    shell: RemoteShell,
+  ) -> Result<Self, RemoteError> {
+    shell.validate_path(home, "home")?;
     validate_component("version", version)?;
     validate_component("staging suffix", staging_suffix)?;
     let version_dir = format!("{home}/{AGENT_DIR}/{version}");
     Ok(Self {
       home: home.to_string(),
       version: version.to_string(),
-      binary: format!("{version_dir}/spacelens"),
+      binary: format!("{version_dir}/{}", agent_binary_name(shell)),
       staging_dir: format!("{home}/{AGENT_DIR}/.staging-{staging_suffix}"),
       version_dir,
     })
@@ -121,8 +149,19 @@ pub struct HostLayout {
 }
 
 impl HostLayout {
+  /// POSIX layout: `/`-rooted home.
   pub fn new(home: &str, version: &str) -> Result<Self, RemoteError> {
-    validate_absolute_path(home, "home")?;
+    Self::for_shell(home, version, RemoteShell::Posix)
+  }
+
+  /// Windows layout: canonical `C:/` home.
+  pub fn windows(home: &str, version: &str) -> Result<Self, RemoteError> {
+    Self::for_shell(home, version, RemoteShell::WindowsPwsh)
+  }
+
+  /// Builds the layout for one platform's path rules.
+  pub fn for_shell(home: &str, version: &str, shell: RemoteShell) -> Result<Self, RemoteError> {
+    shell.validate_path(home, "home")?;
     validate_component("host version", version)?;
     let prefix = format!("{home}/{HOST_DIR}/{version}");
     Ok(Self {
@@ -216,5 +255,41 @@ mod tests {
     assert!(AgentLayout::new("/home/alice", "0.4.0", "../x").is_err());
     assert!(HostLayout::new("/home/alice", ".hidden").is_err());
     assert!(AgentLayout::new("relative", "0.4.0", "x").is_err());
+  }
+
+  #[test]
+  fn windows_layouts_land_on_spacelens_exe() {
+    let agent = AgentLayout::windows("C:/Users/shenh", "0.4.0", "abc123").unwrap();
+    assert_eq!(
+      agent.binary,
+      "C:/Users/shenh/.space-lens/agents/0.4.0/spacelens.exe"
+    );
+    assert_eq!(
+      agent.staging_dir,
+      "C:/Users/shenh/.space-lens/agents/.staging-abc123"
+    );
+    let host = HostLayout::windows("C:/Users/shenh", "0.4.0").unwrap();
+    assert_eq!(
+      host.entry,
+      "C:/Users/shenh/.space-lens/host/0.4.0/node_modules/@space-lens/cli/dist/cli.mjs"
+    );
+    assert_eq!(
+      host.pid_file,
+      "C:/Users/shenh/.space-lens/remote/0.4.0/server.pid"
+    );
+  }
+
+  #[test]
+  fn windows_layouts_refuse_posix_paths_and_backslashes() {
+    assert!(AgentLayout::windows("C:\\Users\\shenh", "0.4.0", "x").is_err());
+    assert!(AgentLayout::windows("/home/alice", "0.4.0", "x").is_err());
+    assert!(HostLayout::windows("C:\\Users\\shenh", "0.4.0").is_err());
+    assert!(HostLayout::windows("shenh", "0.4.0").is_err());
+    // The dispatch constructor enforces the same split.
+    assert!(AgentLayout::for_shell("/home/alice", "0.4.0", "x", RemoteShell::WindowsPwsh).is_err());
+    assert!(HostLayout::for_shell("C:/Users/shenh", "0.4.0", RemoteShell::Posix).is_err());
+    // Component rules are platform-independent.
+    assert!(AgentLayout::windows("C:/Users/shenh", "../../etc", "x").is_err());
+    assert!(HostLayout::windows("C:/Users/shenh", ".hidden").is_err());
   }
 }

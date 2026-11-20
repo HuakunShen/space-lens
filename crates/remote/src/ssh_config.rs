@@ -355,12 +355,17 @@ impl ConfigIo for FsReader {
   }
 }
 
-/// Validates the shell reported by the probe. Only POSIX-compatible login
-/// shells are accepted: the command string is written for POSIX `sh` and is
-/// re-parsed by the login shell before `sh -c` sees it.
+/// Validates the shell reported by the probe.
+///
+/// POSIX-compatible login shells are accepted because the command string is
+/// written for POSIX `sh` and re-parsed by the login shell before `sh -c`
+/// sees it. `powershell` is the one Windows exception: a probe that answered
+/// the PowerShell script ran inside the `powershell -EncodedCommand` channel,
+/// which cmd.exe passes through untouched — there is no login-shell grammar
+/// to be compatible with.
 pub fn shell_supported(shell: &str) -> bool {
   let name = shell.rsplit('/').next().unwrap_or(shell);
-  matches!(name, "sh" | "bash" | "zsh" | "dash" | "ksh")
+  matches!(name, "sh" | "bash" | "zsh" | "dash" | "ksh" | "powershell")
 }
 
 pub fn load_or_error(home: &Path) -> Result<SshConfigListing, RemoteError> {
@@ -524,7 +529,7 @@ Host after
   }
 
   #[test]
-  fn only_posix_shells_are_accepted() {
+  fn only_posix_shells_and_powershell_are_accepted() {
     for shell in [
       "/bin/sh",
       "/bin/bash",
@@ -539,6 +544,7 @@ Host after
         "{shell}"
       );
     }
+    assert!(shell_supported("powershell"));
     assert!(!shell_supported("cmd.exe"));
     assert!(!shell_supported(""));
   }

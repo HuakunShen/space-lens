@@ -23,12 +23,21 @@ harness = false
 required-features = ["runtime"]
 
 [dependencies]
+# The Windows command channel: `powershell -EncodedCommand` carries the
+# script as base64 of UTF-16LE, so `base64` is part of the security story
+# (its alphabet cannot hold a cmd.exe metacharacter). std only; no engine
+# feature is needed for `general_purpose::STANDARD`.
+base64     = "0.22"
 flate2     = "1"
 serde      = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2       = "0.10"
 tar        = "0.4"
 thiserror  = "2"
+# Windows agent archives are `.zip` (cli-release.yml). Deflate only, on the
+# pure-Rust flate2 backend: no bzip2/zstd/xz feature may drag a C library
+# into this crate's build.
+zip        = { version = "2", default-features = false, features = ["deflate"] }
 
 # Mirrors the desktop shell: reqwest 0.13 renamed the old `rustls-tls` feature
 # and ships without a crypto provider, so ring is installed explicitly by the
