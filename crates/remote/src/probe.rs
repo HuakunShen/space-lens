@@ -81,7 +81,8 @@ $nodePath = if ($node) { $node.Source.Replace('\', '/') } else { '' }
 $npmPath = if ($npm) { $npm.Source.Replace('\', '/') } else { '' }
 $npxPath = if ($npx) { $npx.Source.Replace('\', '/') } else { '' }
 p node $nodePath
-p node_version (if ($node) { & $nodePath --version })
+$nodeVersion = if ($node) { & $nodePath --version }
+p node_version $nodeVersion
 p npm $npmPath
 p npx $npxPath
 $agentsDir = [IO.Path]::Combine($lensHome, '.space-lens/agents')

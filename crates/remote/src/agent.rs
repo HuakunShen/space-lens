@@ -68,6 +68,18 @@ impl AgentInfo {
 /// is additive; this set is the minimum, not an equality check.
 pub const REQUIRED_FEATURES: &[&str] = &["scan.stream", "scan.progress", "memory.stdio"];
 
+/// The same requirement, scoped to one remote platform: the Windows agent
+/// does not carry the memory stdio bridge (`cfg(unix)` in the CLI), so a
+/// Windows session must not demand it and its host serves without the
+/// memory view.
+pub fn required_features_for(platform: &str) -> &'static [&'static str] {
+  if platform == "windows" {
+    &["scan.stream", "scan.progress"]
+  } else {
+    REQUIRED_FEATURES
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -104,5 +116,15 @@ mod tests {
     let error = parsed.require(REQUIRED_FEATURES).unwrap_err();
     assert!(error.to_string().contains("scan.progress"));
     assert!(error.to_string().contains("memory.stdio"));
+  }
+
+  #[test]
+  fn windows_sessions_do_not_demand_the_memory_bridge() {
+    assert_eq!(
+      required_features_for("windows"),
+      &["scan.stream", "scan.progress"] as &'static [&'static str]
+    );
+    assert_eq!(required_features_for("linux"), REQUIRED_FEATURES);
+    assert_eq!(required_features_for("macos"), REQUIRED_FEATURES);
   }
 }

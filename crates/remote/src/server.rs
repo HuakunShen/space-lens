@@ -253,6 +253,52 @@ impl RemotePolicy {
   }
 }
 
+/// Copies one local file to the target with `scp`. Windows OpenSSH never
+/// delivers an stdin EOF to a PowerShell child (the wrapped cmd.exe holds
+/// the pipe until the child exits), so the stdin receiver above cannot
+/// finish there; `scp` speaks the SFTP protocol instead and is the transfer
+/// channel for the PowerShell flavor. POSIX hosts keep the stdin pipe.
+pub fn scp_transfer(
+  target: &SshTarget,
+  local_path: &str,
+  remote_path: &str,
+  shell: RemoteShell,
+) -> Result<SshCommand, RemoteError> {
+  if shell != RemoteShell::WindowsPwsh {
+    return Err(RemoteError::InvalidPath(
+      "scp transfer exists for the powershell channel only".into(),
+    ));
+  }
+  target.validate()?;
+  shell.validate_path(remote_path, "transfer path")?;
+  if local_path.is_empty() || local_path.contains('\0') {
+    return Err(RemoteError::InvalidPath("local transfer path is empty".into()));
+  }
+  let mut args: Vec<String> = [
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "NumberOfPasswordPrompts=0",
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    "ConnectTimeout=15",
+  ]
+  .iter()
+  .map(|value| (*value).to_string())
+  .collect();
+  if let Some(port) = target.port() {
+    args.push("-P".into());
+    args.push(port.to_string());
+  }
+  args.push(local_path.to_string());
+  args.push(format!("{}:{}", target.destination(), remote_path));
+  Ok(SshCommand {
+    program: "scp".into(),
+    args,
+  })
+}
+
 /// The remote script that starts the pinned host package (POSIX body).
 ///
 /// `npx` is deliberately not used at run time: `npm install --prefix` gives a
@@ -302,6 +348,7 @@ pub fn serve_script_pwsh(
   node: &str,
   home: &str,
   policy: &RemotePolicy,
+  allow_memory: bool,
 ) -> Result<String, RemoteError> {
   validate_windows_path(agent_binary, "agent binary")?;
   validate_windows_path(node, "node")?;
@@ -322,7 +369,7 @@ pub fn serve_script_pwsh(
      New-Item -ItemType Directory -Force -Path {pid_dir} | Out-Null\n\
      Set-Content -LiteralPath {pid_file} -Value $PID\n\
      $env:{LOCAL_SCAN_BIN_ENV} = {agent}\n\
-     & {node} {entry} serve --machine --allow-memory{cleanup} --root {root}\n\
+     & {node} {entry} serve --machine{memory}{cleanup} --root {root}\n\
      exit $LASTEXITCODE",
     pid_dir = pwsh_literal(&pid_dir)?,
     pid_file = pwsh_literal(&host.pid_file)?,
@@ -330,6 +377,7 @@ pub fn serve_script_pwsh(
     node = pwsh_literal(node)?,
     entry = pwsh_literal(&host.entry)?,
     root = pwsh_literal(home)?,
+    memory = if allow_memory { " --allow-memory" } else { "" },
   ))
 }
 
@@ -799,6 +847,37 @@ mod tests {
   }
 
   #[test]
+  fn windows_transfers_travel_by_scp_with_the_same_guards() {
+    // The stdin receiver cannot finish on Windows OpenSSH (no EOF reaches the
+    // wrapped PowerShell child), so the powershell flavor transfers by scp.
+    let command = scp_transfer(
+      &host_target(),
+      "/tmp/space-lens-agent.exe",
+      "C:/Users/al ice/agent.exe",
+      RemoteShell::WindowsPwsh,
+    )
+    .unwrap();
+    assert_eq!(command.program, "scp");
+    assert!(command.args.contains(&"BatchMode=yes".to_string()));
+    assert!(command.args.contains(&"StrictHostKeyChecking=yes".to_string()));
+    // A concrete port travels as scp's -P, never interpolated into the target.
+    let port = command.args.iter().position(|arg| arg == "-P").unwrap();
+    assert_eq!(command.args[port + 1], "2222");
+    assert_eq!(
+      command.args.last().unwrap(),
+      "alice@[::1]:C:/Users/al ice/agent.exe"
+    );
+    // POSIX keeps the stdin pipe: scp exists only for the powershell channel.
+    assert!(scp_transfer(
+      &host_target(),
+      "/tmp/agent",
+      "/home/alice/agent",
+      RemoteShell::Posix
+    )
+    .is_err());
+  }
+
+  #[test]
   fn windows_transfer_streams_standard_input_into_the_file() {
     let command =
       ssh_transfer_shell(&alias(), "C:/Users/al ice/agent", RemoteShell::WindowsPwsh).unwrap();
@@ -853,6 +932,24 @@ mod tests {
   }
 
   #[test]
+  fn windows_serve_without_memory_omits_the_flag() {
+    // The runtime passes false: the Windows agent has no memory bridge, and
+    // the host must not advertise a capability nothing can back.
+    let host = HostLayout::windows("C:/Users/shenh", "0.4.0").unwrap();
+    let body = serve_script_pwsh(
+      &host,
+      "C:/Users/shenh/.space-lens/agents/0.4.0/spacelens.exe",
+      "C:/Program Files/nodejs/node.exe",
+      "C:/Users/shenh",
+      &RemotePolicy::read_only(),
+      false,
+    )
+    .unwrap();
+    assert!(!body.contains("--allow-memory"));
+    assert!(body.contains("serve --machine --root"));
+  }
+
+  #[test]
   fn windows_serve_script_pins_the_agent_and_never_grants_process_control() {
     let host = HostLayout::windows("C:/Users/shenh", "0.4.0").unwrap();
     let agent = "C:/Users/shenh/.space-lens/agents/0.4.0/spacelens.exe";
@@ -865,6 +962,7 @@ mod tests {
       &RemotePolicy {
         allow_cleanup: true,
       },
+      true,
     )
     .unwrap();
     assert!(body.contains(
@@ -884,6 +982,7 @@ mod tests {
       node,
       "C:/Users/shenh's",
       &RemotePolicy::read_only(),
+      true,
     )
     .unwrap();
     assert!(body.contains("--root 'C:/Users/shenh''s'"));
