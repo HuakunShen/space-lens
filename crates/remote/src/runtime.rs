@@ -119,6 +119,10 @@ pub struct RemoteHost {
   pub service_instance_id: String,
   pub target: SshTarget,
   pub policy: RemotePolicy,
+  /// The authority the host answers for (`127.0.0.1:<remote port>`). The
+  /// tunnel exposes it under a *local* port, so every request must carry the
+  /// host's own authority in its `Host` header or be refused.
+  authority: String,
   pid_file: String,
   base_url: String,
   token: Mutex<String>,
@@ -246,7 +250,10 @@ impl RemoteHost {
     let base_url = format!("http://127.0.0.1:{local_port}");
 
     // 7. Exchange the single-use ticket. No Origin header is sent, which is
-    // exactly what a `--machine` ticket is bound to.
+    // exactly what a `--machine` ticket is bound to. Every request also
+    // carries the host's own authority: the tunnel remaps the port, but the
+    // host's Host-header gate does not.
+    let authority = format!("127.0.0.1:{}", readiness.port);
     progress(InstallProgress::new(
       InstallStage::Pair,
       "Pairing with the remote host",
@@ -261,7 +268,7 @@ impl RemoteHost {
         return Err(error);
       }
     };
-    let token = match pair(&client, &base_url, &readiness.ticket) {
+    let token = match pair(&client, &base_url, &readiness.ticket, &authority) {
       Ok(token) => token,
       Err(error) => {
         let _ = tunnel.kill();
@@ -272,7 +279,7 @@ impl RemoteHost {
       }
     };
 
-    let capabilities = match fetch_capabilities(&client, &base_url, &token) {
+    let capabilities = match fetch_capabilities(&client, &base_url, &token, &authority) {
       Ok(capabilities) => capabilities,
       Err(error) => {
         let _ = tunnel.kill();
@@ -307,6 +314,7 @@ impl RemoteHost {
       service_instance_id: readiness.service_instance_id.clone(),
       target,
       policy,
+      authority,
       pid_file: host.pid_file.clone(),
       base_url,
       token: Mutex::new(token),
@@ -345,6 +353,7 @@ impl RemoteHost {
     let running = self.sse_running.clone();
     let last = self.sse_last.clone();
     let base_url = self.base_url.clone();
+    let authority = self.authority.clone();
     let token = self.token.lock().unwrap().clone();
     let client = self.stream_client.clone();
     let handle = thread::spawn(move || {
@@ -352,6 +361,7 @@ impl RemoteHost {
       while !stop_flag.load(Ordering::SeqCst) {
         let response = client
           .get(format!("{base_url}/api/v1/events"))
+          .header("host", authority.clone())
           .query(&[("since", since.to_string())])
           .bearer_auth(&token)
           .send();
@@ -619,6 +629,7 @@ impl RemoteHost {
       .client
       .request(method, format!("{}{}", self.base_url, path))
       .timeout(timeout)
+      .header("host", self.authority.clone())
       .bearer_auth(token);
     if let Some(body) = body {
       request = request.json(&body);
@@ -1111,6 +1122,9 @@ fn start_tunnel(target: &SshTarget, remote_port: u16) -> Result<(Child, u16), Re
     loop {
       if client
         .get(format!("http://127.0.0.1:{local_port}/health"))
+        // The host's authority gate names its own port; the local forward
+        // carries a different one, so say who the request is for.
+        .header("host", format!("127.0.0.1:{remote_port}"))
         .send()
         .is_ok_and(|response| response.status().is_success())
       {
@@ -1144,9 +1158,11 @@ fn pair(
   client: &reqwest::blocking::Client,
   base_url: &str,
   ticket: &str,
+  authority: &str,
 ) -> Result<String, RemoteError> {
   let response = client
     .post(format!("{base_url}/api/v1/session/exchange"))
+    .header("host", authority)
     .json(&json!({ "ticket": ticket }))
     .send()
     .map_err(|error| RemoteError::HostUnavailable(format!("pairing failed: {error}")))?;
@@ -1174,9 +1190,11 @@ fn fetch_capabilities(
   client: &reqwest::blocking::Client,
   base_url: &str,
   token: &str,
+  authority: &str,
 ) -> Result<Value, RemoteError> {
   let response = client
     .get(format!("{base_url}/api/v1/capabilities"))
+    .header("host", authority)
     .bearer_auth(token)
     .send()
     .map_err(|error| RemoteError::HostUnavailable(format!("capabilities failed: {error}")))?;

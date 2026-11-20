@@ -307,6 +307,7 @@ mod unix {
     }
     let listener = TcpListener::bind("127.0.0.1:0").expect("fixture host bind");
     let port = listener.local_addr().unwrap().port();
+    std::env::set_var("FAKE_HOST_PORT", port.to_string());
     let log = std::env::var("FAKE_SSH_LOG").unwrap();
     thread::spawn(move || {
       for stream in listener.incoming().flatten() {
@@ -399,6 +400,23 @@ mod unix {
     );
 
     let route = path.split('?').next().unwrap_or(path);
+    // The real host answers only for its own authority; the tunnel remaps the
+    // port, so a client that did not pin the Host header is refused here
+    // exactly like `packages/host` refuses it.
+    let expected_authority =
+      format!("127.0.0.1:{}", std::env::var("FAKE_HOST_PORT").unwrap_or_default());
+    if header("host").as_deref() != Some(expected_authority.as_str()) {
+      append_log(
+        log,
+        &format!("{method} {path} refused-host header={}", header("host").unwrap_or_default()),
+      );
+      respond_json(
+        &mut stream,
+        "400 Bad Request",
+        r#"{"problem":{"code":"InvalidRequest","message":"request is not addressed to this service (Host header refused)","retryable":false}}"#,
+      );
+      return;
+    }
     if route == "/health" {
       respond_json(
         &mut stream,
