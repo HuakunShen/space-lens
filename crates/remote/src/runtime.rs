@@ -45,7 +45,7 @@ use crate::server::{
   file_exists_script, host_install_script, host_install_script_pwsh, host_install_tarball_script,
   host_install_tarball_script_pwsh, kill_script, kill_script_pwsh, mkdir_script,
   parse_readiness_line, remove_file_script, remove_tree_script, serve_script, serve_script_pwsh,
-  ssh_exec_shell, ssh_probe_shell, ssh_transfer_shell, ssh_tunnel, staging_dir_script,
+  ssh_exec_shell, ssh_probe_shell, ssh_transfer_shell, ssh_tunnel, scp_transfer, staging_dir_script,
   ReadinessLine, RemotePolicy, RemoteShell, ServeReadiness, SshCommand,
 };
 use crate::target::SshTarget;
@@ -130,6 +130,7 @@ pub struct RemoteHost {
   /// provisioning, so it is part of the connection, not a parameter.
   shell: RemoteShell,
   base_url: String,
+  local_port: u16,
   token: Mutex<String>,
   client: reqwest::blocking::Client,
   stream_client: reqwest::blocking::Client,
@@ -219,6 +220,7 @@ impl RemoteHost {
       resolved.triple,
       &agent,
       shell,
+      platform,
       progress,
     )?;
 
@@ -338,6 +340,7 @@ impl RemoteHost {
       pid_file: host.pid_file.clone(),
       shell,
       base_url,
+      local_port,
       token: Mutex::new(token),
       client,
       stream_client,
@@ -355,6 +358,11 @@ impl RemoteHost {
   /// The capabilities the host reported at pair time.
   pub fn capabilities(&self) -> Value {
     self.capabilities.clone()
+  }
+
+  /// The loopback port this host is reached through on this machine.
+  pub fn local_port(&self) -> u16 {
+    self.local_port
   }
 
   /// Starts forwarding remote SSE payloads into `forwarder`. Repeated calls
@@ -602,6 +610,18 @@ impl RemoteHost {
     )
   }
 
+  /// Asks the host to mint a browser ticket for one loopback origin (the
+  /// tunnel's local port). The host admits that origin to its browser gate
+  /// in the same call; the returned `url` is what a local browser opens.
+  pub fn mint_browser_ticket(&self, origin: &str) -> Result<Value, Value> {
+    self.call(
+      Method::POST,
+      "/api/v1/session/ticket",
+      Some(json!({ "origin": origin })),
+      REQUEST_TIMEOUT,
+    )
+  }
+
   // ------------------------------------------------------------ HTTP writes
 
   /// Plans a trash-only cleanup. Denied locally — before any socket — unless
@@ -742,6 +762,58 @@ fn kill_body(pid_file: &str, shell: RemoteShell) -> Result<String, RemoteError> 
   }
 }
 
+/// Moves bytes to one remote path on either channel.
+///
+/// POSIX hosts keep the historical stdin pipe (`exec cat > path`). Windows
+/// OpenSSH never delivers an stdin EOF to the wrapped PowerShell child, so the
+/// bytes are staged locally and travel by `scp` instead.
+fn transfer_bytes(
+  target: &SshTarget,
+  shell: RemoteShell,
+  remote_path: &str,
+  bytes: &[u8],
+  stage: InstallStage,
+) -> Result<(), RemoteError> {
+  match shell {
+    RemoteShell::Posix => {
+      let transfer = run_ssh(
+        target,
+        &ssh_transfer_shell(target, remote_path, shell)?,
+        Some(bytes.to_vec()),
+        AGENT_TRANSFER_TIMEOUT,
+      )?;
+      if !transfer.success {
+        return Err(RemoteError::stage(
+          stage,
+          format!("transfer failed: {}", tail(&transfer.stderr)),
+        ));
+      }
+      Ok(())
+    }
+    RemoteShell::WindowsPwsh => {
+      let local = std::env::temp_dir().join(format!(
+        "space-lens-transfer-{}-{}",
+        std::process::id(),
+        staging_suffix()
+      ));
+      std::fs::write(&local, bytes)?;
+      let moved = (|| {
+        let command = scp_transfer(target, &local.to_string_lossy(), remote_path, shell)?;
+        run_captured(&command.program, &command.args, None, AGENT_TRANSFER_TIMEOUT)
+      })();
+      let _ = std::fs::remove_file(&local);
+      match moved {
+        Ok(output) if output.success => Ok(()),
+        Ok(output) => Err(RemoteError::stage(
+          stage,
+          format!("transfer failed: {}", tail(&output.stderr)),
+        )),
+        Err(error) => Err(error),
+      }
+    }
+  }
+}
+
 fn ensure_agent(
   source: AgentSource<'_>,
   target: &SshTarget,
@@ -749,9 +821,10 @@ fn ensure_agent(
   triple: &str,
   layout: &AgentLayout,
   shell: RemoteShell,
+  platform: &str,
   progress: &mut dyn FnMut(InstallProgress),
 ) -> Result<(), RemoteError> {
-  if agent_healthy(target, &layout.binary, shell)? {
+  if agent_healthy(target, &layout.binary, shell, platform)? {
     return Ok(());
   }
   let bytes = source(manifest, triple, progress)?;
@@ -776,18 +849,7 @@ fn ensure_agent(
 
   let result = (|| -> Result<(), RemoteError> {
     let remote_binary = format!("{staging}/{}", agent_binary_name(shell));
-    let transfer = run_ssh(
-      target,
-      &ssh_transfer_shell(target, &remote_binary, shell)?,
-      Some(bytes.clone()),
-      AGENT_TRANSFER_TIMEOUT,
-    )?;
-    if !transfer.success {
-      return Err(RemoteError::stage(
-        InstallStage::AgentInstall,
-        format!("transfer failed: {}", tail(&transfer.stderr)),
-      ));
-    }
+    transfer_bytes(target, shell, &remote_binary, &bytes, InstallStage::AgentInstall)?;
     let wc = run_ssh(
       target,
       &ssh_exec_shell(target, &byte_count_script(&remote_binary, shell)?, shell)?,
@@ -821,7 +883,7 @@ fn ensure_agent(
       ));
     }
     let info = AgentInfo::parse(&String::from_utf8_lossy(&smoke.stdout))?;
-    info.require(crate::agent::REQUIRED_FEATURES)?;
+    info.require(crate::agent::required_features_for(platform))?;
 
     let activated = run_ssh(
       target,
@@ -919,18 +981,13 @@ fn ensure_host(
           tail(&created.stderr)
         )));
       }
-      let transfer = run_ssh(
+      transfer_bytes(
         target,
-        &ssh_transfer_shell(target, &remote_tarball, shell)?,
-        Some(bytes),
-        AGENT_TRANSFER_TIMEOUT,
+        shell,
+        &remote_tarball,
+        &bytes,
+        InstallStage::HostCheck,
       )?;
-      if !transfer.success {
-        return Err(RemoteError::HostUnavailable(format!(
-          "host tarball transfer failed: {}",
-          tail(&transfer.stderr)
-        )));
-      }
       let body = match shell {
         RemoteShell::Posix => host_install_tarball_script(host, npm, &remote_tarball, &node_dir)?,
         RemoteShell::WindowsPwsh => {
@@ -998,7 +1055,9 @@ fn agent_healthy(
   target: &SshTarget,
   binary: &str,
   shell: RemoteShell,
+  platform: &str,
 ) -> Result<bool, RemoteError> {
+  let required = crate::agent::required_features_for(platform);
   let output = run_ssh(
     target,
     &ssh_exec_shell(target, &agent_health_script(binary, shell)?, shell)?,
@@ -1010,8 +1069,7 @@ fn agent_healthy(
   }
   match AgentInfo::parse(&String::from_utf8_lossy(&output.stdout)) {
     Ok(info) => Ok(
-      info.agent_protocol == AGENT_PROTOCOL
-        && info.require(crate::agent::REQUIRED_FEATURES).is_ok(),
+      info.agent_protocol == AGENT_PROTOCOL && info.require(required).is_ok(),
     ),
     Err(_) => Ok(false),
   }
@@ -1126,7 +1184,11 @@ fn start_serve(
 ) -> Result<(Child, ServeReadiness), RemoteError> {
   let body = match shell {
     RemoteShell::Posix => serve_script(host, agent_binary, node, home, policy)?,
-    RemoteShell::WindowsPwsh => serve_script_pwsh(host, agent_binary, node, home, policy)?,
+    RemoteShell::WindowsPwsh => {
+      // The Windows agent has no memory bridge, so its host serves without
+      // the memory view instead of advertising a capability nothing can back.
+      serve_script_pwsh(host, agent_binary, node, home, policy, false)?
+    }
   };
   let ssh = ssh_exec_shell(target, &body, shell)?;
   let mut child = spawn(&ssh)?;
