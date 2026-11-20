@@ -7,6 +7,21 @@ license.workspace    = true
 repository.workspace = true
 version.workspace    = true
 
+[features]
+default = []
+# Effectful runtime: spawns `ssh`, speaks HTTP to the provisioned remote host.
+# The crate is pure without it, which keeps the provisioning vocabulary
+# testable without a network or a process.
+runtime = ["dep:reqwest", "dep:rustls"]
+
+# The runtime integration test re-executes this binary as `ssh` and the
+# fixture host, so it owns main instead of libtest.
+[[test]]
+name = "runtime_pipeline"
+path = "tests/runtime_pipeline.rs"
+harness = false
+required-features = ["runtime"]
+
 [dependencies]
 flate2     = "1"
 serde      = { version = "1", features = ["derive"] }
@@ -14,3 +29,9 @@ serde_json = "1"
 sha2       = "0.10"
 tar        = "0.4"
 thiserror  = "2"
+
+# Mirrors the desktop shell: reqwest 0.13 renamed the old `rustls-tls` feature
+# and ships without a crypto provider, so ring is installed explicitly by the
+# runtime before the first HTTPS request (GitHub release downloads).
+reqwest = { version = "0.13", default-features = false, features = ["json", "blocking", "query", "rustls-no-provider"], optional = true }
+rustls  = { version = "0.23", default-features = false, features = ["ring", "std"], optional = true }

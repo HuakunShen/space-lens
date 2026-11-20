@@ -8,7 +8,11 @@
 //! manifest and archive rules, install stages, and the exact `ssh` argv.
 //!
 //! Nothing here spawns a process, reads the network, or touches a remote
-//! filesystem. The desktop runtime injects those effects.
+//! filesystem. The `runtime` feature adds exactly that: an effectful
+//! [`runtime::RemoteHost`] built from the same vocabulary.
+
+#[cfg(feature = "runtime")]
+pub mod runtime;
 
 pub mod agent;
 pub mod archive;
@@ -23,4 +27,8 @@ pub mod target;
 
 pub use error::RemoteError;
 pub use install::{AgentLayout, HostLayout, InstallProgress, InstallStage};
+pub use server::RemotePolicy;
 pub use target::SshTarget;
+
+#[cfg(feature = "runtime")]
+pub use runtime::{EventForwarder, RemoteHost};

@@ -139,6 +139,27 @@ pub fn ssh_transfer(target: &SshTarget, remote_path: &str) -> Result<SshCommand,
   ssh_exec(target, &format!("exec cat > {quoted_path}"))
 }
 
+/// The mutation surface one client is willing to grant a remote host.
+///
+/// The host binary itself decides what it allows (`--allow-cleanup` absent
+/// means read-only); this value is the client's half of the contract, and the
+/// runtime enforces it again before any socket is opened.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RemotePolicy {
+  /// Grant the paired session trash-only cleanup. The host refuses permanent
+  /// deletion by construction; enabling this only unlocks `cleanup/plan` and
+  /// `cleanup/execute`.
+  pub allow_cleanup: bool,
+}
+
+impl RemotePolicy {
+  pub fn read_only() -> Self {
+    Self {
+      allow_cleanup: false,
+    }
+  }
+}
+
 /// The remote script that starts the pinned host package.
 ///
 /// `npx` is deliberately not used at run time: `npm install --prefix` gives a
@@ -150,13 +171,19 @@ pub fn serve_script(
   agent_binary: &str,
   node: &str,
   home: &str,
+  policy: &RemotePolicy,
 ) -> Result<String, RemoteError> {
   validate_absolute_path(agent_binary, "agent binary")?;
   validate_absolute_path(node, "node")?;
   validate_absolute_path(home, "home")?;
   let environment = quote_posix(&format!("{LOCAL_SCAN_BIN_ENV}={agent_binary}"))?;
+  let cleanup = if policy.allow_cleanup {
+    " --allow-cleanup"
+  } else {
+    ""
+  };
   let script = format!(
-    "mkdir -p {pid_dir} && printf '%s\\n' $$ > {pid_file} && exec env {environment} {node} {entry} serve --machine --allow-memory --root {root}",
+    "mkdir -p {pid_dir} && printf '%s\\n' $$ > {pid_file} && exec env {environment} {node} {entry} serve --machine --allow-memory{cleanup} --root {root}",
     pid_dir = quote_posix(&format!("{}/{}/{}", host.home, crate::install::REMOTE_DIR, host.version))?,
     pid_file = quote_posix(&host.pid_file)?,
     node = quote_posix(node)?,
@@ -175,6 +202,27 @@ pub fn host_install_script(host: &HostLayout, npm: &str) -> Result<String, Remot
     npm = quote_posix(npm)?,
     package = crate::manifest::PACKAGE,
     version = host.version,
+  );
+  shell_script(&script)
+}
+
+/// Installs the host package from a tarball already on the remote filesystem.
+///
+/// Development and acceptance testing use this with a local `npm pack` result
+/// transferred over the same SSH session, so a remote host can be exercised
+/// before the package version is published to the registry.
+pub fn host_install_tarball_script(
+  host: &HostLayout,
+  npm: &str,
+  tarball: &str,
+) -> Result<String, RemoteError> {
+  validate_absolute_path(npm, "npm")?;
+  validate_absolute_path(tarball, "host tarball")?;
+  let script = format!(
+    "mkdir -p {prefix} && exec {npm} install --prefix {prefix} --no-audit --no-fund --loglevel=error {tarball}",
+    prefix = quote_posix(&host.prefix)?,
+    npm = quote_posix(npm)?,
+    tarball = quote_posix(tarball)?,
   );
   shell_script(&script)
 }
@@ -362,7 +410,14 @@ mod tests {
   fn serve_script_pins_the_agent_and_host_entry() {
     let host = HostLayout::new("/home/alice", "0.4.0").unwrap();
     let agent = "/home/alice/.space-lens/agents/0.4.0/spacelens";
-    let script = serve_script(&host, agent, "/usr/bin/node", "/home/alice").unwrap();
+    let script = serve_script(
+      &host,
+      agent,
+      "/usr/bin/node",
+      "/home/alice",
+      &RemotePolicy::read_only(),
+    )
+    .unwrap();
     assert!(script.starts_with("exec 'sh' '-c' "));
     assert!(script.contains("--machine"));
     assert!(script.contains("--allow-memory"));
@@ -375,6 +430,23 @@ mod tests {
   }
 
   #[test]
+  fn serve_script_grants_cleanup_only_when_policy_allows_it() {
+    let host = HostLayout::new("/home/alice", "0.4.0").unwrap();
+    let script = serve_script(
+      &host,
+      "/home/alice/.space-lens/agents/0.4.0/spacelens",
+      "/usr/bin/node",
+      "/home/alice",
+      &RemotePolicy {
+        allow_cleanup: true,
+      },
+    )
+    .unwrap();
+    assert!(script.contains("--allow-cleanup"));
+    assert!(!script.contains("--allow-process-control"));
+  }
+
+  #[test]
   fn serve_script_quotes_an_agent_path_with_spaces() {
     let host = HostLayout::new("/home/al ice", "0.4.0").unwrap();
     let script = serve_script(
@@ -382,6 +454,7 @@ mod tests {
       "/home/al ice/.space-lens/agents/0.4.0/spacelens",
       "/usr/bin/node",
       "/home/al ice",
+      &RemotePolicy::read_only(),
     )
     .unwrap();
     // One quoted assignment word: the space must not split it into two.

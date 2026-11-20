@@ -23,7 +23,7 @@ const TARGETS = [
 ]
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
-const DEFAULT_MANIFEST = join(repoRoot, 'apps/desktop/src-tauri/agents/manifest.json')
+const DEFAULT_MANIFEST = join(repoRoot, 'crates/remote/agents/manifest.json')
 
 const args = new Map()
 const flags = new Set()

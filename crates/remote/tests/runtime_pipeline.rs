@@ -6,7 +6,7 @@
 //! rewriting the virtual home, forwards `-L` tunnels, and the fake `node`
 //! starts a small host fixture. The production `RemoteHost` code is unchanged:
 //! the same scripts, quoting, transfer, readiness, tunnel, pairing, HTTP
-//! adapter, and SSE reader run in the test.
+//! adapter, policy gate, and SSE reader run in the test.
 //!
 //! The fake tunnel and host both listen on loopback, exactly like the real
 //! remote forward; nothing here reaches the network.
@@ -18,16 +18,15 @@ mod unix {
   use std::net::{TcpListener, TcpStream};
   use std::path::{Path, PathBuf};
   use std::process::{Command, Stdio};
+  use std::sync::mpsc;
   use std::thread;
   use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-  use space_lens_desktop_lib::commands::{ReadRequest, SubmitRequest};
-  use space_lens_desktop_lib::engine::{CleanupPlanRequest, ScanStartRequest, WireIgnoredMode};
-  use space_lens_desktop_lib::events::EventSink;
-  use space_lens_desktop_lib::remote::RemoteHost;
   use spacelens_remote::install::{HostLayout, InstallStage};
   use spacelens_remote::manifest::AgentManifest;
+  use spacelens_remote::runtime::{RemoteHost, ScanStart};
   use spacelens_remote::target::SshTarget;
+  use spacelens_remote::RemotePolicy;
 
   const MANIFEST: &str = include_str!("../agents/manifest.json");
   const VIRTUAL_HOME: &str = "/home/lens";
@@ -40,7 +39,7 @@ mod unix {
     let argv: Vec<String> = std::env::args().collect();
     match argv.get(1).map(String::as_str) {
       Some("--fake-ssh") => fake_ssh(&argv[2..]),
-      Some("--fixture-host") => fixture_host(),
+      Some("--fixture-host") => fixture_host(&argv[2..]),
       _ => run_test(),
     }
   }
@@ -54,6 +53,7 @@ mod unix {
     std::env::set_var("FAKE_NODE_BIN", fixture.bin.join("node"));
     std::env::set_var("FAKE_NPM_BIN", fixture.bin.join("npm"));
     std::env::set_var("FAKE_SSH_LOG", &fixture.log);
+    std::env::set_var("FAKE_SERVE_LOG", fixture.root.join("serve.log"));
 
     let manifest = AgentManifest::parse(MANIFEST).unwrap();
     let host = HostLayout::new(VIRTUAL_HOME, &manifest.host.version).unwrap();
@@ -63,13 +63,13 @@ mod unix {
 
     let agent = fixture.write_agent();
     let mut stages = Vec::new();
-    let mut progress = |stage: spacelens_remote::install::InstallProgress| {
+    let mut progress = |stage: spacelens_remote::InstallProgress| {
       stages.push(stage.stage);
     };
     let mut source =
       |_manifest: &AgentManifest,
        _triple: &str,
-       _progress: &mut dyn FnMut(spacelens_remote::install::InstallProgress)| {
+       _progress: &mut dyn FnMut(spacelens_remote::InstallProgress)| {
         Ok(fs::read(&agent).unwrap())
       };
 
@@ -78,10 +78,16 @@ mod unix {
       host: "example.test".into(),
       port: None,
     };
-    // The whole production pipeline, except for the two local inputs the
-    // desktop owns: the SSH executable (PATH) and the agent bytes.
-    let remote =
-      RemoteHost::connect_with(target, &mut source, &mut progress).expect("provisioning failed");
+    // The whole production pipeline, except for the one local input the
+    // client owns: the SSH executable (PATH) and the agent bytes.
+    let remote = RemoteHost::connect_with(
+      target.clone(),
+      &manifest,
+      RemotePolicy::read_only(),
+      &mut source,
+      &mut progress,
+    )
+    .expect("provisioning failed");
 
     assert_eq!(remote.platform, "linux");
     assert_eq!(remote.service_instance_id, INSTANCE);
@@ -108,66 +114,51 @@ mod unix {
     let pid_file = fixture.local(&host.pid_file);
     assert!(pid_file.exists(), "serve script did not write its pid file");
 
-    let health = remote.read(&ReadRequest::Health).unwrap();
+    let health = remote.health().unwrap();
     assert_eq!(health["serviceInstanceId"], INSTANCE);
 
-    let roots = remote.read(&ReadRequest::Roots).unwrap();
+    let roots = remote.roots().unwrap();
     assert_eq!(roots["roots"][0]["path"], VIRTUAL_HOME);
 
-    // The host over-reports: cleanup, app scans, reveal, and termination are
-    // all enabled. The desktop's policy must still mask them for a remote.
-    let capabilities = remote.read(&ReadRequest::Capabilities).unwrap();
-    assert_eq!(capabilities["cleanup"]["plan"], false);
-    assert_eq!(capabilities["cleanup"]["execute"], false);
-    assert_eq!(capabilities["cleanup"]["mode"], "none");
-    assert_eq!(capabilities["scan"]["appScan"], false);
-    assert_eq!(capabilities["scan"]["appAudit"], false);
-    assert_eq!(capabilities["host"]["folderPicker"], false);
-    assert_eq!(capabilities["host"]["pathReveal"], false);
-    assert_eq!(capabilities["memory"]["terminate"], false);
-    assert_eq!(capabilities["memory"]["reopen"], false);
-    // Read-only capabilities survive.
-    assert_eq!(capabilities["scan"]["start"], true);
-    assert_eq!(capabilities["scan"]["discovery"], true);
-    assert_eq!(capabilities["memory"]["sample"], true);
+    // The host over-reports: cleanup is enabled. A read-only session must
+    // still refuse it locally, before any socket is opened.
+    let capabilities = remote.capabilities();
+    assert_eq!(capabilities["cleanup"]["plan"], true);
+    assert_eq!(capabilities["cleanup"]["mode"], "trash");
 
     let scan = remote
-      .submit(&SubmitRequest::ScanStart {
-        request: ScanStartRequest {
-          paths: vec![VIRTUAL_HOME.into()],
-          local_only: false,
-          ignore_hidden: false,
-          respect_gitignore: true,
-          ignored_mode: WireIgnoredMode::Summarize,
-          label: Some("Home".into()),
-        },
+      .scan_start(&ScanStart {
+        paths: vec![VIRTUAL_HOME.into()],
+        label: Some("Home".into()),
+        ..ScanStart::default()
       })
       .expect("scan start");
     assert_eq!(scan["scanId"], "scan_remote_1");
 
     let log_before_denial = fixture.log_text();
     let denied = remote
-      .submit(&SubmitRequest::CleanupPlan {
-        request: CleanupPlanRequest {
-          scan_id: "scan_remote_1".into(),
-          node_ids: vec!["node_1".into()],
-        },
-      })
+      .cleanup_plan("scan_remote_1", &["node_1".into()])
       .expect_err("cleanup plan must be denied");
     assert_eq!(denied["problem"]["code"], "Forbidden");
     assert_eq!(fixture.log_text(), log_before_denial, "denial reached HTTP");
+    assert!(
+      !fixture.serve_text().contains("--allow-cleanup"),
+      "read-only serve was granted cleanup: {}",
+      fixture.serve_text()
+    );
 
     // Events: the fixture's first SSE response ends after two frames, so the
     // reader must reconnect with `since=2`; only the third frame then arrives.
-    let sink = EventSink::new();
-    let (_, _, events) = sink.subscribe_channel(None);
-    remote.start_events(sink);
+    let (event_tx, event_rx) = mpsc::channel();
+    remote.start_events(std::sync::Arc::new(move |payload| {
+      let _ = event_tx.send(payload.clone());
+    }));
     let mut payloads = Vec::new();
     for _ in 0..3 {
-      let envelope = events
+      let envelope = event_rx
         .recv_timeout(Duration::from_secs(15))
         .expect("timed out waiting for a forwarded event");
-      payloads.push(envelope.payload);
+      payloads.push(envelope);
     }
     assert_eq!(payloads[0]["kind"], "scan.updated");
     assert_eq!(payloads[1]["kind"], "scan.completed");
@@ -183,9 +174,9 @@ mod unix {
       "no resumed SSE request:\n{log}"
     );
     assert_eq!(
-      events.try_iter().count(),
+      event_rx.try_iter().count(),
       0,
-      "replayed frames reached the sink again"
+      "replayed frames reached the forwarder again"
     );
 
     remote.stop();
@@ -193,7 +184,41 @@ mod unix {
       !pid_file.exists(),
       "stop did not remove the remote pid file"
     );
-    eprintln!("remote pipeline: probe → install → serve → tunnel → pair → read → SSE resume: ok");
+
+    // A second session with cleanup granted: the serve argv carries the flag,
+    // and plan/execute reach the host.
+    let cleanup_remote = RemoteHost::connect_with(
+      target,
+      &manifest,
+      RemotePolicy {
+        allow_cleanup: true,
+      },
+      &mut source,
+      &mut |_stage: spacelens_remote::InstallProgress| {},
+    )
+    .expect("cleanup provisioning failed");
+    assert!(
+      serve_text_contains("--allow-cleanup").expect("serve log"),
+      "serve was not granted --allow-cleanup:\n{}",
+      fixture.serve_text()
+    );
+    let plan = cleanup_remote
+      .cleanup_plan("scan_remote_1", &["node_1".into()])
+      .expect("cleanup plan with the policy granted");
+    assert_eq!(plan["planId"], "plan_remote_1");
+    let outcome = cleanup_remote
+      .cleanup_execute("plan_remote_1")
+      .expect("cleanup execute with the policy granted");
+    assert_eq!(outcome["trashed"][0]["nodeId"], "node_1");
+
+    cleanup_remote.stop();
+    assert!(
+      !pid_file.exists(),
+      "cleanup stop did not remove the remote pid file"
+    );
+    eprintln!(
+      "remote runtime: probe → install → serve → tunnel → pair → read → policy → SSE resume: ok"
+    );
   }
 
   // ------------------------------------------------------------- fake roles
@@ -211,9 +236,9 @@ mod unix {
     }
     let command = args.last().expect("ssh invocation without a command");
     if command.contains("SPACELENS-PROBE") {
-      // Run the exact argv the app built. This proves the multi-line script is
-      // one quoted word the remote login shell can parse; the values are then
-      // replaced with the fixture's Linux answers.
+      // Run the exact argv the client built. This proves the multi-line
+      // script is one quoted word the remote login shell can parse; the
+      // values are then replaced with the fixture's Linux answers.
       let check = Command::new("/bin/sh")
         .arg("-c")
         .arg(command)
@@ -267,12 +292,18 @@ mod unix {
   /// The fake `node` named by the probe. It serves the host routes the remote
   /// runtime uses and prints the readiness/pairing lines `serve --machine`
   /// prints.
-  fn fixture_host() {
+  fn fixture_host(args: &[String]) {
     // The probe runs `node --version` while checking the remote. Answer that
-    // like Node and reserve the HTTP fixture for a real serve invocation.
-    if std::env::args().any(|arg| arg == "--version") {
+    // like Node; record the serve argv like a real launch; reserve the HTTP
+    // fixture for a real serve invocation.
+    if args.iter().any(|arg| arg == "--version") {
       println!("v22.0.0");
       return;
+    }
+    if let Ok(log) = std::env::var("FAKE_SERVE_LOG") {
+      if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log) {
+        let _ = file.write_all(format!("{}\n", args.join(" ")).as_bytes());
+      }
     }
     let listener = TcpListener::bind("127.0.0.1:0").expect("fixture host bind");
     let port = listener.local_addr().unwrap().port();
@@ -428,6 +459,16 @@ mod unix {
         "200 OK",
         r#"{"scanId":"scan_remote_1","rootIds":["root_home"],"createdAt":"2026-01-01T00:00:00Z","label":"Home"}"#,
       ),
+      ("POST", "/api/v1/cleanup/plan") => respond_json(
+        &mut stream,
+        "200 OK",
+        r#"{"planId":"plan_remote_1","entries":[{"path":"/home/lens/target","size":1024,"reason":"node_modules","fingerprint":{"size":1024,"mtimeMs":1.0}}],"totalSize":1024}"#,
+      ),
+      ("POST", "/api/v1/cleanup/execute") => respond_json(
+        &mut stream,
+        "200 OK",
+        r#"{"trashed":[{"nodeId":"node_1","path":"/home/lens/target","size":1024}],"bytesFreed":1024,"failed":[]}"#,
+      ),
       ("GET", "/api/v1/events") => {
         let since: u64 = query(path, "since")
           .and_then(|value| value.parse().ok())
@@ -550,6 +591,7 @@ mod unix {
          exit 1\n",
       )
       .unwrap();
+      set_executable(&path);
       path
     }
 
@@ -560,6 +602,10 @@ mod unix {
 
     fn log_text(&self) -> String {
       fs::read_to_string(&self.log).unwrap_or_default()
+    }
+
+    fn serve_text(&self) -> String {
+      fs::read_to_string(self.root.join("serve.log")).unwrap_or_default()
     }
   }
 
@@ -584,6 +630,14 @@ mod unix {
     let mut permissions = fs::metadata(path).unwrap().permissions();
     permissions.set_mode(0o755);
     fs::set_permissions(path, permissions).unwrap();
+  }
+
+  /// The fixture's serve log accumulates every session's argv; the read-only
+  /// assertion runs before the cleanup session starts, so containment is exact.
+  fn serve_text_contains(needle: &str) -> Result<bool, String> {
+    let log = std::env::var("FAKE_SERVE_LOG").map_err(|error| error.to_string())?;
+    let text = std::fs::read_to_string(&log).map_err(|error| error.to_string())?;
+    Ok(text.contains(needle))
   }
 
   fn home() -> String {

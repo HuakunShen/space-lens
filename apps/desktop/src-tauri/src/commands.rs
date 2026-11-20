@@ -197,7 +197,7 @@ fn bind_session(
     let bundle = bundle.clone();
     drop(sessions);
     if let Some(remote) = &bundle.remote {
-      remote.start_events(bundle.events.clone());
+      crate::remote::start_events(remote, bundle.events.clone());
     }
     return session_metadata(&session_id, &bundle);
   }
@@ -243,7 +243,7 @@ fn bind_session(
   sessions.insert(session_id.clone(), bundle.clone());
   drop(sessions);
   if let Some(remote) = &bundle.remote {
-    remote.start_events(bundle.events.clone());
+    crate::remote::start_events(remote, bundle.events.clone());
   }
   session_metadata(&session_id, &bundle)
 }
@@ -451,7 +451,7 @@ pub async fn sl_remote_connect(
         "message": stage.message,
       }));
     };
-    let remote = match RemoteHost::connect(&app, target, &mut report) {
+    let remote = match crate::remote::connect(&app, target, &mut report) {
       Ok(remote) => remote,
       Err(error) => {
         let _ = reply.send(json!({ "ok": false, "problem": { "problem": error.problem() } }));
@@ -689,7 +689,7 @@ pub async fn sl_read(
       // A remote device answers from its own host over HTTP; the local engine,
       // audit state, icon allow-list, and memory service are never consulted.
       if let Some(remote) = bundle.remote.clone() {
-        return remote.read(&request);
+        return crate::remote::read(&remote, &request);
       }
       if let ReadRequest::Discovery {
         scan_id,
@@ -1038,7 +1038,7 @@ pub async fn sl_submit(
     // Remote v1 is read-only: allowed submits map onto host routes, and every
     // cleanup/app-scan/terminate arm is refused before a socket is opened.
     if let Some(remote) = bundle.remote.clone() {
-      let outcome = remote.submit(&request);
+      let outcome = crate::remote::submit(&remote, &request);
       let _ = reply.send(match outcome {
         Ok(value) => json!({ "ok": true, "result": value }),
         Err(problem) => json!({ "ok": false, "problem": problem }),
