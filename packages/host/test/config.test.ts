@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { platform } from 'node:os'
+import { isAbsolute, resolve } from 'node:path'
 
 import { ConfigError, resolveBindHost, resolveServeConfig, HOSTED_PASSWORD_ENV, AI_API_KEY_ENV } from '../src/config.ts'
 
@@ -7,6 +9,20 @@ describe('bind host resolution', () => {
     expect(resolveBindHost(undefined)).toMatchObject({ address: '127.0.0.1', loopback: true })
     expect(resolveBindHost('localhost')).toMatchObject({ address: '127.0.0.1', loopback: true })
     expect(resolveBindHost('::1')).toMatchObject({ loopback: true })
+  })
+
+  it('keeps absolute roots absolute on every platform', () => {
+    // A Windows drive path is absolute; joining it onto the cwd (the old
+    // `root.startsWith('/')` test) corrupted it into `C:\cwd/C:/Users/...`.
+    const windowsRoot = 'C:/Users/shenh'
+    if (platform() === 'win32') {
+      expect(resolveServeConfig({ roots: [windowsRoot] }).roots[0]).toBe(
+        resolve(windowsRoot),
+      )
+    }
+    // POSIX roots stay byte-identical after the platform-aware rewrite.
+    expect(resolveServeConfig({ roots: ['/home/hk'] }).roots[0]).toBe('/home/hk')
+    expect(isAbsolute(resolveServeConfig({ roots: ['/home/hk'] }).roots[0])).toBe(true)
   })
 
   it('recognizes all-interface binds', () => {

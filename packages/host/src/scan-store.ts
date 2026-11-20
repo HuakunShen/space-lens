@@ -1,6 +1,7 @@
 import { lstatSync, realpathSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { randomBytes } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { Worker } from 'node:worker_threads'
@@ -39,7 +40,10 @@ type ScanNode = DirectoryNode & Partial<Pick<LocalScanNode, 'logicalSize' | 'isD
  * and in tests.
  */
 function resolveEnginePath(): string {
-  return createRequire(import.meta.url).resolve('space-lens')
+  // Windows ESM imports need a `file://` URL; a bare `C:\...` path is
+  // rejected with "Received protocol 'c:'". POSIX paths import unchanged
+  // through their URL form.
+  return pathToFileURL(createRequire(import.meta.url).resolve('space-lens')).href
 }
 
 const WORKER_BOOTSTRAP = `

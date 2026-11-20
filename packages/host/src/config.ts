@@ -1,5 +1,6 @@
 import { networkInterfaces } from 'node:os'
 import { isIP } from 'node:net'
+import { isAbsolute, resolve } from 'node:path'
 import { chatEndpoint } from './ai.ts'
 import { validateCidrs } from './cidr.ts'
 import type { TrashPort } from './trash.ts'
@@ -300,7 +301,10 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
   }
 
   const roots = [...(options.roots ?? [process.cwd()])].map((root) =>
-    root.startsWith('/') ? root : `${process.cwd()}/${root}`,
+    // `isAbsolute` is platform-aware: a Windows drive path (`C:/Users/...`)
+    // is absolute too, and joining it onto the cwd would corrupt it into
+    // `C:\cwd/C:/Users/...`. `resolve` keeps POSIX roots byte-identical.
+    isAbsolute(root) ? resolve(root) : resolve(process.cwd(), root),
   )
 
   return {
