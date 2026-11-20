@@ -657,6 +657,24 @@ impl Drop for RemoteHost {
 
 // ------------------------------------------------------------- provisioning
 
+/// Runs the fixed probe script and returns the parsed answer. This is the
+/// diagnostic surface for CLI shells; [`RemoteHost::connect_with`] performs
+/// the same probe as its first stage.
+pub fn probe(target: &SshTarget) -> Result<RemoteProbe, RemoteError> {
+  target.validate()?;
+  let output = run_ssh(target, &ssh_probe(target)?, None, PROBE_TIMEOUT)?;
+  if !output.success {
+    return Err(RemoteError::Probe(format!(
+      "ssh probe failed: {}",
+      tail(&output.stderr)
+    )));
+  }
+  let probe = parse_probe(&String::from_utf8_lossy(&output.stdout))
+    .map_err(|error| RemoteError::Probe(error.to_string()))?;
+  validate_absolute_path(&probe.home, "home")?;
+  Ok(probe)
+}
+
 fn ensure_agent(
   source: AgentSource<'_>,
   target: &SshTarget,

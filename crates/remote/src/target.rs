@@ -90,6 +90,64 @@ impl SshTarget {
       Self::Host { port, .. } => *port,
     }
   }
+
+  /// Parses one command-line destination: an `~/.ssh/config` alias, or
+  /// `user@host[:port]`. A spec containing `@` is always a concrete host
+  /// (OpenSSH matches `Host` blocks before, not instead of, that form), and a
+  /// host without a user is written `user@host` by the caller.
+  pub fn parse(spec: &str) -> Result<Self, RemoteError> {
+    let spec = spec.trim();
+    if let Some((user, rest)) = spec.split_once('@') {
+      let (host, port) = split_host_port(rest)?;
+      let target = Self::Host {
+        user: user.into(),
+        host,
+        port,
+      };
+      target.validate()?;
+      Ok(target)
+    } else {
+      let target = Self::Alias {
+        alias: spec.to_string(),
+      };
+      target.validate()?;
+      Ok(target)
+    }
+  }
+}
+
+/// Splits `host[:port]`, keeping bracketed IPv6 forms intact.
+fn split_host_port(rest: &str) -> Result<(String, Option<u16>), RemoteError> {
+  if let Some(stripped) = rest.strip_prefix('[') {
+    let end = stripped
+      .find(']')
+      .ok_or_else(|| RemoteError::InvalidTarget("unterminated [IPv6] address".into()))?;
+    let host = format!("[{}]", &stripped[..end]);
+    let tail = &stripped[end + 1..];
+    let port = match tail.strip_prefix(':') {
+      Some(port) => Some(
+        port
+          .parse::<u16>()
+          .map_err(|_| RemoteError::InvalidTarget(format!("port is not 1-65535: {port:?}")))?,
+      ),
+      None if tail.is_empty() => None,
+      None => {
+        return Err(RemoteError::InvalidTarget(format!(
+          "unexpected text after [IPv6] address: {tail:?}"
+        )))
+      }
+    };
+    return Ok((host, port));
+  }
+  match rest.rsplit_once(':') {
+    Some((host, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => {
+      let port = port
+        .parse::<u16>()
+        .map_err(|_| RemoteError::InvalidTarget(format!("port is not 1-65535: {port:?}")))?;
+      Ok((host.to_string(), Some(port)))
+    }
+    _ => Ok((rest.to_string(), None)),
+  }
 }
 
 impl fmt::Display for SshTarget {
@@ -220,6 +278,42 @@ mod tests {
       user: user.into(),
       host: value.into(),
       port,
+    }
+  }
+
+  #[test]
+  fn parses_aliases_and_concrete_destinations() {
+    assert_eq!(SshTarget::parse("ufo").unwrap(), alias("ufo"));
+    assert_eq!(
+      SshTarget::parse("hk@192.168.6.250").unwrap(),
+      host("hk", "192.168.6.250", None)
+    );
+    assert_eq!(
+      SshTarget::parse("hk@192.168.6.250:2222").unwrap(),
+      host("hk", "192.168.6.250", Some(2222))
+    );
+    assert_eq!(
+      SshTarget::parse("alice@[::1]:22").unwrap(),
+      host("alice", "[::1]", Some(22))
+    );
+    assert_eq!(
+      SshTarget::parse("alice@[2001:db8::1]").unwrap(),
+      host("alice", "[2001:db8::1]", None)
+    );
+    // Leading and trailing space is dropped like any other CLI argument.
+    assert_eq!(SshTarget::parse("  ufo \n").unwrap(), alias("ufo"));
+  }
+
+  #[test]
+  fn rejects_specs_that_cannot_be_ssh_destinations() {
+    for spec in [
+      "",
+      "-oProxyCommand=yes",
+      "hk@host:notaport",
+      "hk@[::1",
+      "hk@host:0",
+    ] {
+      assert!(SshTarget::parse(spec).is_err(), "accepted {spec:?}");
     }
   }
 

@@ -21,6 +21,7 @@ use std::path::PathBuf;
 mod mcp;
 
 mod memory_cmd;
+mod remote_cmd;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -53,6 +54,9 @@ enum Command {
   AgentInfo(AgentInfoArgs),
   #[command(subcommand)]
   Memory(MemoryCommand),
+  /// One-shot operations against a machine over the user's OpenSSH.
+  #[command(subcommand)]
+  Remote(remote_cmd::RemoteCommand),
   #[cfg(feature = "mcp")]
   Mcp,
 }
@@ -233,6 +237,7 @@ fn main() -> Result<()> {
     Command::StorageUsage(args) => run_storage_usage(args),
     Command::AgentInfo(args) => run_agent_info(args),
     Command::Memory(command) => memory_cmd::run(command),
+    Command::Remote(command) => remote_cmd::run(command),
     #[cfg(feature = "mcp")]
     Command::Mcp => mcp::run(),
   }
@@ -734,7 +739,7 @@ fn print_plan(plan: &RemovalPlan) {
   }
 }
 
-fn format_bytes(bytes: u64) -> String {
+pub(crate) fn format_bytes(bytes: u64) -> String {
   const UNITS: [&str; 7] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"];
 
   if bytes < 1024 {
@@ -752,7 +757,7 @@ fn format_bytes(bytes: u64) -> String {
   format!("{value:.1} {} ({bytes} bytes)", UNITS[unit])
 }
 
-fn print_json<T: serde::Serialize>(value: &T) -> Result<()> {
+pub(crate) fn print_json<T: serde::Serialize>(value: &T) -> Result<()> {
   serde_json::to_writer_pretty(std::io::stdout(), value)?;
   println!();
   Ok(())

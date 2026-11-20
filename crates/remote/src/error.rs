@@ -96,6 +96,31 @@ impl RemoteError {
   }
 }
 
+/// One-line, code-prefixed rendering for CLI shells, which print errors
+/// instead of mapping them onto a UI problem frame.
+pub fn problem_text(error: &RemoteError) -> String {
+  format!("{}: {error}", error.code())
+}
+
+/// The same rendering for a problem JSON the host (or this crate) produced.
+/// Accepts both the bare problem object and its `{"problem": …}` envelope.
+pub fn problem_text_value(problem: &serde_json::Value) -> String {
+  let inner = problem.get("problem").unwrap_or(problem);
+  let code = inner
+    .get("code")
+    .and_then(serde_json::Value::as_str)
+    .unwrap_or("error");
+  let message = inner
+    .get("message")
+    .and_then(serde_json::Value::as_str)
+    .unwrap_or("");
+  if message.is_empty() {
+    code.to_string()
+  } else {
+    format!("{code}: {message}")
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -119,5 +144,27 @@ mod tests {
     }
     assert!(!RemoteError::stage(InstallStage::AgentInstall, "x").retryable());
     assert!(RemoteError::HostUnavailable("x".into()).retryable());
+  }
+
+  #[test]
+  fn problem_text_names_the_code_for_shells() {
+    let error = RemoteError::UnsupportedShell("fish".into());
+    assert!(problem_text(&error).starts_with("unsupported-shell: "));
+    assert!(
+      problem_text(&error).contains("fish"),
+      "problem_text dropped the message"
+    );
+
+    let host_problem = serde_json::json!({
+      "problem": { "code": "Forbidden", "message": "cleanup is disabled", "retryable": false }
+    });
+    assert_eq!(
+      problem_text_value(&host_problem),
+      "Forbidden: cleanup is disabled"
+    );
+    assert_eq!(
+      problem_text_value(&serde_json::json!({ "code": "NotFound", "message": "" })),
+      "NotFound"
+    );
   }
 }
