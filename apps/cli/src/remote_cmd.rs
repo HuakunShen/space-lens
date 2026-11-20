@@ -365,10 +365,11 @@ fn discovery(args: RemoteDiscoveryArgs) -> Result<()> {
 // ------------------------------------------------------------------ cleanup
 
 fn cleanup(args: RemoteCleanupArgs) -> Result<()> {
-  // The policy is granted per command, not per config file: the serve process
-  // only ever sees --allow-cleanup when the operator typed --execute.
+  // Planning is a read-only computation, but the host gates even `cleanup/plan`
+  // behind serve-time `--allow-cleanup`, so this one-shot session grants it.
+  // The destructive half stays behind the operator's `--execute`.
   let policy = RemotePolicy {
-    allow_cleanup: args.execute,
+    allow_cleanup: true,
   };
   let remote = connect(&args.target, policy)?;
   let _guard = StopOnDrop(remote.clone());
@@ -456,7 +457,10 @@ fn cleanup(args: RemoteCleanupArgs) -> Result<()> {
 
 // ---------------------------------------------------------------- plumbing
 
-fn connect(spec: &str, policy: RemotePolicy) -> Result<Arc<RemoteHost>> {
+/// Connects one SSH device with the pinned manifest and the CLI's agent
+/// cache. Shared with the MCP adapter, which keeps sessions alive across
+/// tool calls instead of stopping after one command.
+pub(crate) fn connect(spec: &str, policy: RemotePolicy) -> Result<Arc<RemoteHost>> {
   let target = SshTarget::parse(spec)?;
   let manifest = load_manifest()?;
   let mut progress = |stage: InstallProgress| {
@@ -478,6 +482,27 @@ fn load_manifest() -> Result<AgentManifest> {
     return Ok(AgentManifest::parse(&text)?);
   }
   Ok(AgentManifest::parse(MANIFEST_JSON)?)
+}
+
+/// The ssh-config listing for the devices tool: alias + resolved destination.
+#[cfg_attr(not(feature = "mcp"), allow(dead_code))]
+pub(crate) fn ssh_hosts() -> Vec<(String, String)> {
+  let Ok(home) = std::env::var("HOME") else {
+    return Vec::new();
+  };
+  spacelens_remote::ssh_config::load(&PathBuf::from(home))
+    .hosts
+    .into_iter()
+    .map(|host| {
+      let destination = match (&host.user, &host.host_name, host.port) {
+        (Some(user), Some(name), Some(port)) => format!("{user}@{name}:{port}"),
+        (Some(user), Some(name), None) => format!("{user}@{name}"),
+        (_, _, Some(port)) => format!("{}:{port}", host.alias),
+        (_, _, None) => host.alias.clone(),
+      };
+      (host.alias, destination)
+    })
+    .collect()
 }
 
 /// `$XDG_CACHE_HOME` (or `~/.cache`) `/space-lens/remote-agents/<v>/<triple>`.

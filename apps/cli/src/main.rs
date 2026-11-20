@@ -57,8 +57,18 @@ enum Command {
   /// One-shot operations against a machine over the user's OpenSSH.
   #[command(subcommand)]
   Remote(remote_cmd::RemoteCommand),
+  /// Read-only disk insight over MCP; `--allow-cleanup` adds trash-only cleanup tools.
   #[cfg(feature = "mcp")]
-  Mcp,
+  Mcp(McpArgs),
+}
+
+#[derive(Debug, Args)]
+struct McpArgs {
+  /// Grant the cleanup tools: remote sessions serve with `--allow-cleanup`
+  /// (trash-only) and local cleanup paths actually execute. Without it every
+  /// cleanup tool answers `Forbidden`.
+  #[arg(long)]
+  allow_cleanup: bool,
 }
 
 #[derive(Debug, Args)]
@@ -239,7 +249,7 @@ fn main() -> Result<()> {
     Command::Memory(command) => memory_cmd::run(command),
     Command::Remote(command) => remote_cmd::run(command),
     #[cfg(feature = "mcp")]
-    Command::Mcp => mcp::run(),
+    Command::Mcp(args) => mcp::run(args.allow_cleanup),
   }
 }
 
