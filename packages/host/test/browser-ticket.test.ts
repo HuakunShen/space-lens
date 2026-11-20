@@ -89,13 +89,19 @@ describe('browser tickets', () => {
     const { app, auth } = buildHarness()
     const token = await supervisorSession(app, auth)
 
-    // Before any mint, a browser-origin pairing is refused by the gate.
+    // Before any mint, a browser through the tunnel names the tunnel port in
+    // its Host header and sends its own Origin; both gates refuse it.
+    const TUNNEL_AUTHORITY = '127.0.0.1:12399'
     const refused = await app.request(`http://${HOST}/api/v1/session/exchange`, {
       method: 'POST',
-      headers: { host: HOST, origin: BROWSER_ORIGIN, 'content-type': 'application/json' },
+      headers: {
+        host: TUNNEL_AUTHORITY,
+        origin: BROWSER_ORIGIN,
+        'content-type': 'application/json',
+      },
       body: JSON.stringify({ ticket: auth.mintTicket(BROWSER_ORIGIN, false) }),
     })
-    expect(refused.status).toBe(403)
+    expect(refused.status).toBe(400)
 
     const minted = await app.request(`http://${HOST}/api/v1/session/ticket`, {
       method: 'POST',
@@ -106,10 +112,14 @@ describe('browser tickets', () => {
     const browser = (await minted.json()) as { ticket: string; url: string }
     expect(browser.url).toBe(`${BROWSER_ORIGIN}/?pair=${browser.ticket}`)
 
-    // The browser pairs with its own Origin header.
+    // The browser pairs with its own Origin header and its tunnel Host header.
     const exchanged = await app.request(`http://${HOST}/api/v1/session/exchange`, {
       method: 'POST',
-      headers: { host: HOST, origin: BROWSER_ORIGIN, 'content-type': 'application/json' },
+      headers: {
+        host: TUNNEL_AUTHORITY,
+        origin: BROWSER_ORIGIN,
+        'content-type': 'application/json',
+      },
       body: JSON.stringify({ ticket: browser.ticket }),
     })
     expect(exchanged.status).toBe(200)

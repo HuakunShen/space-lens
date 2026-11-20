@@ -9,9 +9,11 @@
 //! Other platforms: enumeration returns an empty list; the catalog CLI
 //! entries are still measured against the audit home.
 
-use std::path::{Path, PathBuf};
-
+use std::path::Path;
 use super::DiscoveredApp;
+
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 
 /// Read the display name and bundle id for one `.app` bundle.
 ///

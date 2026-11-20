@@ -123,11 +123,18 @@ export function buildApp(deps: HostDeps): HonoApp {
     policy = { authorities, allowedOrigins: [...originsForAuthorities(authorities), ...config.uiOrigins] }
   }
   // A supervisor (the CLI over an SSH tunnel) mints browser tickets for its
-  // own loopback origin; that origin joins the gate only through this call,
-  // never from a request body.
+  // own loopback origin; that origin joins the browser gate only through this
+  // call, never from a request body. The minted origin's authority joins the
+  // Host-header gate at the same time: a browser reaches the host through the
+  // supervisor's local port, so its Host header names that port, not ours.
   app.admitPairingOrigin = (origin: string) => {
-    if (policy.allowedOrigins.includes(origin)) return
-    policy = { ...policy, allowedOrigins: [...policy.allowedOrigins, origin] }
+    const authority = origin.replace(/^http:\/\//, '')
+    if (!policy.authorities.includes(authority)) {
+      policy = { ...policy, authorities: [...policy.authorities, authority] }
+    }
+    if (!policy.allowedOrigins.includes(origin)) {
+      policy = { ...policy, allowedOrigins: [...policy.allowedOrigins, origin] }
+    }
   }
 
   const remoteAddress = (c: { env: unknown; req: { header: (name: string) => string | undefined } }): string | null => {

@@ -610,6 +610,7 @@ fn agent_info() -> AgentInfo {
   let shell = std::env::var("SHELL")
     .ok()
     .filter(|value| !value.is_empty());
+  #[cfg_attr(windows, allow(unused_mut))]
   let mut features = vec![
     "scan.stream",
     "scan.progress",
