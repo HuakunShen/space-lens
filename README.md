@@ -264,6 +264,13 @@ from a picker that lists the remote filesystem one level at a time (no absolute
 paths to type); a remote scan is an ordinary scan, which is what the host needs
 to plan a cleanup against it.
 
+Cleanup proves the trash before it deletes: on Windows the shell silently falls
+back to a *permanent* delete when it cannot recycle (a non-interactive SSH
+session is one such case), so the host first recycles a zero-byte probe beside
+the planned folder and refuses the whole plan when the bin does not take it,
+then confirms every item appeared in the bin. A refused plan leaves the files
+untouched and says why.
+
 ```bash
 spacelens remote list                       # concrete hosts from ~/.ssh/config
 spacelens remote probe ufo                  # os, arch, node, resolved agent

@@ -95,6 +95,11 @@ host refuses permanent deletion by construction.
   token (its OpenSSH default shell is cmd.exe); files travel by scp, because
   a PowerShell child never sees an stdin EOF; Windows remotes serve without
   the memory view (`--allow-memory` is macOS/Linux only).
+- Windows cleanup refuses rather than deleting permanently: the shell's
+  recycle API falls back to a permanent delete when it cannot recycle (a
+  non-interactive SSH session does this) and still returns success, so the
+  host probes the bin with a zero-byte file first and verifies each item
+  landed in it (0.4.1).
 - Before a pinned release exists, run the same pipeline against local
   artifacts: `SPACELENS_REMOTE_AGENT=<binary>`,
   `SPACELENS_REMOTE_HOST_TARBALL=<npm pack tarball>`, and optionally
