@@ -73,6 +73,7 @@
     appScanAvailable as appScanGate,
     memoryAvailable as memoryGate,
     pathRevealAvailable as pathRevealGate,
+    pathListAvailable as pathListGate,
   } from '../lib/gates'
   import MemoryPage from '../lib/memory/MemoryPage.svelte'
   import AiPanel from '../lib/ai/panel.svelte'
@@ -422,6 +423,14 @@
    */
   const pathRevealAvailable = $derived(
     pathRevealGate({ capabilities: workbench.capabilities, service: workbench.service }),
+  )
+  /**
+   * Browsing folders inside the served roots needs the host route and the
+   * request arm; older hosts fall back to typing a path (or the desktop's
+   * native dialog).
+   */
+  const pathListAvailable = $derived(
+    pathListGate({ capabilities: workbench.capabilities, service: workbench.service }),
   )
   const revealLabel = $derived(fileManagerLabel(workbench.capabilities?.host.platform, 'reveal'))
   const openLabel = $derived(fileManagerLabel(workbench.capabilities?.host.platform, 'open'))
@@ -1797,6 +1806,9 @@
         deviceLabel={__SPACLENS_DESKTOP__ ? activeDeviceLabel : undefined}
         onOpenDevices={__SPACLENS_DESKTOP__ ? openDevices : undefined}
         onPickFolder={() => workbench.service?.pickFolder?.() ?? Promise.resolve(null)}
+        onListFolder={pathListAvailable
+          ? (path) => workbench.service!.listFolder!({ path })
+          : undefined}
         chromeInset={headerInset()}
         logo={`${base}/logo-mark.png`}
         initialPath={pickerPath}

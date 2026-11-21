@@ -8,6 +8,7 @@ import {
   gitignoredAvailable,
   appAuditAvailable,
   pathRevealAvailable,
+  pathListAvailable,
 } from '../src/lib/gates.ts'
 import type { Capabilities, ScanStatus } from '@space-lens/contract'
 
@@ -112,6 +113,21 @@ test('opening a scanned path in the file manager needs the host flag and the req
   // service method missing -> hidden
   assert.equal(pathRevealAvailable({ capabilities: revealCapabilities, service: {} }), false)
   assert.equal(pathRevealAvailable({ capabilities: revealCapabilities, service: null }), false)
+})
+
+test('browsing folders for the picker needs the host flag and the request method', () => {
+  const listCapabilities: Capabilities = {
+    ...capabilities(),
+    host: { folderPicker: false, pathList: true },
+  }
+  const listService = { listFolder: () => Promise.reject(new Error('unused')) }
+  assert.equal(pathListAvailable({ capabilities: listCapabilities, service: listService }), true)
+  // An older host without the route keeps the typed path.
+  assert.equal(pathListAvailable({ capabilities: capabilities(), service: listService }), false)
+  assert.equal(pathListAvailable({ capabilities: null, service: listService }), false)
+  // The flag without the request arm (or the reverse) is not enough.
+  assert.equal(pathListAvailable({ capabilities: listCapabilities, service: {} }), false)
+  assert.equal(pathListAvailable({ capabilities: listCapabilities, service: null }), false)
 })
 
 test('the AI advisor needs the desktop proxy or an HTTP host that serves it', () => {

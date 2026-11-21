@@ -16,6 +16,8 @@
   import DriveList from './DriveList.svelte'
   import { Input } from '../ui/input/index'
   import { Progress } from '../ui/progress/index'
+  import PathBrowser from './PathBrowser.svelte'
+  import type { FsListResponse } from '@space-lens/contract'
 
   interface Props {
     targets: ScanTarget[]
@@ -42,6 +44,11 @@
      */
     folderPicker?: boolean
     onPickFolder?: () => Promise<string | null>
+    /**
+     * Lists one folder on the host so the picker can browse instead of
+     * typing. Absent on hosts without the route (older builds).
+     */
+    onListFolder?: (path?: string) => Promise<FsListResponse>
     /** Where the window chrome sits; defaults follow the mode. */
     chromeInset?: string
     /** V3 cached audit report for the Apps section; never auto-fetched. */
@@ -83,6 +90,7 @@
     onForget,
     folderPicker = false,
     onPickFolder = undefined,
+    onListFolder = undefined,
     chromeInset = undefined,
     auditReport = null,
     auditLoading = false,
@@ -174,6 +182,9 @@
   })
   let secondPath = $state('')
   let pickingFolder = $state(false)
+  let browsing = $state(false)
+  /** Folders the host serves: presets only, never a remembered scan. */
+  let browseRoots = $derived(targets.filter((target) => target.source !== 'recent').map((target) => target.path))
   let selectedTarget = $derived(targets.find((target) => target.id === selectedId))
   let startupDisk = $derived(
     targets.some((target) => target.source !== 'recent' && target.path === '/System/Volumes/Data'),
@@ -283,17 +294,49 @@
           }}
         >
           {#if !selectedTarget}
-            <label class={fieldClass}>
-              <span class={labelClass}>Folder</span>
+            <div class={fieldClass}>
+              <label class={labelClass} for="scan-folder-path">Folder</label>
               <div class="flex min-w-0 gap-2">
-                <Input bind:value={customPath} placeholder="/path/to/folder" disabled={busy} class="flex-1" />
-                {#if folderPicker && onPickFolder}
+                <Input
+                  id="scan-folder-path"
+                  bind:value={customPath}
+                  placeholder="/path/to/folder"
+                  disabled={busy}
+                  class="flex-1"
+                />
+                {#if onListFolder}
+                  <Button
+                    variant="outline"
+                    onclick={() => (browsing = !browsing)}
+                    disabled={busy}
+                    aria-expanded={browsing}
+                    aria-controls="scan-folder-browser"
+                    title="Browse the folders this host serves"
+                    ><FolderSearch size={15} />{browsing ? 'Hide' : 'Browse'}</Button
+                  >
+                {:else if folderPicker && onPickFolder}
                   <Button variant="outline" onclick={pickFolder} disabled={busy || pickingFolder}
                     ><FolderOpen size={15} />{pickingFolder ? 'Opening…' : 'Choose…'}</Button
                   >
                 {/if}
               </div>
-            </label>
+            </div>
+            {#if browsing && onListFolder}
+              <div id="scan-folder-browser">
+                <PathBrowser
+                  roots={browseRoots}
+                  value={customPath}
+                  {busy}
+                  listFolder={onListFolder}
+                  onSelect={(path) => {
+                    customPath = path
+                    selectedId = 'custom'
+                    browsing = false
+                  }}
+                  onClose={() => (browsing = false)}
+                />
+              </div>
+            {/if}
             <label class={fieldClass}
               ><span class={labelClass}>Second folder</span><Input
                 bind:value={secondPath}

@@ -31,6 +31,8 @@
   }
 
   let { inspected, active, hoveredId, focusNode, percentageLabel, noun, annotation = null, provenance = null, isAccounting = false }: Props = $props()
+  // "a item" reads wrong; the noun is configurable, so pick the article.
+  let article = $derived(/^[aeiou]/i.test(noun) ? 'an' : 'a')
 </script>
 
 <div
@@ -49,7 +51,7 @@
     <div class="inspector-heading">
       <strong>{inspected?.name ?? 'Explore your storage'}</strong><span>{formatNodeSize(inspected)}{provenance === 'audit-time' ? ' · audit-time' : ''}</span>
     </div>
-    <p class="inspector-path">{inspected?.path ?? `Hover or focus a ${noun} to see its full path.`}</p>
+    <p class="inspector-path">{inspected?.path ?? `Hover or focus ${article} ${noun} to see its full path.`}</p>
     {#if annotation}<p class="inspector-audit">
         {#if annotation.purgeable}<span
             class="inline-block size-1.5 rounded-full bg-primary"

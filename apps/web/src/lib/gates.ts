@@ -75,6 +75,20 @@ export function pathRevealAvailable(input: PathRevealGateInput): boolean {
   return Boolean(input.capabilities?.host.pathReveal && input.service?.revealPath)
 }
 
+export interface PathListGateInput {
+  capabilities: Capabilities | null
+  /** `Pick` of the workbench service; only the list method matters. */
+  service: { listFolder?: unknown } | null
+}
+
+/**
+ * Browsing the host's folders for the scan picker needs both the capability
+ * flag and the request arm; without them the form keeps the typed path.
+ */
+export function pathListAvailable(input: PathListGateInput): boolean {
+  return Boolean(input.capabilities?.host.pathList && input.service?.listFolder)
+}
+
 export interface AppScanGateInput {
   capabilities: Capabilities | null
   /** `Pick` of the workbench service; only the optional startAppScan method matters. */

@@ -141,7 +141,7 @@ export async function startServe(options: ServeOptions): Promise<RunningServer> 
       maxConcurrent: config.maxConcurrentScans,
     },
     cleanup: { plan: config.allowCleanup, execute: config.allowCleanup, mode: config.allowCleanup ? 'trash' : 'none' },
-    host: { folderPicker: false, pathReveal: true, platform: hostPlatform() },
+    host: { folderPicker: false, pathReveal: true, pathList: true, platform: hostPlatform() },
     icloud: 'unavailable',
     ai: config.ai !== null,
     ...(memoryCapability === undefined ? {} : { memory: memoryCapability }),

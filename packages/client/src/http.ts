@@ -17,6 +17,8 @@ import type {
   DiscoveryRequest,
   DiscoveryPage,
   FreeUpCandidates,
+  FsListRequest,
+  FsListResponse,
   Health,
   HistoryRequest,
   MemoryHistory,
@@ -153,6 +155,13 @@ export function createHttpService(options: HttpServiceOptions) {
         method: 'POST',
         body: JSON.stringify(body),
       }),
+    /**
+     * One folder inside the host's roots, for the picker's browse mode. The
+     * host decides containment on the real path; a folder outside the roots
+     * is refused there with a Forbidden problem.
+     */
+    listFolder: (body: FsListRequest) =>
+      request<FsListResponse>('/api/v1/fs/list', { method: 'POST', body: JSON.stringify(body) }),
     plan: (body: CleanupPlanRequest) =>
       request<CleanupPlan>('/api/v1/cleanup/plan', { method: 'POST', body: JSON.stringify(body) }),
     execute: (body: CleanupExecuteRequest) =>

@@ -44,6 +44,11 @@ export const CapabilitiesSchema = z.strictObject({
      * older hosts, which never had the route.
      */
     pathReveal: z.boolean().optional(),
+    /**
+     * One-level folder listing for the scan picker's browse mode. Absent on
+     * older hosts, whose picker falls back to typing a path.
+     */
+    pathList: z.boolean().optional(),
     /** The host's operating system, so the UI can name the file manager. */
     platform: z.enum(HOST_PLATFORMS).optional(),
   }),

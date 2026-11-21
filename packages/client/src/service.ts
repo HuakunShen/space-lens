@@ -28,6 +28,8 @@ import type {
   AuditLog,
   CandidatesRequest,
   FreeUpCandidates,
+  FsListRequest,
+  FsListResponse,
   HistoryRequest,
   MemoryHistory,
   MemorySnapshot,
@@ -84,6 +86,12 @@ export interface WorkbenchService {
    * is refused there. Optional: older hosts predate the route and the request.
    */
   revealPath?(body: { path: string; action?: RevealAction }): Promise<{ revealed: boolean }>
+  /**
+   * Lists one folder inside the host's served roots, for the scan picker's
+   * browse mode. Optional: older hosts predate the route, and the desktop
+   * shell uses its native folder dialog instead.
+   */
+  listFolder?(body: FsListRequest): Promise<FsListResponse>
   /**
    * Opens the host's own folder picker and answers the one absolute path
    * chosen, or `null` for a cancelled dialog. The affordance is gated by the

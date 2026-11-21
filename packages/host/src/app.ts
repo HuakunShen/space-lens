@@ -15,6 +15,7 @@ import {
   CleanupPlanRequestSchema,
   DiscoveryRequestSchema,
   FreeUpCandidatesSchema,
+  FsListRequestSchema,
   HistoryRequestSchema,
   MemoryHistorySchema,
   MemorySnapshotSchema,
@@ -33,6 +34,7 @@ import type {
   AiChatRequest,
   AiConfigView,
   CandidatesRequest,
+  FsListRequest,
   HistoryRequest,
   RevealAction,
   TerminateExecuteRequest,
@@ -54,6 +56,7 @@ import { runAppAuditCli, runAppIconCli } from './app-audit.ts'
 import { forwardChatCompletion, forwardChatStream } from './ai.ts'
 import type { MemoryBridge, MemoryCall } from './memory.ts'
 import { revealPath, type FileManagerTarget } from './reveal.ts'
+import { listFolder } from './fs-list.ts'
 
 export interface HostDeps {
   config: ResolvedServeConfig
@@ -333,6 +336,18 @@ export function buildApp(deps: HostDeps): HonoApp {
   app.get('/api/v1/volumes', async (c) => {
     ensureScope(c.get('session'), 'scan:read')
     return c.json({ volumes: await mountedVolumes() })
+  })
+
+  /**
+   * One folder inside the served roots, for the scan picker's browse mode.
+   * Read only and never recursive: the picker drills one level at a time so
+   * a browser (or a remote workbench over SSH) can choose a folder it cannot
+   * see, instead of typing an absolute path and hoping.
+   */
+  app.post('/api/v1/fs/list', async (c) => {
+    ensureScope(c.get('session'), 'scan:read')
+    const request = await parseBody<FsListRequest>(c, FsListRequestSchema)
+    return c.json(await listFolder(request, config.roots))
   })
 
   app.post('/api/v1/scans', async (c) => {
