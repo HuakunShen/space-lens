@@ -289,6 +289,9 @@ spacelens remote open ufo                   # print a browser URL for the workbe
 `.venv`, a render `out/`, a `pretrained_models/` — and takes several `--path`
 flags. It scans each target's parent, resolves the entry by name, and prints
 the plan; `--execute` moves it to the remote trash (never a permanent delete).
+The host keeps at most 8 scan sessions, so pass targets from at most seven
+different parent folders per invocation; the one-shot commands reconnect for
+the next batch.
 
 With no target and no path, `scan` and `cleanup` become interactive: hosts
 come from a numbered `~/.ssh/config` list, the path prompt shows the home

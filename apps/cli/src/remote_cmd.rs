@@ -571,6 +571,11 @@ fn trash(args: RemoteTrashArgs) -> Result<()> {
   }
 
   let mut plans: Vec<(String, Value)> = Vec::new();
+  let mut plan_lines: Vec<Value> = Vec::new();
+  let mut outcomes: Vec<Value> = Vec::new();
+  let mut freed = 0u64;
+  let mut trashed = 0usize;
+  let mut failures = 0usize;
   for (parent, names) in &by_parent {
     if !args.json {
       eprintln!("scanning {parent} on {} …", args.target);
@@ -602,86 +607,79 @@ fn trash(args: RemoteTrashArgs) -> Result<()> {
       continue;
     }
     let plan = host(remote.cleanup_plan(&scan_id, &node_ids))?;
+    plan_lines.push(plan.clone());
+    // Execute inside the loop: the host keeps at most 8 scan sessions, so a
+    // batch that planned everything first would hit the limit and lose the
+    // work it had already done.
+    if args.execute {
+      let outcome = host(
+        remote.cleanup_execute(plan["planId"].as_str().context("plan returned no planId")?),
+      )?;
+      freed += outcome["bytesFreed"].as_u64().unwrap_or(0);
+      trashed += outcome["trashed"].as_array().map(Vec::len).unwrap_or(0);
+      failures += outcome["failed"].as_array().map(Vec::len).unwrap_or(0);
+      outcomes.push(outcome);
+    }
     plans.push((scan_id, plan));
   }
 
-  if plans.is_empty() {
+  if plan_lines.is_empty() {
     println!("nothing to plan");
     return Ok(());
   }
 
-  if args.json && !args.execute {
-    print_json(&json!({ "plans": plans.iter().map(|(_, plan)| plan.clone()).collect::<Vec<_>>() }))?;
+  let total_entries: usize = plan_lines
+    .iter()
+    .map(|plan| plan["entries"].as_array().map(Vec::len).unwrap_or(0))
+    .sum();
+  let total_bytes: u64 = plan_lines
+    .iter()
+    .map(|plan| plan["totalSize"].as_u64().unwrap_or(0))
+    .sum();
+
+  if args.json {
+    print_json(&json!({
+      "plans": plan_lines,
+      "outcomes": outcomes,
+      "freed": freed,
+      "trashed": trashed,
+      "failed": failures,
+    }))?;
     return Ok(());
   }
 
-  let mut total_entries = 0usize;
-  let mut total_bytes = 0u64;
-  for (_, plan) in &plans {
-    total_entries += plan["entries"].as_array().map(Vec::len).unwrap_or(0);
-    total_bytes += plan["totalSize"].as_u64().unwrap_or(0);
-  }
-  if !args.json {
-    for (_, plan) in &plans {
+  for plan in &plan_lines {
+    println!(
+      "plan {} — {} entries, {}",
+      plan["planId"].as_str().unwrap_or("?"),
+      plan["entries"].as_array().map(Vec::len).unwrap_or(0),
+      format_bytes(plan["totalSize"].as_u64().unwrap_or(0)),
+    );
+    for entry in plan["entries"].as_array().into_iter().flatten() {
       println!(
-        "plan {} — {} entries, {}",
-        plan["planId"].as_str().unwrap_or("?"),
-        plan["entries"].as_array().map(Vec::len).unwrap_or(0),
-        format_bytes(plan["totalSize"].as_u64().unwrap_or(0)),
+        "{:>10}  {}",
+        format_bytes(entry["size"].as_u64().unwrap_or(0)),
+        entry["path"].as_str().unwrap_or("?")
       );
-      for entry in plan["entries"].as_array().into_iter().flatten() {
-        println!(
-          "{:>10}  {}",
-          format_bytes(entry["size"].as_u64().unwrap_or(0)),
-          entry["path"].as_str().unwrap_or("?")
-        );
-      }
     }
   }
 
   if !args.execute {
-    if !args.json {
-      println!(
-        "dry run: {total_entries} entries, {}; pass --execute to move them to the remote trash.",
-        format_bytes(total_bytes)
-      );
-    }
+    println!(
+      "dry run: {total_entries} entries, {}; pass --execute to move them to the remote trash.",
+      format_bytes(total_bytes)
+    );
     return Ok(());
   }
-
-  let mut outcomes = Vec::new();
-  let mut freed = 0u64;
-  let mut failures = 0usize;
-  for (_, plan) in &plans {
-    let outcome =
-      host(remote.cleanup_execute(plan["planId"].as_str().context("plan returned no planId")?))?;
-    freed += outcome["bytesFreed"].as_u64().unwrap_or(0);
-    for failure in outcome["failed"].as_array().into_iter().flatten() {
-      failures += 1;
-      eprintln!(
-        "failed: {}",
-        failure["message"].as_str().unwrap_or(failure.to_string().as_str())
-      );
+  println!(
+    "trashed {trashed} paths, freed {}{}",
+    format_bytes(freed),
+    if failures == 0 {
+      String::new()
+    } else {
+      format!(" ({failures} failed)")
     }
-    outcomes.push(outcome);
-  }
-  if args.json {
-    print_json(&json!({ "plans": plans.iter().map(|(_, plan)| plan.clone()).collect::<Vec<_>>(), "outcomes": outcomes }))?;
-  } else {
-    println!(
-      "trashed {} paths, freed {}{}",
-      outcomes
-        .iter()
-        .map(|outcome| outcome["trashed"].as_array().map(Vec::len).unwrap_or(0))
-        .sum::<usize>(),
-      format_bytes(freed),
-      if failures == 0 {
-        String::new()
-      } else {
-        format!(" ({failures} failed)")
-      }
-    );
-  }
+  );
   Ok(())
 }
 
