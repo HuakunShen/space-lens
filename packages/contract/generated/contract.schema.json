@@ -116,6 +116,9 @@
             "pathReveal": {
               "type": "boolean"
             },
+            "pathList": {
+              "type": "boolean"
+            },
             "platform": {
               "type": "string",
               "enum": [
@@ -3041,6 +3044,40 @@
       },
       "required": [
         "ticket"
+      ],
+      "additionalProperties": false
+    },
+    "BrowserTicketRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "origin": {
+          "type": "string",
+          "pattern": "^http:\\/\\/(127\\.0\\.0\\.1|localhost):[1-9][0-9]{0,4}$"
+        }
+      },
+      "required": [
+        "origin"
+      ],
+      "additionalProperties": false
+    },
+    "BrowserTicket": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "ticket": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 512
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "ticket",
+        "url"
       ],
       "additionalProperties": false
     },
