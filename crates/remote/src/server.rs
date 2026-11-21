@@ -272,7 +272,9 @@ pub fn scp_transfer(
   target.validate()?;
   shell.validate_path(remote_path, "transfer path")?;
   if local_path.is_empty() || local_path.contains('\0') {
-    return Err(RemoteError::InvalidPath("local transfer path is empty".into()));
+    return Err(RemoteError::InvalidPath(
+      "local transfer path is empty".into(),
+    ));
   }
   let mut args: Vec<String> = [
     "-o",
@@ -859,7 +861,9 @@ mod tests {
     .unwrap();
     assert_eq!(command.program, "scp");
     assert!(command.args.contains(&"BatchMode=yes".to_string()));
-    assert!(command.args.contains(&"StrictHostKeyChecking=yes".to_string()));
+    assert!(command
+      .args
+      .contains(&"StrictHostKeyChecking=yes".to_string()));
     // A concrete port travels as scp's -P, never interpolated into the target.
     let port = command.args.iter().position(|arg| arg == "-P").unwrap();
     assert_eq!(command.args[port + 1], "2222");
