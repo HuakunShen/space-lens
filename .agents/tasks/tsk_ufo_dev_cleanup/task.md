@@ -12,33 +12,38 @@ progress:
   percent: 100
 links: []
 created_at: 2026-11-21T07:41:10Z
-updated_at: 2026-11-21T07:41:10Z
+updated_at: 2026-11-21T12:59:57Z
 archived_at: null
 deleted_at: null
 x_activity_receipts:
   - op_id: create-ufo-cleanup-001
     request_hash: sha256:fe7397adc2117352dc5ecd02c103e25c019c91ee3cc44fe11158258c43ecdc53
     applied_at: 2026-11-21T07:41:10Z
+  - op_id: update-ufo-cleanup-002
+    request_hash: sha256:f69256329894708029e17886cff7e0fe4e473649514cf17281fce4dbaa0f96bf
+    applied_at: 2026-11-21T12:59:57Z
+checkpoint:
+  summary: Trash emptied; CrossCopy and videos removed with full-history bundles as backups; ~/dev 169.7 GiB → ~31–38 GiB; disk 457 GB free (from 367). Only root-owned stragglers (1.6 GiB) need the owner's sudo.
+  reported_at: 2026-11-21T21:10:00Z
+  reporter: agent
 ---
 ## Scope
-Owner asked for an analysis of ufo's `~/dev` (182 GB / 5.05M files) and then approved tier A, then B+C, for trash-only cleanup.
+Owner asked for an analysis of ufo's `~/dev` (182 GB / 5.05M files), then approved tier A, then B+C, then emptying the trash and removing `CrossCopy` (and earlier `videos`).
 
-## Executed (all into `~/.local/share/Trash`, recoverable)
-- **A**: 13 Python environments (`.venv`/`.venvs`, incl. `videos/.venvs` 22.2 GiB, `quant/.../ml_env/py312_torch` 7.1) → 51.4 GiB; 467 `node_modules` in 67 batches → 27.6 GiB.
-- **B**: `videos/projects/*/{out,audio}`, `polyquant-v2/research/*/cache`, `quant/output/research/*` (42 dirs) → part of 42.05 GiB.
-- **C**: `others/CosyVoice/pretrained_models` 13.6, `2048AI/models` 1.2, `ts2vec/datasets` 0.8.
+## Executed
+- **A**: 13 Python environments + 467 `node_modules` (67 batches) → 51.4 + 27.6 GiB.
+- **B+C**: `videos/projects/*/{out,audio}`, `polyquant-v2/research/*/cache`, `quant/output/research/*`, CosyVoice models, 2048AI models, ts2vec datasets → 42.05 GiB.
+- **Trash emptied** (`rm -rf ~/.local/share/Trash/{files,info}/*`) → +61 GiB free.
+- **CrossCopy removed** after `git bundle create --all` (38 MB, verified complete; copy at `/tmp/crosscopy-backup-2026-11-21.bundle` locally and `~/crosscopy-backup-2026-11-21.bundle` on ufo) and saving the one dirty file (`pnpm-lock.yaml`). Its sibling worktree `CrossCopy-tui-enrollment-dev` (which pointed into the deleted `.git`) was re-initialised as a standalone repo so its 8k files stay usable.
+- **videos removed** after `git bundle create --all` (4.48 GB, `~/videos-backup-2026-11-21.bundle`) and copying the two untracked `script.md` dirs to `~/videos-untracked-backup/`.
 
 ## Result
 ```
-~/dev   182,208,434,176 B → 63,694,852,817 B   (169.7 GiB → 59.3 GiB, −110.4 GiB)
-trash   114,266,687,442 B in 542 entries (each with .trashinfo)
+~/dev         182,208,434,176 B  →  33,314,711,244 B   (169.7 GiB → 31.0 GiB)
+disk free     367 GB  →  457 GB
 ```
-Space returns when the trash is emptied (`rm -rf ~/.local/share/Trash/{files,info}/*`).
 
-## Left alone
-- `videos` and `CrossCopy` as whole repositories: **videos has 30 unpushed commits + 2 dirty paths**, **CrossCopy has 95 unpushed commits** and three worktrees. Deleting them would destroy that history; awaiting an owner decision (push first, artifacts-only, or delete anyway).
-- `polyquant-v2/data` (market data + `polymarket.db`), `videos/.git`, sources.
-- 14 nested `node_modules` (~0.3 GB) inside worktrees/vendored packages.
-
-## Tool note
-`spacelens remote trash` (new, unreleased) does the work; the host keeps 8 scan sessions, so at most seven parent folders per invocation.
+## Left behind
+- `~/dev/CrossCopy` 1.6 GiB of **root-owned** files (docker/swift build caches) — `rm` is refused; needs `sudo rm -rf ~/dev/CrossCopy`. Same for `~/dev/multi-network-interface-proxy/logs`.
+- `polyquant-v2` 13 GiB (market data + `polymarket.db`), `others` 4.4, `CrossCopy-crossflow` 3.7, `data-intensive-app-tts` 1.3 — sources/data, untouched.
+- Backups: `~/videos-backup-2026-11-21.bundle`, `~/crosscopy-backup-2026-11-21.bundle`, `~/crosscopy-tui-pnpm-lock.yaml.bak`, `~/videos-untracked-backup/`.
