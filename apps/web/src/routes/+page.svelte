@@ -948,20 +948,31 @@
   }
 
   /**
-   * Opens a session: the printed pairing ticket when there is one, otherwise a
-   * development-only session from a host started with `--dev-open-session`.
+   * Opens a session, in the order that costs the operator the least:
    *
-   * The dev route is a convenience, not a fallback that hides a broken host: it
-   * is only tried when there is no ticket to spend, and a host without the flag
-   * answers Unavailable, so the pairing form stays the answer for a normal
-   * host.
+   * 1. the printed pairing ticket, when the URL carries one;
+   * 2. a local session — a loopback browser on the machine that serves the
+   *    page needs no code at all (hosts hosted for others answer Unavailable);
+   * 3. `--dev-open-session`, kept for hosts that only enable the dev route;
+   * 4. the pairing form, which is what a remote or hosted host expects.
    */
   async function openSession(
-    service: { exchange: (ticket: string, password?: string) => Promise<Session>; devSession?: () => Promise<Session> },
+    service: {
+      exchange: (ticket: string, password?: string) => Promise<Session>
+      localSession?: () => Promise<Session>
+      devSession?: () => Promise<Session>
+    },
     ticket: string | null,
   ): Promise<Session> {
     if (ticket !== null) {
       return service.exchange(ticket, hosted && passwordInput !== '' ? passwordInput : undefined)
+    }
+    if (service.localSession !== undefined) {
+      try {
+        return await service.localSession()
+      } catch {
+        // A hosted or wider-bound host refuses; fall through.
+      }
     }
     if (service.devSession !== undefined) {
       try {
@@ -974,24 +985,32 @@
   }
 
   /**
-   * Pairs a fresh browser against a development host. The token is saved before
-   * `connect()` runs, so connect sees a stored token and skips the exchange.
-   * Anything else (no flag, a remote host, an old build) is left alone and the
-   * pairing form stays up.
+   * Opens a session without a ticket, for the machine's own browser: the local
+   * route first, then the development route older hosts carry. Anything else
+   * (a hosted host, a remote host, an old build) is left alone and the pairing
+   * form stays up.
    */
-  async function openDevSession(): Promise<void> {
+  async function openLocalSession(): Promise<void> {
     const resolved = resolveBaseUrl(explicitUrlInput || null)
     const [{ createHttpService }] = await Promise.all([import('@space-lens/client')])
     const service = createHttpService({ baseUrl: resolved.url, getToken: loadToken })
-    if (service.devSession === undefined) return
-    try {
-      const session = await service.devSession()
-      saveToken(session.token)
-    } catch {
-      return
+    let session: Session | null = null
+    for (const attempt of [service.localSession, service.devSession]) {
+      if (attempt === undefined) continue
+      try {
+        session = await attempt()
+        break
+      } catch {
+        // Try the next route; both refusing means the pairing form is next.
+      }
     }
+    if (session === null) return
+    saveToken(session.token)
     await connect()
   }
+
+  /** One silent re-mint per page load: an expired token is not a pairing prompt. */
+  let localSessionRetried = false
 
   async function connect(): Promise<void> {
     workbench.phase = 'connecting'
@@ -1028,6 +1047,13 @@
       if (!new URLSearchParams(window.location.search).has('autoscan')) await restoreActiveScan()
     } catch (error) {
       clearToken()
+      // A stale token (the host restarted, or the session TTL ran out) is not
+      // a reason to send a local operator to the pairing form.
+      if (!localSessionRetried && ticketFromLocation() === null && ticketInput === '') {
+        localSessionRetried = true
+        await openLocalSession()
+        return
+      }
       workbench.phase = 'failed'
       workbench.connectMessage = describeError(error)
     }
@@ -1674,10 +1700,10 @@
         return startScan(workbench.targets.map((target) => target.path))
       })
     } else {
-      // A host started with `--dev-open-session` opens a session without a
-      // ticket; a normal host answers Unavailable and this leaves the pairing
-      // form untouched. Developers should not copy a ticket on every reload.
-      void openDevSession().then(() => {
+      // A loopback host opens a session without a ticket (the machine's own
+      // browser); a hosted or remote host answers Unavailable and this leaves
+      // the pairing form untouched.
+      void openLocalSession().then(() => {
         if (autoscan === null || workbench.phase !== 'ready') return
         return startScan(workbench.targets.map((target) => target.path))
       })

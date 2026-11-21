@@ -19,6 +19,7 @@ import type {
   ScanSession,
   ScanStartRequest,
   ScanStatus,
+  Session,
   TreeSliceRequest,
   ChildrenPage,
   CleanupPlan,
@@ -62,6 +63,12 @@ export interface WorkbenchService {
    * hosts (and the HTTP host this round) predate the submit arm. */
   startAppScan?(body: AppScanStartRequest): Promise<ScanSession>
   listScans?(): Promise<ScanStatus[]>
+  /**
+   * Opens a session without a ticket from a loopback browser (the machine's
+   * own page). Optional: hosts that are hosted or bound wider do not offer
+   * it, and their page falls back to the pairing form.
+   */
+  localSession?(): Promise<Session>
   scanStatus(scanId: string): Promise<ScanStatus>
   cancelScan(scanId: string): Promise<ScanStatus>
   treeSlice(body: TreeSliceRequest): Promise<TreeSlice>

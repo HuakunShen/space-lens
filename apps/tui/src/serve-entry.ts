@@ -24,6 +24,8 @@ const FLAG_ALIASES: Record<string, string> = {
   'allow-memory': 'allowMemory',
   'allow-process-control': 'allowProcessControl',
   'dev-open-session': 'devOpenSession',
+  'local-session': 'localSession',
+  'no-local-session': 'noLocalSession',
   'ui-origin': 'uiOrigins',
   'ticket-ttl': 'ticketTtlSeconds',
   root: 'roots',
@@ -105,6 +107,12 @@ export function parseServeArgs(argv: readonly string[]): ParsedServeArgs {
       case 'noOpen':
         parsed.open = false
         break
+      case 'localSession':
+        parsed.localSession = true
+        break
+      case 'noLocalSession':
+        parsed.localSession = false
+        break
     }
   }
   return parsed
@@ -148,9 +156,11 @@ Memory view (optional):
                       allow quitting processes from a loopback UI; requires --allow-memory and a
                       loopback bind with loopback-only --ui-origin values
 
-Development:
-  --dev-open-session  let a loopback client open a session without the pairing ticket
-                      (POST /api/v1/session/dev); loopback bind only, never for a shared host
+Sessions:
+  (default)           this machine's own browser opens a session without a pairing ticket
+                      (POST /api/v1/session/local), so a reload or a second tab just works
+  --no-local-session  require the pairing ticket for every browser, even on loopback
+  --dev-open-session  legacy dev route (POST /api/v1/session/dev); loopback bind only
 
 AI advisor (optional):
   --ai-base-url <url> OpenAI-compatible base URL (https; http only for loopback). Enables the advisor.
@@ -232,9 +242,11 @@ export async function runServe(argv: readonly string[]): Promise<void> {
               ? 'read-only'
               : 'disabled'
         }`,
-        server.config.devOpenSession
-          ? 'dev sessions: open (loopback clients need no pairing ticket)'
-          : '',
+        server.config.localSession
+          ? `open this machine without a ticket: ${server.baseUrl}/`
+          : server.config.devOpenSession
+            ? 'dev sessions: open (loopback clients need no pairing ticket)'
+            : '',
         args.ai ? `ai advisor: ${args.ai.model} at ${args.ai.baseUrl}` : '',
         args.uiOrigins?.length ? `cross-origin UIs: ${args.uiOrigins.join(', ')}` : '',
         `press p + Enter to reprint the pairing URL, Ctrl+C to stop`,

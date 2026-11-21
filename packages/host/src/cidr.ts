@@ -23,6 +23,13 @@ export function normalizeRemoteAddress(address: string): string {
   return address
 }
 
+/** True for the loopback interface in either family (v4-mapped v6 included). */
+export function isLoopbackAddress(address: string): boolean {
+  const normalized = normalizeRemoteAddress(address)
+  if (normalized === '::1') return true
+  return normalized.startsWith('127.')
+}
+
 export interface ClientAllowlist {
   check(remoteAddress: string): boolean
 }

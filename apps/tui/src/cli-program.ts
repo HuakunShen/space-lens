@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
 import { Args, Command, Options } from '@effect/cli'
 import * as NodeContext from '@effect/platform-node/NodeContext'
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
@@ -7,7 +10,22 @@ import { normalizeCliConfig, SORT_MODES } from './cli-config.js'
 import type { CliOptions } from './model.js'
 import { runTui } from './ui.js'
 
-const APP_VERSION = '0.2.8'
+/**
+ * The published package sits beside `dist/`, so the manifest is the one place
+ * the version lives — a hardcoded string went stale (0.2.8 while the package
+ * said 0.4.x).
+ */
+function packageVersion(): string {
+  try {
+    const manifest = fileURLToPath(new URL('../package.json', import.meta.url))
+    const parsed = JSON.parse(readFileSync(manifest, 'utf8')) as { version?: unknown }
+    return typeof parsed.version === 'string' ? parsed.version : '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
+
+const APP_VERSION = packageVersion()
 
 const command = Command.make(
   'spacelens',

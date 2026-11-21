@@ -126,6 +126,9 @@ export function createHttpService(options: HttpServiceOptions) {
     // started with `--dev-open-session`. Hosts without the flag answer
     // Unavailable, and the caller falls back to the pairing form.
     devSession: () => request<Session>('/api/v1/session/dev', { method: 'POST', body: '{}' }),
+    // The machine's own browser: a loopback page opens a session without a
+    // ticket, so a reload never asks for the pairing code again.
+    localSession: () => request<Session>('/api/v1/session/local', { method: 'POST', body: '{}' }),
     capabilities: () => request<Capabilities>('/api/v1/capabilities'),
     roots: () => request<RootsResponse>('/api/v1/roots'),
     volumes: () => request<VolumesResponse>('/api/v1/volumes'),

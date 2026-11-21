@@ -44,7 +44,7 @@ import type { SessionRecord } from './auth.ts'
 import type { AuthService } from './auth.ts'
 import type { AssetHandler } from './assets.ts'
 import type { ClientAllowlist } from './cidr.ts'
-import { normalizeRemoteAddress } from './cidr.ts'
+import { isLoopbackAddress, normalizeRemoteAddress } from './cidr.ts'
 import type { EventRing } from './events.ts'
 import { ProblemError, Problems } from './problems.ts'
 import { authoritiesFor, checkOrigin, originsForAuthorities, type OriginPolicy } from './origins.ts'
@@ -244,6 +244,33 @@ export function buildApp(deps: HostDeps): HonoApp {
       throw Problems.unavailable(
         'dev sessions are off; pair with the ticket printed by spacelens serve',
       )
+    }
+    const minted = auth.mintSession()
+    const session: Session = {
+      token: minted.token,
+      sessionId: minted.sessionId,
+      expiresAt: new Date(minted.expiresAtMs).toISOString(),
+      scopes: [...minted.scopes] as Session['scopes'],
+    }
+    events.publish({ kind: 'session', expiresAt: session.expiresAt })
+    return c.json(session)
+  })
+
+  // 3c. Local browser session: a page served by this host from the loopback
+  // interface is already on the machine that owns the data, so it can open a
+  // session without a copied ticket. This is what makes a reload (or a new
+  // tab) work at the same URL; the ticket stays the answer for anything that
+  // is not local. Off when the host is hosted (password) or bound wider;
+  // `--no-local-session` turns it off anywhere.
+  app.post('/api/v1/session/local', (c) => {
+    if (!config.localSession) {
+      throw Problems.unavailable(
+        'local sessions are off; pair with the ticket printed by spacelens serve',
+      )
+    }
+    const remote = remoteAddress(c)
+    if (remote === null || !isLoopbackAddress(remote)) {
+      throw Problems.forbidden('a ticket-free session is loopback-only')
     }
     const minted = auth.mintSession()
     const session: Session = {

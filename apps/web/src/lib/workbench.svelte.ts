@@ -58,15 +58,20 @@ export function stripTicketFromLocation(): void {
   if (changed) window.history.replaceState(null, '', url.toString())
 }
 
+// localStorage, not sessionStorage: a second tab or a reload must reach the
+// same session instead of demanding a fresh pairing ticket. The token is bound
+// to this origin and expires with the host's session TTL anyway.
 export function loadToken(): string | null {
-  return window.sessionStorage.getItem(TOKEN_KEY)
+  return window.localStorage.getItem(TOKEN_KEY) ?? window.sessionStorage.getItem(TOKEN_KEY)
 }
 
 export function saveToken(token: string): void {
-  window.sessionStorage.setItem(TOKEN_KEY, token)
+  window.localStorage.setItem(TOKEN_KEY, token)
+  window.sessionStorage.removeItem(TOKEN_KEY)
 }
 
 export function clearToken(): void {
+  window.localStorage.removeItem(TOKEN_KEY)
   window.sessionStorage.removeItem(TOKEN_KEY)
 }
 

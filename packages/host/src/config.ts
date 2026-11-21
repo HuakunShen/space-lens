@@ -68,6 +68,14 @@ export interface ServeOptions {
    * `resolveServeConfig` refuses anything else with a {@link ConfigError}.
    */
   devOpenSession?: boolean
+  /**
+   * Let the machine's own browser open a session without a ticket
+   * (`POST /api/v1/session/local`). Defaults to on for a loopback listener
+   * with no hosted password: the pairing code then only matters for other
+   * machines, and a reload never needs a copied ticket. `--no-local-session`
+   * turns it off.
+   */
+  localSession?: boolean
   /** Exact origins allowed to talk to this API cross-origin (Cloudflare PWA). */
   uiOrigins?: readonly string[]
   ticketTtlSeconds?: number
@@ -128,6 +136,8 @@ export interface ResolvedServeConfig {
   allowProcessControl: boolean
   /** Development only: loopback clients may open a session without a ticket. */
   devOpenSession: boolean
+  /** Loopback browsers may open a session without a ticket (default on). */
+  localSession: boolean
   uiOrigins: string[]
   ticketTtlMs: number
   sessionTtlMs: number
@@ -293,6 +303,16 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
   // development convenience, so it is refused on anything but a loopback
   // listener — a ticket-less session on a LAN bind would be an open door.
   const devOpenSession = options.devOpenSession ?? false
+  // The local-session route is the same trust decision as `devOpenSession`,
+  // but it is the default for a loopback listener: the browser is already on
+  // this machine. Hosting (a password, or a non-loopback bind) turns it off.
+  const localSession = options.localSession ?? (bind.loopback && hostedPassword === null)
+  if (localSession && !bind.loopback) {
+    throw new ConfigError(
+      'local sessions require a loopback bind; a session without a pairing ticket must never ' +
+        'be reachable from another machine',
+    )
+  }
   if (devOpenSession && !bind.loopback) {
     throw new ConfigError(
       '--dev-open-session requires a loopback bind; a session without a pairing ticket must never ' +
@@ -317,6 +337,7 @@ export function resolveServeConfig(options: ServeOptions): ResolvedServeConfig {
     allowMemory,
     allowProcessControl,
     devOpenSession,
+    localSession,
     uiOrigins,
     ticketTtlMs: (options.ticketTtlSeconds ?? 60) * 1000,
     sessionTtlMs: (options.sessionTtlSeconds ?? 8 * 60 * 60) * 1000,

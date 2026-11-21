@@ -521,9 +521,14 @@ fn open(spec: &str) -> Result<()> {
     Some(url) => url.to_string(),
     None => format!("{origin}/?pair={}", text(&ticket, "ticket")?),
   };
-  println!("Open this URL in a browser (the ticket is single-use):");
+  // The remote host serves local sessions (loopback bind, no password), so
+  // the plain URL opens and reopens without a pairing code: the ticket is only
+  // what admits the tunnel's origin, and a fallback if a host refuses.
+  println!("Open this URL in a browser — no pairing code needed:");
   println!();
-  println!("  {url}");
+  println!("  {origin}/");
+  println!();
+  println!("One-time ticket, if this host still asks for one:\n\n  {url}");
   println!();
   println!(
     "This window holds the SSH tunnel. Close it (Ctrl-C) when done; the\n\
