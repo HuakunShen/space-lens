@@ -555,3 +555,30 @@ describe('session contract', () => {
     expect(SessionSchema.parse(session).scopes).toContain('ai:chat')
   })
 })
+
+describe('long paths', () => {
+it('parses a path longer than PATH_MAX (deep node_modules trees)', async () => {
+  const { LocalScanMessageSchema } = await import('../src/local-scan.ts')
+  // 4184 characters is real on this machine (`~/dev/tauri-plugin-libsql/...`);
+  // 4096 is the syscall limit, not the longest legal path.
+  const longPath = `/home/alice/dev/${'node_modules/self/'.repeat(250)}pkg/index.js`
+  expect(longPath.length).toBeGreaterThan(4096)
+  const message = {
+    type: 'node' as const,
+    node: {
+      name: 'index.js',
+      path: longPath,
+      size: 1,
+      depth: 40,
+      ignored: false,
+      collapsed: false,
+      logicalSize: 1,
+      isDirectory: false,
+      scanState: 'complete' as const,
+      skipReason: null,
+      children: [],
+    },
+  }
+  expect(LocalScanMessageSchema.safeParse(message).success).toBe(true)
+})
+})

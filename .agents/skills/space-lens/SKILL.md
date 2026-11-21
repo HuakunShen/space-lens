@@ -46,7 +46,15 @@ spacelens remote cleanup ufo --path ~/dev --execute  # move remote caches to tra
 spacelens remote open ufo                  # browser URL for the full workbench
 spacelens mcp                              # read-only MCP stdio server
 spacelens mcp --allow-cleanup              # …with local + remote cleanup unlocked
+spacelens skills install                   # install THIS skill for your agents (npx skills)
+spacelens skills update                    # pull the newest version from the repo
 ```
+
+- `spacelens skills …` wraps `npx -y skills@latest` with the repository and
+  skill name filled in (`install`, `update`, `list`, `remove`). It installs
+  user-level by default; `--project` installs into the current repository, and
+  `--agent <name>` (repeatable) picks the agents when one of them cannot
+  install globally.
 
 - MCP ships in the prebuilt brew/binstall binaries (source builds need
   `--features mcp`); MCP clients use command `spacelens`, args `["mcp"]`.

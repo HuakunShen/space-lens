@@ -199,7 +199,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 4096
+            "maxLength": 16384
           }
         },
         "ignoreHidden": {
@@ -375,7 +375,7 @@
                   "path": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 4096
+                    "maxLength": 16384
                   },
                   "reason": {
                     "type": "string"
@@ -422,7 +422,7 @@
               "path": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4096
+                "maxLength": 16384
               },
               "totalBytes": {
                 "type": "integer",
@@ -703,7 +703,7 @@
                   "path": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 4096
+                    "maxLength": 16384
                   },
                   "reason": {
                     "type": "string"
@@ -750,7 +750,7 @@
               "path": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4096
+                "maxLength": 16384
               },
               "totalBytes": {
                 "type": "integer",
@@ -798,7 +798,7 @@
             "path": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 16384
             },
             "size": {
               "type": "integer",
@@ -872,7 +872,7 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 16384
         },
         "size": {
           "type": "integer",
@@ -944,7 +944,7 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 16384
         },
         "size": {
           "type": "integer",
@@ -1017,7 +1017,7 @@
             {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 16384
             },
             {
               "type": "null"
@@ -1091,7 +1091,7 @@
                 "path": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 4096
+                  "maxLength": 16384
                 },
                 "size": {
                   "type": "integer",
@@ -1177,7 +1177,7 @@
                     {
                       "type": "string",
                       "minLength": 1,
-                      "maxLength": 4096
+                      "maxLength": 16384
                     },
                     {
                       "type": "null"
@@ -1328,7 +1328,7 @@
                           "path": {
                             "type": "string",
                             "minLength": 1,
-                            "maxLength": 4096
+                            "maxLength": 16384
                           },
                           "reason": {
                             "type": "string"
@@ -1375,7 +1375,7 @@
                       "path": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 4096
+                        "maxLength": 16384
                       },
                       "totalBytes": {
                         "type": "integer",
@@ -1432,7 +1432,7 @@
             "path": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 16384
             },
             "size": {
               "type": "integer",
@@ -1570,7 +1570,7 @@
               "path": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4096
+                "maxLength": 16384
               },
               "reason": {
                 "type": "string"
@@ -1616,7 +1616,7 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 4096
+          "maxLength": 16384
         },
         "totalBytes": {
           "type": "integer",
@@ -1700,7 +1700,7 @@
             "path": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 16384
             },
             "size": {
               "type": "integer",
@@ -1778,7 +1778,7 @@
               "path": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4096
+                "maxLength": 16384
               },
               "size": {
                 "type": "integer",
@@ -1895,7 +1895,7 @@
             "path": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 16384
             },
             "size": {
               "type": "integer",
@@ -2049,7 +2049,7 @@
             "path": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 4096
+              "maxLength": 16384
             },
             "size": {
               "type": "integer",
@@ -2173,7 +2173,7 @@
                   "path": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": 4096
+                    "maxLength": 16384
                   },
                   "size": {
                     "type": "integer",
@@ -2681,7 +2681,7 @@
               "path": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4096
+                "maxLength": 16384
               },
               "size": {
                 "type": "integer",
@@ -2795,7 +2795,7 @@
               "path": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4096
+                "maxLength": 16384
               },
               "size": {
                 "type": "integer",
@@ -2823,7 +2823,7 @@
               "path": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4096
+                "maxLength": 16384
               },
               "code": {
                 "type": "string",
@@ -2883,7 +2883,7 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 4096
+            "maxLength": 16384
           }
         }
       },
@@ -2924,7 +2924,7 @@
               "path": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4096
+                "maxLength": 16384
               },
               "size": {
                 "type": "integer",
@@ -3288,7 +3288,7 @@
                               "path": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 4096
+                                "maxLength": 16384
                               },
                               "reason": {
                                 "type": "string"
@@ -3335,7 +3335,7 @@
                           "path": {
                             "type": "string",
                             "minLength": 1,
-                            "maxLength": 4096
+                            "maxLength": 16384
                           },
                           "totalBytes": {
                             "type": "integer",
@@ -3687,7 +3687,7 @@
                               "path": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 4096
+                                "maxLength": 16384
                               },
                               "reason": {
                                 "type": "string"
@@ -3734,7 +3734,7 @@
                           "path": {
                             "type": "string",
                             "minLength": 1,
-                            "maxLength": 4096
+                            "maxLength": 16384
                           },
                           "totalBytes": {
                             "type": "integer",

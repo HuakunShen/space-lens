@@ -325,6 +325,26 @@ which move remote nodes to the remote machine's trash — never a permanent
 delete. The desktop embeds the same contract; an MCP session holds its SSH
 connections for its lifetime and reaps every remote server on exit.
 
+## Agent skill
+
+This repository ships an agent skill (`.agents/skills/space-lens/SKILL.md`)
+that teaches an AI client the CLI, the library, the MCP adapter and the
+remote workflow. `spacelens skills` wraps the ecosystem CLI (`skills.sh`) so
+the repository and skill name are already filled in:
+
+```bash
+spacelens skills install           # add it to your agents (user-level)
+spacelens skills install --project # ...or into this repository's agents
+spacelens skills update            # pull the newest version from the repo
+spacelens skills list              # what is installed, and where
+spacelens skills remove            # take it out again
+```
+
+Add `--agent claude-code --agent opencode` (repeatable) when one agent cannot
+install globally, `--copy` to copy instead of symlinking, `--yes` to skip the
+confirmation. The commands forward to `npx -y skills@latest …` and print the
+exact invocation first, so the underlying tool stays visible.
+
 ## space-lens TUI CLI
 
 The `space-lens` package remains importable as a native library and also exposes the Solid/Uniview TUI as a `space-lens` executable. It has two modes: `scan` for a disk usage tree and `clean` for selecting cleanup candidates and deleting them after confirmation. In Scan mode, `d` deletes the current file or directory after confirmation, while `A` deletes all discovered preset candidates at once. Preset candidates are highlighted in red, and scan rows support mouse focus and folder expansion. It runs on Node.js 20 or newer:

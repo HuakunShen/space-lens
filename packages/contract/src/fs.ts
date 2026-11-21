@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-const PathSchema = z.string().min(1).max(4096)
+const PathSchema = z.string().min(1).max(16384)
 
 /**
  * Folder browsing for the scan picker.

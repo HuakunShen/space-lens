@@ -10,7 +10,8 @@ export type SortMode = z.infer<typeof SortModeSchema>
 
 const IsoDateTimeSchema = z.iso.datetime()
 const UintSchema = z.number().int().nonnegative()
-const PathSchema = z.string().min(1).max(4096)
+// Long build trees exceed PATH_MAX; a path is data, not a 4 KiB limit.
+const PathSchema = z.string().min(1).max(16384)
 export const ScanIdSchema = z.string().regex(/^scan_[0-9a-zA-Z]{8,64}$/)
 export const NodeIdSchema = z.string().min(1).max(128)
 

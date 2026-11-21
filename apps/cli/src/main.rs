@@ -23,6 +23,7 @@ mod mcp;
 mod memory_cmd;
 mod remote_cmd;
 mod remote_interactive;
+mod skills_cmd;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -58,6 +59,9 @@ enum Command {
   /// One-shot operations against a machine over the user's OpenSSH.
   #[command(subcommand)]
   Remote(remote_cmd::RemoteCommand),
+  /// Install or update this repository's agent skill (`npx skills`).
+  #[command(subcommand)]
+  Skills(skills_cmd::SkillsCommand),
   /// Read-only disk insight over MCP; `--allow-cleanup` adds trash-only cleanup tools.
   #[cfg(feature = "mcp")]
   Mcp(McpArgs),
@@ -249,6 +253,7 @@ fn main() -> Result<()> {
     Command::AgentInfo(args) => run_agent_info(args),
     Command::Memory(command) => memory_cmd::run(command),
     Command::Remote(command) => remote_cmd::run(command),
+    Command::Skills(command) => skills_cmd::run(skills_cmd::SkillsArgs { command }),
     #[cfg(feature = "mcp")]
     Command::Mcp(args) => mcp::run(args.allow_cleanup),
   }

@@ -5,7 +5,7 @@ import { ScanIdSchema } from './scan.ts'
 
 const UintSchema = z.number().int().nonnegative()
 const IsoDateTimeSchema = z.iso.datetime()
-const PathSchema = z.string().min(1).max(4096)
+const PathSchema = z.string().min(1).max(16384)
 
 export const PlanIdSchema = z.string().regex(/^plan_[0-9a-zA-Z]{8,64}$/)
 

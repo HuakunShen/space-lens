@@ -1,7 +1,10 @@
 import { z } from 'zod'
 
 const UintSchema = z.number().int().nonnegative()
-const PathSchema = z.string().min(1).max(4096)
+// 4096 is PATH_MAX for a single syscall, not a real ceiling: deep
+// node_modules/build trees reach paths past it (`find` walks with openat), so a
+// scan must carry them instead of failing the whole run.
+const PathSchema = z.string().min(1).max(16384)
 
 export const LocalNodeStateSchema = z.enum(['complete', 'partial', 'skipped'])
 export type LocalNodeState = z.infer<typeof LocalNodeStateSchema>
