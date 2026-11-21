@@ -84,6 +84,15 @@ pub fn read(remote: &Arc<RemoteHost>, request: &ReadRequest) -> Result<Value, Va
     ReadRequest::Capabilities => Ok(remote_capabilities(remote.capabilities(), &remote.platform)),
     ReadRequest::Roots => remote.call(Method::GET, "/api/v1/roots", None, REQUEST_TIMEOUT),
     ReadRequest::Volumes => remote.call(Method::GET, "/api/v1/volumes", None, REQUEST_TIMEOUT),
+    ReadRequest::FsList { path } => remote.call(
+      Method::POST,
+      "/api/v1/fs/list",
+      Some(match path {
+        Some(path) => json!({ "path": path }),
+        None => json!({}),
+      }),
+      REQUEST_TIMEOUT,
+    ),
     ReadRequest::ScanStatus { scan_id } => remote.call(
       Method::GET,
       &format!("/api/v1/scans/{scan_id}"),

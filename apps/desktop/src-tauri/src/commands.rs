@@ -543,6 +543,11 @@ pub enum ReadRequest {
   Capabilities,
   Roots,
   Volumes,
+  /// One folder inside the host's roots, for the picker's browse mode.
+  FsList {
+    #[serde(default)]
+    path: Option<String>,
+  },
   ScanStatus {
     scan_id: String,
   },
@@ -760,6 +765,15 @@ pub async fn sl_read(
           // grant no scan capability by themselves.
           serde_json::to_value(json!({ "volumes": engine.volumes() }))
             .map_err(|error| problem_value("InternalError", error))
+        }
+        ReadRequest::FsList { .. } => {
+          // A local session browses through the native dialog; only a remote
+          // session (crate::remote::read) reaches the HTTP route, and the
+          // information bar's capability mask is what keeps this unreachable.
+          Err(problem_value(
+            "UnsupportedOperation",
+            "folder browsing is a remote-host feature; the local workbench uses the system dialog",
+          ))
         }
         ReadRequest::ScanStatus { scan_id } => {
           serde_json::to_value(engine.status(&scan_id).map_err(problem_to_value)?)

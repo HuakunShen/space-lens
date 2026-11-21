@@ -18,6 +18,8 @@ import type {
   DiscoveryPage,
   DiscoveryRequest,
   FreeUpCandidates,
+  FsListRequest,
+  FsListResponse,
   Health,
   HistoryRequest,
   MemoryHistory,
@@ -255,6 +257,16 @@ export function createTauriService(
     },
     async volumes() {
       return invokeReply<VolumesResponse>('sl_read', { request: { method: 'volumes' } })
+    },
+    /**
+     * Remote sessions only. A local desktop session lists nothing through
+     * this arm: it keeps the native folder dialog (`pickFolder`), and the
+     * page gates the Browse button on the active device for that reason.
+     */
+    async listFolder(body: FsListRequest) {
+      return invokeReply<FsListResponse>('sl_read', {
+        request: { method: 'fsList', ...(body.path === undefined ? {} : { path: body.path }) },
+      })
     },
     async startScan(body: ScanStartRequest) {
       const { paths, ignoreHidden, respectGitignore, ignoredMode, label, localOnly } = body
