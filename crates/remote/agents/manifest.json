@@ -19,6 +19,32 @@
       "app-audit",
       "app-icon"
     ],
-    "targets": {}
+    "targets": {
+      "x86_64-unknown-linux-musl": {
+        "archive": "spacelens-x86_64-unknown-linux-musl-v0.4.0.tar.gz",
+        "sha256": "0ecb6088e1909cc7c50e30b3fd247679da7101a034e12d8a0a9274363ac5e771",
+        "size": 3245133
+      },
+      "aarch64-unknown-linux-musl": {
+        "archive": "spacelens-aarch64-unknown-linux-musl-v0.4.0.tar.gz",
+        "sha256": "293c00fe3abfe6982b2c81c9536c593622970654b92456171f133a64e2ccd071",
+        "size": 2983706
+      },
+      "x86_64-apple-darwin": {
+        "archive": "spacelens-x86_64-apple-darwin-v0.4.0.tar.gz",
+        "sha256": "e5d05fc8311516a16b489b41a55d9d29297b2a1970e73bafae0f2eb4873b2571",
+        "size": 4048490
+      },
+      "aarch64-apple-darwin": {
+        "archive": "spacelens-aarch64-apple-darwin-v0.4.0.tar.gz",
+        "sha256": "4b6a02d5275e48996f2118690126a56ed433285f32ce6035d75ede43d3ba56aa",
+        "size": 3763054
+      },
+      "x86_64-pc-windows-msvc": {
+        "archive": "spacelens-x86_64-pc-windows-msvc-v0.4.0.zip",
+        "sha256": "02ca3e1cfd9a3f49cfbcd3b4b70aa41c131c8633754f0782bda0ebc32845327e",
+        "size": 3305760
+      }
+    }
   }
 }
