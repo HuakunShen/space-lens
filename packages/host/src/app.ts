@@ -403,7 +403,7 @@ export function buildApp(deps: HostDeps): HonoApp {
     }
     const request = await parseBody<AppAuditRequest>(c, AppAuditRequestSchema)
     // Same binary mechanism as protected scans: explicit config path or
-    // SPACLENS_LOCAL_SCAN_BIN env / repository discovery. Unresolved reads
+    // SPACELENS_LOCAL_SCAN_BIN env / repository discovery. Unresolved reads
     // as the standard Unavailable problem.
     const binary = resolveLocalScanBin(localScanBin)
     activeAppAudits += 1

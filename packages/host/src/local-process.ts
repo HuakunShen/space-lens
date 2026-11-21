@@ -12,7 +12,7 @@ import {
 import { Problems } from './problems.ts'
 import { ScanIndex } from './scan-index.ts'
 
-export const LOCAL_SCAN_BIN_ENV = 'SPACLENS_LOCAL_SCAN_BIN'
+export const LOCAL_SCAN_BIN_ENV = 'SPACELENS_LOCAL_SCAN_BIN'
 const MAX_STDERR_BYTES = 8192
 const MAX_LINE_BYTES = 512 * 1024 * 1024
 const MAX_NODE_LINE_BYTES = 1024 * 1024

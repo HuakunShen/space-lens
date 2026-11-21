@@ -222,6 +222,6 @@ describe('app storage audit over HTTP', () => {
   })
 
   it('exposes the local scan bin env contract', () => {
-    expect(LOCAL_SCAN_BIN_ENV).toBe('SPACLENS_LOCAL_SCAN_BIN')
+    expect(LOCAL_SCAN_BIN_ENV).toBe('SPACELENS_LOCAL_SCAN_BIN')
   })
 })
