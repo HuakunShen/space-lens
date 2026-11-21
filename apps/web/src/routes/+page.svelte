@@ -1090,9 +1090,15 @@
     if (service === null || startingScan || workbench.deleting) return
     startingScan = true
     workbench.error = null
+    // A protected (localOnly) scan is read-only by contract: the local host
+    // refuses to plan cleanup against it, while the desktop's own engine can
+    // still clean up locally. A *remote* desktop session therefore scans the
+    // ordinary way — the same scan `spacelens remote cleanup` runs — because
+    // the remote host would otherwise refuse the plan.
+    const protectedScan = !__SPACLENS_DESKTOP__ || activeDeviceId === LOCAL_DEVICE_ID
     try {
       const session = await service.startScan({
-        localOnly: true,
+        localOnly: protectedScan,
         paths: paths.map(expandTilde),
         ignoreHidden: false,
         respectGitignore: !paths.some((path) => path === '/' || path === '/System/Volumes/Data'),
@@ -2197,8 +2203,10 @@
               ? 'Local cleanup enabled'
               : 'Cleanup enabled'
             : 'Read-only scan'
-          : workbench.capabilities?.cleanup.execute
-            ? 'Local cleanup enabled'
+          : cleanupAvailable
+            ? __SPACLENS_DESKTOP__ && activeDeviceId === LOCAL_DEVICE_ID
+              ? 'Local cleanup enabled'
+              : 'Cleanup enabled'
             : 'Read-only connection'}</span
       ><Button.Root
         variant="ghost"

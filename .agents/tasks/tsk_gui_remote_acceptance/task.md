@@ -12,7 +12,7 @@ progress:
   percent: 100
 links: []
 created_at: 2026-11-21T02:10:18Z
-updated_at: 2026-11-21T02:10:44Z
+updated_at: 2026-11-21T02:28:56Z
 archived_at: null
 deleted_at: null
 x_activity_receipts:
@@ -22,9 +22,12 @@ x_activity_receipts:
   - op_id: gui-acceptance-cp-001
     request_hash: sha256:b8f2da12d2c26a9e37706b3a9ae3f2973e0bc879253a268d80b6f63df806dc87
     applied_at: 2026-11-21T02:10:44Z
+  - op_id: gui-cleanup-001
+    request_hash: sha256:4e73fba2ca8cd1093f36c19cbab2c402d949009b0c0de4163866133f3f8bb404
+    applied_at: 2026-11-21T02:28:56Z
 checkpoint:
-  summary: "GUI remote verified on ufo: connect → browse /home/hk → space-lens-test → 3 items · 32.0 MiB scanned (media.bin 32 MiB, package.json 4 KiB). Desktop lib tests 78 passed. Local keeps the native dialog. Remote cleanup stays masked pending an owner decision."
-  reported_at: 2026-11-21T02:11:00Z
+  summary: "GUI remote cleanup enabled and verified on ufo: plan 8.01 MiB → Move to Trash → node_modules.3 + .trashinfo in the remote trash, source gone. Desktop lib 78, host 217, web 79 green."
+  reported_at: 2026-11-21T02:40:00Z
   reporter: agent
 ---
 ## Scope
@@ -51,8 +54,28 @@ footer         "32.0 MiB scanned · Read-only scan"
 switch back    This machine → Folder row shows "Choose…" (native dialog), no Browse
 ```
 
-## Not available in the GUI, by construction
-`apps/desktop/src-tauri/src/remote.rs` connects with `RemotePolicy::read_only()`, maps no mutation besides starting a scan, and masks `cleanup.*` to `none`; the dialog says "Remote hosts are read-only in this beta". So remote cleanup from the GUI is a product decision, not a bug: it needs `allow_cleanup` on the serve side plus plan/execute mapping, and the trash-only guarantee comes from the remote host's own cleanup. Owner call.
+## Remote cleanup, enabled on the owner's call (2026-11-21)
+
+The owner asked for it, so the desktop now maps trash-only cleanup:
+
+- `connect` uses `RemotePolicy { allow_cleanup: true }`, so the remote host is served with `--allow-cleanup`;
+- `submit_route` maps `cleanupPlan` → `/api/v1/cleanup/plan` and `cleanupExecute` → `/api/v1/cleanup/execute` (app cleanup, app scans and process termination stay unmapped);
+- `remote_capabilities` passes the host's `cleanup` block through instead of masking it, so a host served read-only still shows no cleanup;
+- the workbench starts a **non-protected** scan for a remote device (`localOnly: false`): the host refuses to plan against a protected scan by contract, and this matches what `spacelens remote cleanup` does. Local desktop/browser scans stay protected.
+
+Live evidence (same Tauri build, device ufo):
+
+```
+scan /home/hk/space-lens-test  40.0 MiB (media.bin 32 + node_modules 8.01), footer "Cleanup enabled"
+select node_modules            checkbox → Review → 1 item · 8.01 MiB
+Review cleanup plan            "Confirm move to Trash — 1 item · 8.01 MiB in the verified plan"
+Move to Trash                  "1 item moved to Trash · 8.01 MiB"
+ufo: ls ~/space-lens-test      media.bin, package.json only (node_modules gone)
+ufo: ~/.local/share/Trash      files/node_modules.3 + node_modules.3.trashinfo
+```
+
+Copy fixed on the way: the footer said "Local cleanup enabled" for any non-protected scan
+(now device-aware) and the outcome card said "1 items".
 
 ## Verification
 - Desktop lib tests: see checkpoint below.

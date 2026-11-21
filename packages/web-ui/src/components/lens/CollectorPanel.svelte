@@ -33,7 +33,7 @@
     </Sheet.Header>
     <div class="collector-scroll">
       {#if outcome}
-        <div class="cleanup-outcome" role="status"><Check size={17} /><div><strong>{outcome.trashed.length} items moved to Trash · {formatBytes(outcome.bytesFreed)}</strong><p>Empty Trash when you are ready to reclaim space.</p></div></div>
+        <div class="cleanup-outcome" role="status"><Check size={17} /><div><strong>{outcome.trashed.length} item{outcome.trashed.length === 1 ? '' : 's'} moved to Trash · {formatBytes(outcome.bytesFreed)}</strong><p>Empty Trash when you are ready to reclaim space.</p></div></div>
         {#if outcome.trashed.length > 0}<details class="outcome-details"><summary>Moved paths ({outcome.trashed.length})</summary>{#each outcome.trashed as item}<p>{item.path}</p>{/each}</details>{/if}
         {#each outcome.failed as failure}<div class="inline-error"><strong>{failure.path}</strong><p>{failure.message}</p></div>{/each}
       {/if}

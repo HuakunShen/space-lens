@@ -282,7 +282,8 @@
 
     <Dialog.Footer>
       <p class="mr-auto text-xs text-muted-foreground">
-        Remote hosts are read-only in this beta: scans, discovery, app audits, and memory.
+        Remote hosts support scans, discovery, app audits, memory, and trash-only cleanup of a
+        reviewed plan. Nothing is ever deleted permanently.
       </p>
       <Button.Root variant="outline" type="button" disabled={busy} onclick={onClose}>
         Close

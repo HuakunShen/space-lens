@@ -2,17 +2,18 @@
 //!
 //! The WebView never talks to the remote host. It keeps calling the closed
 //! `sl_*` commands; this module maps each allowed request onto the host's
-//! frozen routes and refuses every mutation before a socket is opened. The
-//! provisioning pipeline itself lives in `spacelens_remote::runtime` and is
-//! shared with the CLI and the MCP adapter.
+//! frozen routes and refuses everything outside that allow-list before a
+//! socket is opened. The provisioning pipeline itself lives in
+//! `spacelens_remote::runtime` and is shared with the CLI and the MCP adapter.
 //!
 //! What is desktop-specific here:
 //!
 //! - the embedded manifest authorizes what shipped in the app bundle;
 //! - the agent archive cache lives in the app cache directory;
-//! - the remote device is read-only by construction: this adapter maps no
-//!   mutation other than starting a scan, even if the session's policy or the
-//!   remote host would allow more;
+//! - mutations are limited to starting a scan and trash-only cleanup of a
+//!   reviewed plan (`cleanup/plan`, `cleanup/execute`); app-scoped cleanup,
+//!   app scans and process termination are never mapped, even if the remote
+//!   host would allow them;
 //! - capabilities are masked to what the workbench can actually drive;
 //! - SSE payloads are re-published through the window's [`EventSink`].
 
@@ -61,7 +62,11 @@ pub fn connect(
   RemoteHost::connect_with(
     target,
     &manifest,
-    RemotePolicy::read_only(),
+    // Trash-only cleanup over SSH: the host refuses permanent deletion by
+    // construction, and this grants nothing else (no app cleanup, no process
+    // termination — see `submit_route`). The user still confirms a plan in
+    // the workbench before anything moves.
+    RemotePolicy { allow_cleanup: true },
     &mut source,
     progress,
   )
@@ -205,36 +210,43 @@ pub fn read(remote: &Arc<RemoteHost>, request: &ReadRequest) -> Result<Value, Va
   }
 }
 
-/// The desktop's remote is read-only by construction. The host is started
-/// without the mutation flags, and this match denies again before any socket
-/// is opened.
+/// The remote mutation allow-list: a scan, and trash-only cleanup of a
+/// reviewed plan. App-scoped cleanup, app scans and process termination stay
+/// absent by construction — the host may serve them, this adapter does not
+/// map them.
 pub fn submit(remote: &Arc<RemoteHost>, request: &SubmitRequest) -> Result<Value, Value> {
   let Some(path) = submit_route(request) else {
     return Err(forbidden(
-      "cleanup and process termination are disabled for remote hosts",
+      "app cleanup and process termination are disabled for remote hosts",
     ));
   };
-  match request {
-    SubmitRequest::ScanStart { request } => remote.call(
-      Method::POST,
-      path,
-      Some(serde_json::to_value(request).map_err(internal)?),
-      DISCOVERY_TIMEOUT,
-    ),
-    _ => Err(forbidden(
-      "cleanup and process termination are disabled for remote hosts",
-    )),
-  }
+  // The wire shape the host parses, spelled here rather than derived: the
+  // engine types are deserialize-only because they never leave the desktop.
+  let body = match request {
+    SubmitRequest::ScanStart { request } => serde_json::to_value(request).map_err(internal)?,
+    SubmitRequest::CleanupPlan { request } => json!({
+      "scanId": request.scan_id,
+      "nodeIds": request.node_ids,
+    }),
+    SubmitRequest::CleanupExecute { request } => json!({
+      "planId": request.plan_id,
+      "confirm": request.confirm,
+    }),
+    _ => {
+      return Err(forbidden(
+        "app cleanup and process termination are disabled for remote hosts",
+      ))
+    }
+  };
+  remote.call(Method::POST, path, Some(body), DISCOVERY_TIMEOUT)
 }
 
-/// The complete remote mutation allow-list. One arm: starting a read-only
-/// scan. Everything else is absent by construction, not by a default.
 pub fn submit_route(request: &SubmitRequest) -> Option<&'static str> {
   match request {
     SubmitRequest::ScanStart { .. } => Some("/api/v1/scans"),
-    SubmitRequest::CleanupPlan { .. }
-    | SubmitRequest::CleanupExecute { .. }
-    | SubmitRequest::AppCleanupPlan { .. }
+    SubmitRequest::CleanupPlan { .. } => Some("/api/v1/cleanup/plan"),
+    SubmitRequest::CleanupExecute { .. } => Some("/api/v1/cleanup/execute"),
+    SubmitRequest::AppCleanupPlan { .. }
     | SubmitRequest::AppCleanupExecute { .. }
     | SubmitRequest::AppScanStart { .. }
     | SubmitRequest::MemoryTerminatePlan { .. }
@@ -242,14 +254,12 @@ pub fn submit_route(request: &SubmitRequest) -> Option<&'static str> {
   }
 }
 
-/// The desktop's own policy is stricter than the remote host's flags: even a
-/// misreported capability cannot advertise cleanup, app scans, reveal, or
-/// process termination for a remote device.
+/// The desktop's own policy is stricter than the remote host's flags: app
+/// cleanup, app scans, reveal and process termination stay hidden whatever
+/// the host advertises. Plain trash-only cleanup passes through as the host
+/// reports it, so a host served read-only still shows no cleanup here.
 fn remote_capabilities(mut value: Value, platform: &str) -> Value {
   if let Some(cleanup) = value.get_mut("cleanup").and_then(Value::as_object_mut) {
-    cleanup.insert("plan".into(), Value::Bool(false));
-    cleanup.insert("execute".into(), Value::Bool(false));
-    cleanup.insert("mode".into(), Value::String("none".into()));
     cleanup.insert("appPlan".into(), Value::Bool(false));
     cleanup.insert("appExecute".into(), Value::Bool(false));
   }
@@ -288,16 +298,30 @@ mod tests {
   }
 
   #[test]
-  fn only_scan_start_is_allowed_remotely() {
-    let allowed = submit(json!({
+  fn scan_start_and_trash_only_cleanup_are_allowed_remotely() {
+    let scan = submit(json!({
       "kind": "scanStart",
       "paths": ["/home/alice"],
     }));
-    assert_eq!(submit_route(&allowed), Some("/api/v1/scans"));
+    assert_eq!(submit_route(&scan), Some("/api/v1/scans"));
 
+    let plan = submit(json!({
+      "kind": "cleanupPlan",
+      "scanId": "scan_12345678",
+      "nodeIds": ["n1"],
+    }));
+    assert_eq!(submit_route(&plan), Some("/api/v1/cleanup/plan"));
+
+    let execute = submit(json!({
+      "kind": "cleanupExecute",
+      "planId": "plan_12345678",
+      "confirm": true,
+    }));
+    assert_eq!(submit_route(&execute), Some("/api/v1/cleanup/execute"));
+
+    // Everything the desktop does not map stays absent: app-scoped cleanup,
+    // app scans and process termination never reach a remote host.
     let denied = [
-      json!({ "kind": "cleanupPlan", "scanId": "scan_12345678", "nodeIds": ["n1"] }),
-      json!({ "kind": "cleanupExecute", "planId": "plan_12345678", "confirm": true }),
       json!({ "kind": "appCleanupPlan", "auditId": "audit_12345678", "appId": "app", "paths": ["/a"] }),
       json!({ "kind": "appCleanupExecute", "planId": "plan_12345678", "confirm": true }),
       json!({ "kind": "appScanStart", "auditId": "audit_12345678", "appId": "app" }),
@@ -323,12 +347,16 @@ mod tests {
   }
 
   #[test]
-  fn remote_capabilities_intersect_with_read_only_policy() {
+  fn remote_capabilities_keep_host_cleanup_and_mask_the_rest() {
     for platform in ["linux", "macos"] {
       let value = remote_capabilities(full_capabilities(), platform);
-      assert_eq!(value["cleanup"]["plan"], false);
-      assert_eq!(value["cleanup"]["execute"], false);
-      assert_eq!(value["cleanup"]["mode"], "none");
+      // Trash-only cleanup is the host's answer: a host served with the flag
+      // advertises it, and the workbench then offers plan/execute.
+      assert_eq!(value["cleanup"]["plan"], true);
+      assert_eq!(value["cleanup"]["execute"], true);
+      assert_eq!(value["cleanup"]["mode"], "trash");
+      // App-scoped cleanup has no remote mapping, so it stays hidden even
+      // when the host advertises it.
       assert_eq!(value["cleanup"]["appPlan"], false);
       assert_eq!(value["cleanup"]["appExecute"], false);
       assert_eq!(value["scan"]["appScan"], false);
@@ -341,6 +369,19 @@ mod tests {
       assert_eq!(value["scan"]["start"], true);
       assert_eq!(value["scan"]["discovery"], true);
     }
+    // A host that serves read-only keeps advertising no cleanup.
+    let read_only = json!({
+      "apiMajor": 1,
+      "contractVersion": "1.1.0",
+      "scan": { "start": true, "cancel": true, "maxConcurrent": 1 },
+      "cleanup": { "plan": false, "execute": false, "mode": "none" },
+      "host": { "folderPicker": false, "platform": "linux" },
+      "icloud": "unavailable"
+    });
+    let masked = remote_capabilities(read_only, "linux");
+    assert_eq!(masked["cleanup"]["plan"], false);
+    assert_eq!(masked["cleanup"]["execute"], false);
+    assert_eq!(masked["cleanup"]["mode"], "none");
     // App audit depends on a macOS remote; the Linux beta hides it.
     assert_eq!(
       remote_capabilities(full_capabilities(), "linux")["scan"]["appAudit"],
