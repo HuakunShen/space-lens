@@ -2,12 +2,12 @@
   "schema": 1,
   "host": {
     "package": "@space-lens/cli",
-    "version": "0.4.2",
+    "version": "0.4.3",
     "apiMajor": 1,
     "minNode": 20
   },
   "agent": {
-    "version": "0.4.2",
+    "version": "0.4.3",
     "protocol": 1,
     "features": [
       "scan.stream",
@@ -21,29 +21,29 @@
     ],
     "targets": {
       "x86_64-unknown-linux-musl": {
-        "archive": "spacelens-x86_64-unknown-linux-musl-v0.4.2.tar.gz",
-        "sha256": "31cccd2ef5a2ede51bb0340671627098e41cdb8472f6184533ff1580ef0edf57",
-        "size": 3245627
+        "archive": "spacelens-x86_64-unknown-linux-musl-v0.4.3.tar.gz",
+        "sha256": "fe1d7e64f447f067dc6643d6aceb2faa0906b3f136a3c7f85cbcaea314966621",
+        "size": 3262003
       },
       "aarch64-unknown-linux-musl": {
-        "archive": "spacelens-aarch64-unknown-linux-musl-v0.4.2.tar.gz",
-        "sha256": "77cbb0562d18ac908be802ee2d65c01588a7e30aae772d20919e2adf314aec9e",
-        "size": 2984595
+        "archive": "spacelens-aarch64-unknown-linux-musl-v0.4.3.tar.gz",
+        "sha256": "afc6dc170a9c89186a0be70fbb906800d92e73cc68ec9d7d73a7f4bda6885d65",
+        "size": 3001623
       },
       "x86_64-apple-darwin": {
-        "archive": "spacelens-x86_64-apple-darwin-v0.4.2.tar.gz",
-        "sha256": "d49faf195bbbfb9c5ed108ceebcf3182919f63b83be9391199cddd9d8f81fab2",
-        "size": 4050652
+        "archive": "spacelens-x86_64-apple-darwin-v0.4.3.tar.gz",
+        "sha256": "af06d14e5b17bd0eb51b621e3f8e2eacc0b8e49560bc75f3a37b8b0b8cb7957c",
+        "size": 4064450
       },
       "aarch64-apple-darwin": {
-        "archive": "spacelens-aarch64-apple-darwin-v0.4.2.tar.gz",
-        "sha256": "614b241277973b595e04ea899fd9a2015fe71636a49fc90ff3596b21d23d5d8e",
-        "size": 3763748
+        "archive": "spacelens-aarch64-apple-darwin-v0.4.3.tar.gz",
+        "sha256": "c988b8082869d558ecf1b60737b31edfa58b5d099aa3e4635c586fa561546bf1",
+        "size": 3777989
       },
       "x86_64-pc-windows-msvc": {
-        "archive": "spacelens-x86_64-pc-windows-msvc-v0.4.2.zip",
-        "sha256": "32fdbff13473a8dc9c62c8c7113961dbb4edcdddd411dfd05f47eb7a31d1735e",
-        "size": 3307447
+        "archive": "spacelens-x86_64-pc-windows-msvc-v0.4.3.zip",
+        "sha256": "6180035b0854ed35bd9ef016d83b3a1692666104780aaee9090944f6bd326cb7",
+        "size": 3327080
       }
     }
   }
