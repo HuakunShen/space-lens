@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 
 import { API_MAJOR, CONTRACT_VERSION } from '@space-lens/contract'
-import { AuthService } from '../src/auth.ts'
+import { AuthService, hashHostedPassword } from '../src/auth.ts'
 import { buildApp, type HonoApp } from '../src/app.ts'
 import { createClientAllowlist } from '../src/cidr.ts'
 import { resolveServeConfig } from '../src/config.ts'
@@ -51,7 +51,7 @@ function buildAppWith(options: {
     serviceInstanceId: 'inst_local',
     ticketTtlMs: 60_000,
     sessionTtlMs: 3_600_000,
-    hostedPassword: options.hostedPassword ?? null,
+    hostedPassword: options.hostedPassword == null ? null : hashHostedPassword(options.hostedPassword),
     scopes: ['scan:read', 'memory:read'],
   })
   const events = new EventRing()
