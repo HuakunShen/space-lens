@@ -261,11 +261,21 @@ trash-only — the host refuses permanent deletion by construction.
 spacelens remote list                       # concrete hosts from ~/.ssh/config
 spacelens remote probe ufo                  # os, arch, node, resolved agent
 spacelens remote scan ufo --path ~         # largest entries, live progress
+spacelens remote scan                       # interactive: pick host, then path
 spacelens remote discovery ufo --scan-id …  # large files, caches, gitignored
 spacelens remote cleanup ufo --path ~/dev   # dry-run plan of dev caches
+spacelens remote cleanup                    # interactive, ends with a y/N trash confirm
 spacelens remote cleanup ufo --path ~/dev --execute   # move them to trash
 spacelens remote open ufo                   # print a browser URL for the workbench
 ```
+
+With no target and no path, `scan` and `cleanup` become interactive: hosts
+come from a numbered `~/.ssh/config` list, the path prompt shows the home
+folder's reported size, and `b` scans it once so you can drill into real
+size-sorted rows (`u` up, `n`/`p` page, Enter accepts) — picking a path and
+seeing its distribution are the same interaction. Browsing a >50 GiB root
+asks twice: the whole tree loads on the remote host and can exhaust its
+memory.
 
 Windows hosts are reached through PowerShell (their OpenSSH default shell is
 cmd.exe, so every command travels as one base64 `-EncodedCommand` token; file

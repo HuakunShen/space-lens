@@ -71,7 +71,10 @@ stops the remote server when it ends. Remote cleanup is **trash-only**: the
 host refuses permanent deletion by construction.
 
 - Commands: `list` (ssh-config hosts), `probe`, `scan --path`, `discovery
-  --scan-id`, `cleanup --path [--execute]`, `open`.
+  --scan-id`, `cleanup --path [--execute]`, `open`. With no target and no
+  path, `scan`/`cleanup` turn interactive: a numbered host list, a path
+  prompt showing the home's size, and `b` to drill real size-sorted rows
+  (browsing a >50 GiB root asks twice — the tree loads on the remote host).
 - The remote needs Node.js ≥ 20 and npm (nvm/Homebrew/user-local installs are
   found without an interactive PATH). Connect once with plain `ssh <target>`
   to trust the host key: the channel is strict (`BatchMode`,
