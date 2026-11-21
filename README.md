@@ -257,6 +257,13 @@ strictly: `BatchMode` and `StrictHostKeyChecking=yes`, so connect once with
 plain `ssh <target>` first to trust the key. Remote cleanup is always
 trash-only — the host refuses permanent deletion by construction.
 
+In the desktop app, open **Switch device → SSH hosts** and connect. The workbench
+then reads that machine: scans, discovery, app audits, memory, and — after you
+review a plan — **Move to Trash** into the remote's own trash. Folder choices come
+from a picker that lists the remote filesystem one level at a time (no absolute
+paths to type); a remote scan is an ordinary scan, which is what the host needs
+to plan a cleanup against it.
+
 ```bash
 spacelens remote list                       # concrete hosts from ~/.ssh/config
 spacelens remote probe ufo                  # os, arch, node, resolved agent

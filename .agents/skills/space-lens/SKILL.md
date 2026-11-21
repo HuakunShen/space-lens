@@ -85,7 +85,12 @@ host refuses permanent deletion by construction.
 - `remote open` prints a browser URL for the full workbench (a single-use
   ticket minted for the tunnel's own loopback origin). Keep the command
   running — it holds the SSH tunnel; the remote host is reaped on the next
-  connect after it exits.
+  connect after it exits. That browser session is read-only; use
+  `remote cleanup` (or MCP with `--allow-cleanup`) to trash files.
+- The desktop app's **Switch device → SSH hosts** connects the same way and
+  does support cleanup: review a plan, then **Move to Trash** into the remote
+  trash. A remote device scans without `localOnly` (a protected scan is
+  read-only by contract, so the host would refuse the plan).
 - Windows specifics: commands travel as one PowerShell `-EncodedCommand`
   token (its OpenSSH default shell is cmd.exe); files travel by scp, because
   a PowerShell child never sees an stdin EOF; Windows remotes serve without
