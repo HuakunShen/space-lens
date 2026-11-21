@@ -83,3 +83,15 @@ describe('freedesktop trash fallback', () => {
     )
   })
 })
+
+describe('windows recycle bin verification', () => {
+  it('matches the plain name and the duplicate rename, and escapes brackets', async () => {
+    const { recycleBinNamePattern } = await import('../src/trash.ts')
+    // Windows appends " (2)" for a second item with the same display name.
+    expect(recycleBinNamePattern('node_modules')).toBe('node_modules (*')
+    // `-like` would read [a] as a character class and count other entries.
+    const escaped = recycleBinNamePattern('cache[old]')
+    expect(escaped).toContain('`[')
+    expect(escaped).toContain('`]')
+  })
+})
