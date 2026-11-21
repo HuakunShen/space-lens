@@ -20,6 +20,8 @@ use spacelens_remote::manifest::AgentManifest;
 use spacelens_remote::runtime::{self, RemoteHost, ScanStart};
 use spacelens_remote::{RemotePolicy, SshTarget};
 use std::path::PathBuf;
+
+use crate::remote_interactive::LineReader as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -54,10 +56,10 @@ pub enum RemoteCommand {
 
 #[derive(Debug, Args)]
 pub struct RemoteScanArgs {
-  /// An alias from ~/.ssh/config, or `user@host[:port]`.
+  /// An alias from ~/.ssh/config, or `user@host[:port]`; omit to pick from a list.
   #[arg(value_name = "TARGET")]
-  pub target: String,
-  /// Folder on the remote; defaults to the first root the host reports.
+  pub target: Option<String>,
+  /// Folder on the remote; omit to be asked (Enter = home, `b` = browse by size).
   #[arg(long, value_name = "PATH")]
   pub path: Option<String>,
   /// How many entries to print, largest first.
@@ -92,11 +94,10 @@ pub struct RemoteDiscoveryArgs {
 
 #[derive(Debug, Args)]
 pub struct RemoteCleanupArgs {
-  /// An alias from ~/.ssh/config, or `user@host[:port]`.
+  /// An alias from ~/.ssh/config, or `user@host[:port]`; omit to pick from a list.
   #[arg(value_name = "TARGET")]
-  pub target: String,
-  /// Folder on the remote to scan for cleanup candidates; defaults to the
-  /// first root the host reports.
+  pub target: Option<String>,
+  /// Folder on the remote to scan for cleanup candidates; omit to be asked.
   #[arg(long, value_name = "PATH")]
   pub path: Option<String>,
   /// Where candidates come from; `caches` finds node_modules, Cargo target
@@ -230,24 +231,40 @@ impl Drop for StopOnDrop {
 }
 
 fn scan(args: RemoteScanArgs) -> Result<()> {
+  let interactive = crate::remote_interactive::stdin_is_interactive();
+  let Some(target) = resolve_target(args.target.as_deref(), interactive)? else {
+    println!("cancelled.");
+    return Ok(());
+  };
   let policy = RemotePolicy::read_only();
-  let remote = connect(&args.target, policy)?;
+  let remote = connect(&target, policy)?;
   let _guard = StopOnDrop(remote.clone());
 
   let path = match &args.path {
     Some(path) => path.clone(),
     None => {
       let roots = host(remote.roots())?;
-      roots["roots"]
+      let home = roots["roots"]
         .get(0)
         .and_then(|root| root.get("path"))
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| anyhow!("the remote host reported no scan roots"))?
+        .ok_or_else(|| anyhow!("the remote host reported no scan roots"))?;
+      if !interactive || args.json {
+        home
+      } else {
+        match ask_path(&remote, &home, interactive)? {
+          Some(chosen) => chosen,
+          None => {
+            println!("cancelled.");
+            return Ok(());
+          }
+        }
+      }
     }
   };
   if !args.json {
-    eprintln!("scanning {path} on {} …", args.target);
+    eprintln!("scanning {path} on {target} …");
   }
   let scan = host(remote.scan_start(&ScanStart {
     paths: vec![path.clone()],
@@ -280,7 +297,7 @@ fn scan(args: RemoteScanArgs) -> Result<()> {
     .context("the ready scan reported no root id")?;
 
   let children = host(remote.tree_children(&scan_id, root_id, 0, args.limit, "size"))?;
-  println!("{} — largest entries under {path}", args.target);
+  println!("{target} — largest entries under {path}");
   println!("{:>10}  path", "size");
   for item in children["items"].as_array().unwrap_or(&Vec::new()) {
     let size = item["size"].as_u64().unwrap_or(0);
@@ -375,10 +392,16 @@ fn cleanup(args: RemoteCleanupArgs) -> Result<()> {
   // Planning is a read-only computation, but the host gates even `cleanup/plan`
   // behind serve-time `--allow-cleanup`, so this one-shot session grants it.
   // The destructive half stays behind the operator's `--execute`.
+  let interactive = crate::remote_interactive::stdin_is_interactive();
+  let Some(target) = resolve_target(args.target.as_deref(), interactive)? else {
+    println!("cancelled.");
+    return Ok(());
+  };
+  let mut execute = args.execute;
   let policy = RemotePolicy {
     allow_cleanup: true,
   };
-  let remote = connect(&args.target, policy)?;
+  let remote = connect(&target, policy)?;
   let _guard = StopOnDrop(remote.clone());
 
   // A scan session lives and dies with the remote host process, so the plan is
@@ -387,16 +410,27 @@ fn cleanup(args: RemoteCleanupArgs) -> Result<()> {
     Some(path) => path.clone(),
     None => {
       let roots = host(remote.roots())?;
-      roots["roots"]
+      let home = roots["roots"]
         .get(0)
         .and_then(|root| root.get("path"))
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| anyhow!("the remote host reported no scan roots"))?
+        .ok_or_else(|| anyhow!("the remote host reported no scan roots"))?;
+      if interactive {
+        match ask_path(&remote, &home, interactive)? {
+          Some(chosen) => chosen,
+          None => {
+            println!("cancelled.");
+            return Ok(());
+          }
+        }
+      } else {
+        home
+      }
     }
   };
   if !args.json {
-    eprintln!("scanning {path} on {} …", args.target);
+    eprintln!("scanning {path} on {target} …");
   }
   let scan = host(remote.scan_start(&ScanStart {
     paths: vec![path.clone()],
@@ -445,7 +479,18 @@ fn cleanup(args: RemoteCleanupArgs) -> Result<()> {
       entry["path"].as_str().unwrap_or("?")
     );
   }
-  if !args.execute {
+  if interactive && !execute && !args.json {
+    println!("move these to the remote trash? (y/N)");
+    let mut input = crate::remote_interactive::StdinLines;
+    if let Some(answer) = input.next_line() {
+      execute =
+        answer.trim().eq_ignore_ascii_case("y") || answer.trim().eq_ignore_ascii_case("yes");
+    }
+    if !execute {
+      println!("dry run only; rerun and confirm (or pass --execute) to move them.");
+      return Ok(());
+    }
+  } else if !args.execute {
     println!("dry run only; pass --execute to move these to the remote trash.");
     return Ok(());
   }
@@ -496,6 +541,85 @@ fn open(spec: &str) -> Result<()> {
 }
 
 // ---------------------------------------------------------------- plumbing
+
+/// The ssh target: an explicit argument, an interactive pick, or an error
+/// that explains both. `None` means the operator cancelled the picker.
+fn resolve_target(explicit: Option<&str>, interactive: bool) -> Result<Option<String>> {
+  match explicit {
+    Some(target) => Ok(Some(target.to_string())),
+    None if interactive => {
+      let mut input = crate::remote_interactive::StdinLines;
+      crate::remote_interactive::pick_host(&mut input)
+    }
+    None => Err(anyhow!(
+      "pass an ssh target (alias or user@host[:port]) — or run from a terminal to pick one"
+    )),
+  }
+}
+
+/// Asks for the folder to work on: Enter accepts the reported home, `b`
+/// starts a scan of it and drills by size, anything else is a typed path the
+/// host validates on use. `None` cancels. Browsing a huge root loads its
+/// whole tree on the remote host and can exhaust its memory, so the
+/// reported root size is shown and a very large browse asks twice.
+fn ask_path(remote: &Arc<RemoteHost>, home: &str, interactive: bool) -> Result<Option<String>> {
+  if !interactive {
+    return Ok(Some(home.to_string()));
+  }
+  let roots = host(remote.roots())?;
+  let home_size = roots["roots"]
+    .as_array()
+    .and_then(|roots| roots.first())
+    .and_then(|root| root.get("size"))
+    .and_then(Value::as_u64)
+    .unwrap_or(0);
+  const BROWSE_WARN_BYTES: u64 = 50 * 1024 * 1024 * 1024;
+  let size_note = if home_size > 0 {
+    format!(" ({})", format_bytes(home_size))
+  } else {
+    String::new()
+  };
+  println!(
+    "Which folder? Enter = {home}{size_note}, `b` = browse sizes first, or type a path (q cancels)"
+  );
+  let mut input = crate::remote_interactive::StdinLines;
+  let Some(line) = input.next_line() else {
+    return Ok(None);
+  };
+  let line = line.trim();
+  match line {
+    "" => Ok(Some(home.to_string())),
+    "q" | "quit" => Ok(None),
+    "b" | "browse" => {
+      if home_size > BROWSE_WARN_BYTES {
+        println!(
+          "{} is {}; browsing scans it first and loads the whole tree on the remote host, which can exhaust its memory.",
+          home,
+          format_bytes(home_size),
+        );
+        println!("browse anyway? (y/N)");
+        match input.next_line() {
+          Some(answer) if answer.trim().eq_ignore_ascii_case("y") => {}
+          _ => return Ok(None),
+        }
+      }
+      eprintln!("scanning {home} to browse its sizes …");
+      let scan = host(remote.scan_start(&ScanStart {
+        paths: vec![home.to_string()],
+        ..ScanStart::default()
+      }))?;
+      let scan_id = text(&scan, "scanId")?.to_string();
+      let status = wait_ready(remote, &scan_id, false)?;
+      let root_id = status["rootIds"]
+        .get(0)
+        .and_then(Value::as_str)
+        .context("the ready scan reported no root id")?
+        .to_string();
+      crate::remote_interactive::browse_path(remote, &scan_id, &root_id, home, &mut input)
+    }
+    typed => Ok(Some(typed.to_string())),
+  }
+}
 
 /// Connects one SSH device with the pinned manifest and the CLI's agent
 /// cache. Shared with the MCP adapter, which keeps sessions alive across

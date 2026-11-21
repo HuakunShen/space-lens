@@ -22,6 +22,7 @@ mod mcp;
 
 mod memory_cmd;
 mod remote_cmd;
+mod remote_interactive;
 
 #[derive(Debug, Parser)]
 #[command(
