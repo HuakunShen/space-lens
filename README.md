@@ -280,8 +280,15 @@ spacelens remote discovery ufo --scan-id …  # large files, caches, gitignored
 spacelens remote cleanup ufo --path ~/dev   # dry-run plan of dev caches
 spacelens remote cleanup                    # interactive, ends with a y/N trash confirm
 spacelens remote cleanup ufo --path ~/dev --execute   # move them to trash
+spacelens remote trash ufo --path ~/dev/x/.venv       # any folder, dry run by default
+spacelens remote trash ufo --path ~/dev/x/.venv --execute   # ...then move it to trash
 spacelens remote open ufo                   # print a browser URL for the workbench
 ```
+
+`remote trash` is for the folders a cache-oriented discovery never names — a
+`.venv`, a render `out/`, a `pretrained_models/` — and takes several `--path`
+flags. It scans each target's parent, resolves the entry by name, and prints
+the plan; `--execute` moves it to the remote trash (never a permanent delete).
 
 With no target and no path, `scan` and `cleanup` become interactive: hosts
 come from a numbered `~/.ssh/config` list, the path prompt shows the home

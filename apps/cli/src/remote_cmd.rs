@@ -46,6 +46,8 @@ pub enum RemoteCommand {
   Discovery(RemoteDiscoveryArgs),
   /// Plan (and optionally execute) a trash-only cleanup for remote nodes.
   Cleanup(RemoteCleanupArgs),
+  /// Trash specific folders (venvs, build outputs, models) — dry run by default.
+  Trash(RemoteTrashArgs),
   /// Connect and print a browser URL for the remote workbench.
   Open {
     /// An alias from ~/.ssh/config, or `user@host[:port]`.
@@ -88,6 +90,22 @@ pub struct RemoteDiscoveryArgs {
   #[arg(long, default_value_t = 50)]
   pub limit: usize,
   /// Full discovery pages as JSON instead of a table.
+  #[arg(long)]
+  pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct RemoteTrashArgs {
+  /// An alias from ~/.ssh/config, or `user@host[:port]`.
+  #[arg(value_name = "TARGET")]
+  pub target: String,
+  /// Folder(s) to move to the remote trash. Repeatable.
+  #[arg(long = "path", value_name = "PATH", required = true)]
+  pub paths: Vec<String>,
+  /// Actually move them; without this the plan is printed only.
+  #[arg(long)]
+  pub execute: bool,
+  /// Machine-readable plan/outcome.
   #[arg(long)]
   pub json: bool,
 }
@@ -141,6 +159,7 @@ pub fn run(command: RemoteCommand) -> Result<()> {
     RemoteCommand::Scan(args) => scan(args),
     RemoteCommand::Discovery(args) => discovery(args),
     RemoteCommand::Cleanup(args) => cleanup(args),
+    RemoteCommand::Trash(args) => trash(args),
     RemoteCommand::Open { target } => open(&target),
   }
 }
@@ -507,6 +526,165 @@ fn cleanup(args: RemoteCleanupArgs) -> Result<()> {
   Ok(())
 }
 
+// ------------------------------------------------------------------- trash
+
+/// Splits an absolute folder path into the folder to scan and the entry to
+/// look for in it. Both separators are honoured because a Windows remote sends
+/// `C:\Users\…` while the POSIX ones send `/`.
+fn split_parent(path: &str) -> Option<(String, String)> {
+  let trimmed = path.trim_end_matches(['/', '\\']);
+  // Only absolute paths: a relative one has no folder the host serves, and the
+  // remote command would otherwise scan the remote process's cwd by accident.
+  let absolute = trimmed.starts_with('/') || trimmed.as_bytes().get(1) == Some(&b':');
+  if !absolute {
+    return None;
+  }
+  let index = trimmed.rfind(['/', '\\'])?;
+  let (parent, name) = (&trimmed[..index], &trimmed[index + 1..]);
+  if parent.is_empty() || name.is_empty() {
+    return None;
+  }
+  Some((parent.to_string(), name.to_string()))
+}
+
+/**
+ * Moves named folders (a venv, a build output, a model cache) to the remote
+ * trash. The host can only plan against a folder it has in a scan, so each
+ * target's parent is scanned, the entry is resolved by name, and the plan runs
+ * on that node — the same path the workbench takes. Dry run by default.
+ *
+ * Targets should be leaf folders: the parent is scanned with the ordinary
+ * engine, so pointing at a folder inside a huge tree costs that tree's walk.
+ */
+fn trash(args: RemoteTrashArgs) -> Result<()> {
+  let policy = RemotePolicy {
+    allow_cleanup: true,
+  };
+  let remote = connect(&args.target, policy)?;
+  let _guard = StopOnDrop(remote.clone());
+
+  let mut by_parent: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+  for path in &args.paths {
+    let (parent, name) =
+      split_parent(path).with_context(|| format!("{path} is not an absolute folder path"))?;
+    by_parent.entry(parent).or_default().push(name);
+  }
+
+  let mut plans: Vec<(String, Value)> = Vec::new();
+  for (parent, names) in &by_parent {
+    if !args.json {
+      eprintln!("scanning {parent} on {} …", args.target);
+    }
+    let scan = host(remote.scan_start(&ScanStart {
+      paths: vec![parent.clone()],
+      ..ScanStart::default()
+    }))?;
+    let scan_id = text(&scan, "scanId")?.to_string();
+    let status = wait_ready(&remote, &scan_id, true)?;
+    let root_id = status["rootIds"]
+      .get(0)
+      .and_then(Value::as_str)
+      .context("the ready scan reported no root id")?
+      .to_string();
+    let page = host(remote.tree_children(&scan_id, &root_id, 0, 1000, "size"))?;
+    let items = page["items"].as_array().cloned().unwrap_or_default();
+    let mut node_ids: Vec<String> = Vec::new();
+    for name in names {
+      match items
+        .iter()
+        .find(|item| item["name"].as_str() == Some(name.as_str()))
+      {
+        Some(item) => node_ids.push(item["id"].as_str().unwrap_or_default().to_string()),
+        None => eprintln!("  {name} is not in {parent}; skipped"),
+      }
+    }
+    if node_ids.is_empty() {
+      continue;
+    }
+    let plan = host(remote.cleanup_plan(&scan_id, &node_ids))?;
+    plans.push((scan_id, plan));
+  }
+
+  if plans.is_empty() {
+    println!("nothing to plan");
+    return Ok(());
+  }
+
+  if args.json && !args.execute {
+    print_json(&json!({ "plans": plans.iter().map(|(_, plan)| plan.clone()).collect::<Vec<_>>() }))?;
+    return Ok(());
+  }
+
+  let mut total_entries = 0usize;
+  let mut total_bytes = 0u64;
+  for (_, plan) in &plans {
+    total_entries += plan["entries"].as_array().map(Vec::len).unwrap_or(0);
+    total_bytes += plan["totalSize"].as_u64().unwrap_or(0);
+  }
+  if !args.json {
+    for (_, plan) in &plans {
+      println!(
+        "plan {} — {} entries, {}",
+        plan["planId"].as_str().unwrap_or("?"),
+        plan["entries"].as_array().map(Vec::len).unwrap_or(0),
+        format_bytes(plan["totalSize"].as_u64().unwrap_or(0)),
+      );
+      for entry in plan["entries"].as_array().into_iter().flatten() {
+        println!(
+          "{:>10}  {}",
+          format_bytes(entry["size"].as_u64().unwrap_or(0)),
+          entry["path"].as_str().unwrap_or("?")
+        );
+      }
+    }
+  }
+
+  if !args.execute {
+    if !args.json {
+      println!(
+        "dry run: {total_entries} entries, {}; pass --execute to move them to the remote trash.",
+        format_bytes(total_bytes)
+      );
+    }
+    return Ok(());
+  }
+
+  let mut outcomes = Vec::new();
+  let mut freed = 0u64;
+  let mut failures = 0usize;
+  for (_, plan) in &plans {
+    let outcome =
+      host(remote.cleanup_execute(plan["planId"].as_str().context("plan returned no planId")?))?;
+    freed += outcome["bytesFreed"].as_u64().unwrap_or(0);
+    for failure in outcome["failed"].as_array().into_iter().flatten() {
+      failures += 1;
+      eprintln!(
+        "failed: {}",
+        failure["message"].as_str().unwrap_or(failure.to_string().as_str())
+      );
+    }
+    outcomes.push(outcome);
+  }
+  if args.json {
+    print_json(&json!({ "plans": plans.iter().map(|(_, plan)| plan.clone()).collect::<Vec<_>>(), "outcomes": outcomes }))?;
+  } else {
+    println!(
+      "trashed {} paths, freed {}{}",
+      outcomes
+        .iter()
+        .map(|outcome| outcome["trashed"].as_array().map(Vec::len).unwrap_or(0))
+        .sum::<usize>(),
+      format_bytes(freed),
+      if failures == 0 {
+        String::new()
+      } else {
+        format!(" ({failures} failed)")
+      }
+    );
+  }
+  Ok(())
+}
+
 // ------------------------------------------------------------------- open
 
 /// Connects one device and prints the URL that opens its workbench in a
@@ -699,4 +877,34 @@ fn text<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
     .get(key)
     .and_then(Value::as_str)
     .with_context(|| format!("the host response has no string field {key:?}"))
+}
+
+#[cfg(test)]
+mod trash_tests {
+  use super::split_parent;
+
+  #[test]
+  fn parents_split_on_both_separators() {
+    assert_eq!(
+      split_parent("/home/hk/dev/2048AI/models"),
+      Some(("/home/hk/dev/2048AI".to_string(), "models".to_string()))
+    );
+    // A Windows remote sends backslashes; the parent must not become `C:`.
+    assert_eq!(
+      split_parent(r"C:\Users\shenh\proj\node_modules"),
+      Some((r"C:\Users\shenh\proj".to_string(), "node_modules".to_string()))
+    );
+    // Trailing separators are not part of the name.
+    assert_eq!(
+      split_parent("/home/hk/dev/videos/.venvs/"),
+      Some(("/home/hk/dev/videos".to_string(), ".venvs".to_string()))
+    );
+  }
+
+  #[test]
+  fn relative_and_root_paths_are_refused() {
+    assert_eq!(split_parent("dev/node_modules"), None, "a relative path has no folder to serve");
+    assert_eq!(split_parent("/"), None);
+    assert_eq!(split_parent("/home"), None, "the root itself has no parent to scan");
+  }
 }
