@@ -12,7 +12,7 @@ progress:
   percent: 40
 links: []
 created_at: 2026-11-21T15:01:06Z
-updated_at: 2026-11-24T00:53:19Z
+updated_at: 2026-11-24T01:00:25Z
 archived_at: null
 deleted_at: null
 x_activity_receipts:
@@ -22,9 +22,12 @@ x_activity_receipts:
   - op_id: data-disk-cp-002
     request_hash: sha256:81a794ddaa3480ece04d0d520cf1f86550e83f2ccd1979911968e600677cb3ae
     applied_at: 2026-11-24T00:53:19Z
+  - op_id: data-disk-cp-003
+    request_hash: sha256:e6f4383a48f24551490ce7f3e6b0b5787df6b48dad2758e18480cb51afe5dd52
+    applied_at: 2026-11-24T01:00:25Z
 checkpoint:
-  summary: Disk filled again (19 GB free). Deleted polyquant (276 GB of market data) → 314 GB free. polyinsight (146 GB, same family) and the 380 GB slot build caches (in use) remain.
-  reported_at: 2026-11-24T00:00:00Z
+  summary: "Deleted polyquant (276 GB) + polyinsight (146 GB) + idle build caches: slots/1..3 target (378 GB), targets/ev30 + cf-deadman (36 GB). Free went 19 GB → 810 GB (7% used). Active targets now: 2 (targets/avfix72 and slots/1, both writing)."
+  reported_at: 2026-11-24T09:05:00Z
   reporter: agent
 ---
 ## Scan (protected streaming, 14 s)
