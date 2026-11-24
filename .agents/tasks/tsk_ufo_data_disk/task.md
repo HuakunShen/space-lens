@@ -12,13 +12,20 @@ progress:
   percent: 40
 links: []
 created_at: 2026-11-21T15:01:06Z
-updated_at: 2026-11-21T15:01:06Z
+updated_at: 2026-11-24T00:53:19Z
 archived_at: null
 deleted_at: null
 x_activity_receipts:
   - op_id: create-data-disk-001
     request_hash: sha256:72dbba810644f01cffcf7bf989b98c114a15e8259d0584e017b9b21fdb72f6da
     applied_at: 2026-11-21T15:01:06Z
+  - op_id: data-disk-cp-002
+    request_hash: sha256:81a794ddaa3480ece04d0d520cf1f86550e83f2ccd1979911968e600677cb3ae
+    applied_at: 2026-11-24T00:53:19Z
+checkpoint:
+  summary: Disk filled again (19 GB free). Deleted polyquant (276 GB of market data) → 314 GB free. polyinsight (146 GB, same family) and the 380 GB slot build caches (in use) remain.
+  reported_at: 2026-11-24T00:00:00Z
+  reporter: agent
 ---
 ## Scan (protected streaming, 14 s)
 `/media/hk/Data` 916 GB ext4, 862 GB allocated / 1.85M files, 411k dirs.
