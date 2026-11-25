@@ -25,11 +25,29 @@ use index::{NodeFacts, NodeId, NodeIndex, NONE};
 
 // ---------------------------------------------------------------- wire types
 
+// The index keeps canonical paths (verbatim-prefixed on Windows) because
+// cleanup re-checks them against `fs::canonicalize`; only the wire spelling
+// loses the prefix.
+fn wire_path<S: serde::Serializer>(path: &str, serializer: S) -> Result<S::Ok, S::Error> {
+  serializer.serialize_str(&spacelens_discovery::display_path(path))
+}
+
+fn wire_optional_path<S: serde::Serializer>(
+  path: &Option<String>,
+  serializer: S,
+) -> Result<S::Ok, S::Error> {
+  match path {
+    Some(path) => wire_path(path, serializer),
+    None => serializer.serialize_none(),
+  }
+}
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TreeNodeSummary {
   pub id: String,
   pub name: String,
+  #[serde(serialize_with = "wire_path")]
   pub path: String,
   pub size: u64,
   pub depth: u32,
@@ -90,10 +108,12 @@ pub struct ScanStatus {
   pub state: String,
   pub message: String,
   pub progress: Option<f64>,
+  #[serde(serialize_with = "wire_optional_path")]
   pub current_path: Option<String>,
   pub bytes_scanned: u64,
   pub entries_scanned: usize,
   pub root_ids: Vec<String>,
+  #[serde(serialize_with = "wire_optional_path")]
   pub label: Option<String>,
   pub updated_at: String,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -112,6 +132,7 @@ pub struct ScanSession {
   pub scan_id: String,
   pub root_ids: Vec<String>,
   pub created_at: String,
+  #[serde(serialize_with = "wire_optional_path")]
   pub label: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub app: Option<AppScanOrigin>,
@@ -314,6 +335,7 @@ pub struct EntryFingerprint {
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanEntry {
+  #[serde(serialize_with = "wire_path")]
   pub path: String,
   pub size: u64,
   pub reason: String,
@@ -353,6 +375,7 @@ pub struct CleanupOutcome {
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TrashedEntry {
+  #[serde(serialize_with = "wire_path")]
   pub path: String,
   pub size: u64,
 }
@@ -360,6 +383,7 @@ pub struct TrashedEntry {
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct FailedEntry {
+  #[serde(serialize_with = "wire_path")]
   pub path: String,
   pub code: String,
   pub message: String,

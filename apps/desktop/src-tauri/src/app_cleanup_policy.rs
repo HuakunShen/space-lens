@@ -232,7 +232,7 @@ pub fn strict_target_metadata(path: &Path) -> Option<fs::Metadata> {
 /// Windows (`\\?\C:\...`, `\\?\UNC\server\share\...`), which never equal the
 /// plain `C:\...` strings the audit records — without this mapping every
 /// Windows probe fails closed as `StalePlan`. Other platforms pass through.
-fn normalize_canonical(canonical: &Path) -> PathBuf {
+pub(crate) fn normalize_canonical(canonical: &Path) -> PathBuf {
   #[cfg(windows)]
   {
     let text = canonical.to_string_lossy();

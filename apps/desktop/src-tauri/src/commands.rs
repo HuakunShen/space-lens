@@ -2027,6 +2027,53 @@ mod tests {
     std::fs::remove_dir_all(path).unwrap();
   }
 
+  /// `fs::canonicalize` gives Windows scans `\?\` paths. The wire must carry
+  /// the plain spelling, which is also what reveal accepts against the plain
+  /// drive roots, while cleanup planning keeps working off the node ids.
+  #[test]
+  fn wire_paths_drop_the_verbatim_prefix_and_remain_revealable() {
+    let raw = std::env::temp_dir().join(format!("sl-wire-path-{}", std::process::id()));
+    std::fs::create_dir_all(raw.join("proj")).unwrap();
+    std::fs::write(raw.join("proj/a.bin"), vec![b'x'; 4096]).unwrap();
+    let canonical = std::fs::canonicalize(&raw).unwrap();
+    let plain = std::path::PathBuf::from(
+      spacelens_discovery::display_path(&canonical.to_string_lossy()).into_owned(),
+    );
+    let mut engine = crate::engine::EngineStore::new(vec![plain.clone()]);
+    let request = serde_json::from_value(serde_json::json!({ "paths": [plain] })).unwrap();
+    let session = engine.start_scan(request).unwrap();
+    let status = engine.status(&session.scan_id).unwrap();
+    let page = engine
+      .children(&crate::engine::ChildrenPageRequest {
+        scan_id: session.scan_id.clone(),
+        node_id: session.root_ids[0].clone(),
+        offset: 0,
+        limit: 10,
+        sort: "size".into(),
+      })
+      .unwrap();
+    let plan = engine
+      .plan(&crate::engine::CleanupPlanRequest {
+        scan_id: session.scan_id.clone(),
+        node_ids: vec![page.items[0].id.clone()],
+      })
+      .unwrap();
+    for wire in [
+      serde_json::to_value(&session).unwrap(),
+      serde_json::to_value(&status).unwrap(),
+      serde_json::to_value(&page).unwrap(),
+      serde_json::to_value(&plan).unwrap(),
+    ] {
+      assert!(!wire.to_string().contains(r"\\?\\"), "{wire}");
+    }
+    let wire = serde_json::to_value(&page).unwrap();
+    let path = wire["items"][0]["path"].as_str().unwrap();
+    assert_eq!(std::path::Path::new(path), plain.join("proj"));
+    crate::reveal::reveal_scan_path(&[plain], path, crate::reveal::RevealAction::Reveal)
+      .expect("the wire path is revealable under the served root");
+    std::fs::remove_dir_all(raw).unwrap();
+  }
+
   #[test]
   fn capabilities_declare_only_reachable_operations() {
     let capabilities = super::capabilities_json(serde_json::json!({
@@ -2615,7 +2662,10 @@ mod tests {
     .unwrap();
     let entries = value["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 1, "covered descendant must be pruned");
-    assert_eq!(entries[0]["path"], parent.to_string_lossy().as_ref());
+    assert_eq!(
+      entries[0]["path"],
+      spacelens_discovery::display_path(&parent.to_string_lossy()).as_ref()
+    );
     assert_eq!(entries[0]["reason"], "staged app location");
     assert_eq!(entries[0]["preset"], serde_json::Value::Null);
     assert_eq!(entries[0]["ignored"], false);

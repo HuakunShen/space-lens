@@ -1105,6 +1105,8 @@ mod tests {
     let root = fixture_project("views");
     let result = discovery_call(&root, json!({}));
     assert_ne!(result["isError"], true);
+    // JSON output carries plain paths, never the Windows verbatim prefix.
+    assert!(!result.to_string().contains(r"\\\\?\\"));
     let views = result["structuredContent"]["views"]
       .as_array()
       .expect("views");
@@ -1119,6 +1121,7 @@ mod tests {
       .any(|item| item["path"]
         .as_str()
         .unwrap()
+        .replace('\\', "/")
         .ends_with("project/node_modules")));
     assert!(!caches["items"]
       .as_array()
@@ -1127,6 +1130,7 @@ mod tests {
       .any(|item| item["path"]
         .as_str()
         .unwrap()
+        .replace('\\', "/")
         .contains("vendor/node_modules")));
 
     let gitignored = views
@@ -1137,7 +1141,11 @@ mod tests {
       .as_array()
       .unwrap()
       .iter()
-      .any(|item| item["path"].as_str().unwrap().ends_with("project/build")));
+      .any(|item| item["path"]
+        .as_str()
+        .unwrap()
+        .replace('\\', "/")
+        .ends_with("project/build")));
 
     let large = views
       .iter()

@@ -632,10 +632,14 @@ pub fn reveal_app_location(
   }
   let canonical = std::fs::canonicalize(path)
     .map_err(|_| problem_value("NotFound", format!("no such location: {path}")))?;
-  let location_hit = snapshot
-    .locations_by_app
-    .get(app_id)
-    .is_some_and(|paths| paths.contains(&canonical));
+  let location_hit = snapshot.locations_by_app.get(app_id).is_some_and(|paths| {
+    // Audited locations carry the plain spelling; canonicalize adds the
+    // Windows verbatim prefix.
+    let canonical = crate::app_cleanup_policy::normalize_canonical(&canonical);
+    paths
+      .iter()
+      .any(|path| crate::app_cleanup_policy::normalize_canonical(path) == canonical)
+  });
   let bundle_hit = snapshot
     .app_paths
     .get(app_id)
