@@ -216,7 +216,7 @@
       </div>{/if}
     {#if report}<p class="audit-generation" title={report.auditId ? `Audit generation ${report.auditId}` : undefined}>
         Audited {new Date(report.generatedAt).toLocaleString()}{#if !scanAvailable}
-          · app scans need the desktop host{/if}
+          · scanning a single app is not available on this host yet{/if}
       </p>{/if}
     <div class="audit-list">
       <div class="discovery-rows">
@@ -236,7 +236,7 @@
                     stale={isStale(app.id)}
                     scanning={scanningAppId === app.id}
                     scanDisabled={disabled || !scanAvailable}
-                    scanTitle={scanAvailable ? `Scan ${app.name}` : 'App scans need the desktop host'}
+                    scanTitle={scanAvailable ? `Scan ${app.name}` : 'Scanning a single app is not available on this host yet'}
                     onOpen={() => scanApp(app)}
                     onIcon={onIcon}
                   />
@@ -298,7 +298,7 @@
                     variant="outline"
                     size="sm"
                     disabled={disabled || scanningAppId !== null || !scanAvailable}
-                    title={scanAvailable ? `Scan ${app.name}` : 'App scans need the desktop host'}
+                    title={scanAvailable ? `Scan ${app.name}` : 'Scanning a single app is not available on this host yet'}
                     onclick={() => scanApp(app)}
                     >{scanningAppId === app.id ? 'Scanning…' : `Scan ${app.name} →`}</Button
                   >

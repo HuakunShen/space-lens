@@ -268,14 +268,15 @@ fn session_metadata(session_id: &str, bundle: &SessionBundle) -> Value {
 /// single worker slot — EngineStore rejects a second scan while one is
 /// active or leased; the slot semantics are locked by
 /// `tests/local_scan.rs::protected_prepare_is_nonblocking_and_cancellation_is_terminal`.
-/// `scan.appScan` advertises virtual-root app sessions (`appScanStart`).
+/// `scan.appScan` advertises virtual-root app sessions (`appScanStart`); they
+/// walk with the guarded scanner, so only where it runs.
 /// `memory` is supplied by [`crate::memory::capability`], which mirrors the
 /// running service's own greeting rather than a compile-time guess.
 fn capabilities_json(memory: Value) -> Value {
   json!({
       "apiMajor": API_MAJOR,
       "contractVersion": CONTRACT_VERSION,
-      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true, "appScan": true },
+      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true, "appScan": crate::engine::protected_scan_supported() },
       "cleanup": { "plan": true, "execute": true, "mode": "trash", "appPlan": true, "appExecute": true },
       "host": { "folderPicker": true, "appLocationReveal": true, "pathReveal": true, "platform": crate::reveal::host_platform() },
       "icloud": "unavailable",
@@ -1328,6 +1329,9 @@ fn submit_app_cleanup_reply(
     .map_err(|error| problem_value("InternalError", error))
 }
 
+const APP_SCAN_UNSUPPORTED: &str =
+  "Scanning a single app is not available on this platform yet. The app audit still lists app storage.";
+
 /// App-scan dispatch: clones the current audit snapshot under a short
 /// app-audit lock (the single A7 pinning point), prepares the session under a
 /// short engine lock, replies the session FIRST, and walks outside every lock
@@ -1338,6 +1342,13 @@ fn submit_app_scan_reply(
   request: AppScanStartRequest,
   reply: &Channel<Value>,
 ) {
+  if !crate::engine::protected_scan_supported() {
+    let _ = reply.send(json!({
+      "ok": false,
+      "problem": problem_value("UnsupportedOperation", APP_SCAN_UNSUPPORTED),
+    }));
+    return;
+  }
   let snapshot = bundle.app_audit.lock().unwrap().audit.clone();
   let Some(snapshot) = snapshot else {
     let _ = reply.send(json!({ "ok": false, "problem": { "code": "InvalidRequest", "message": "audit is stale; re-run the audit", "retryable": false } }));
@@ -2074,6 +2085,43 @@ mod tests {
     std::fs::remove_dir_all(raw).unwrap();
   }
 
+  #[cfg(not(unix))]
+  #[test]
+  fn app_scans_are_refused_with_a_clear_message_without_the_guarded_scanner() {
+    let state = super::AppState::new(Vec::new());
+    let session = super::connect_window_session("main", super::LOCAL_DEVICE_ID, &state);
+    let bundle = state
+      .sessions
+      .lock()
+      .unwrap()
+      .get(session["sessionId"].as_str().unwrap())
+      .unwrap()
+      .clone();
+    let messages = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let received = messages.clone();
+    let channel = tauri::ipc::Channel::<serde_json::Value>::new(move |body| {
+      let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+        panic!("expected JSON channel reply")
+      };
+      received
+        .lock()
+        .unwrap()
+        .push(serde_json::from_str::<serde_json::Value>(&json).unwrap());
+      Ok(())
+    });
+    super::submit_app_scan_reply(
+      bundle,
+      serde_json::from_value(serde_json::json!({ "auditId": "audit_x", "appId": "codex-cli" }))
+        .unwrap(),
+      &channel,
+    );
+    let messages = messages.lock().unwrap();
+    let problem = &messages[0]["problem"];
+    assert_eq!(messages[0]["ok"], false);
+    assert_eq!(problem["problem"]["code"], "UnsupportedOperation");
+    assert_eq!(problem["problem"]["message"], super::APP_SCAN_UNSUPPORTED);
+  }
+
   #[test]
   fn capabilities_declare_only_reachable_operations() {
     let capabilities = super::capabilities_json(serde_json::json!({
@@ -2087,7 +2135,12 @@ mod tests {
     assert_eq!(capabilities["scan"]["cancel"], true);
     assert_eq!(capabilities["scan"]["discovery"], true);
     assert_eq!(capabilities["scan"]["appAudit"], true);
-    assert_eq!(capabilities["scan"]["appScan"], true);
+    // App scans walk with the guarded scanner only; never advertise them
+    // where it cannot run.
+    assert_eq!(
+      capabilities["scan"]["appScan"],
+      crate::engine::protected_scan_supported()
+    );
     assert_eq!(capabilities["scan"]["maxConcurrent"], 1);
     assert_eq!(capabilities["cleanup"]["plan"], true);
     assert_eq!(capabilities["cleanup"]["execute"], true);
