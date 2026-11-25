@@ -7,6 +7,7 @@
 
 use serde::Serialize;
 use space_lens::{scan_directory, IgnoredMode, ScanNode, ScanOptions};
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
 use std::fs;
@@ -144,7 +145,7 @@ pub fn run_discovery(options: DiscoveryOptions) -> Result<DiscoveryReport, Disco
   Ok(DiscoveryReport {
     roots: roots
       .iter()
-      .map(|root| root.to_string_lossy().to_string())
+      .map(|root| display_path(&root.to_string_lossy()).into_owned())
       .collect(),
     views: vec![
       finish_view(
@@ -167,6 +168,39 @@ pub fn run_discovery(options: DiscoveryOptions) -> Result<DiscoveryReport, Disco
       ),
     ],
   })
+}
+
+/// The spelling of a scanned path that leaves this crate: the Windows verbatim
+/// prefix (`\\?\C:\`, `\\?\UNC\`) that `fs::canonicalize` adds is removed.
+/// It stays when the plain spelling would name a different file (a component
+/// ending in a dot or space, or a DOS device name), because shells hand these
+/// strings back. Other paths pass through.
+pub fn display_path(path: &str) -> Cow<'_, str> {
+  let Some(rest) = path.strip_prefix(r"\\?\") else {
+    return Cow::Borrowed(path);
+  };
+  if rest.split('\\').any(needs_verbatim) {
+    return Cow::Borrowed(path);
+  }
+  if let Some(share) = rest.strip_prefix(r"UNC\") {
+    return Cow::Owned(format!(r"\\{share}"));
+  }
+  match rest.as_bytes() {
+    [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic() => Cow::Borrowed(rest),
+    _ => Cow::Borrowed(path),
+  }
+}
+
+fn needs_verbatim(component: &str) -> bool {
+  if component.ends_with('.') || component.ends_with(' ') {
+    return true;
+  }
+  let stem = component.split('.').next().unwrap_or_default().trim_end();
+  let upper = stem.to_ascii_uppercase();
+  matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+    || (upper.len() == 4
+      && (upper.starts_with("COM") || upper.starts_with("LPT"))
+      && matches!(upper.as_bytes()[3], b'1'..=b'9'))
 }
 
 fn canonical_roots(requested: &[PathBuf]) -> Result<Vec<PathBuf>, DiscoveryError> {
@@ -236,7 +270,7 @@ fn walk_classify(
       .ancestors()
       .any(|ancestor| ignored_paths.contains(ancestor));
     let entry = |category: Option<&'static str>, is_directory: bool| DiscoveryEntry {
-      path: path.to_string_lossy().to_string(),
+      path: display_path(&path.to_string_lossy()).into_owned(),
       name: path
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
@@ -394,7 +428,12 @@ mod tests {
     }
 
     fn paths(view: &DiscoveryView) -> Vec<String> {
-      view.items.iter().map(|item| item.path.clone()).collect()
+      // Forward slashes so the assertions below read the same on Windows.
+      view
+        .items
+        .iter()
+        .map(|item| item.path.replace('\\', "/"))
+        .collect()
     }
   }
 
@@ -410,6 +449,25 @@ mod tests {
       ignore_hidden: false,
       min_size,
       limit,
+    }
+  }
+
+  #[test]
+  fn display_path_drops_only_safe_verbatim_prefixes() {
+    use super::display_path;
+    assert_eq!(display_path(r"\\?\C:\Users\me\a b"), r"C:\Users\me\a b");
+    assert_eq!(display_path(r"\\?\C:\"), r"C:\");
+    assert_eq!(display_path(r"\\?\UNC\server\share\x"), r"\\server\share\x");
+    for kept in [
+      r"\\?\C:\dir\trailing.",
+      r"\\?\C:\dir\trailing \x",
+      r"\\?\C:\dir\NUL.txt",
+      r"\\?\C:\com1",
+      r"\\?\Volume{0000}\x",
+      r"C:\plain",
+      "/tmp/a",
+    ] {
+      assert_eq!(display_path(kept), kept);
     }
   }
 
@@ -446,7 +504,7 @@ mod tests {
     let node_modules = caches
       .items
       .iter()
-      .find(|item| item.path.ends_with("project/node_modules"))
+      .find(|item| Path::new(&item.path).ends_with("project/node_modules"))
       .unwrap();
     assert_eq!(node_modules.category, Some("Node dependencies"));
   }
@@ -471,9 +529,8 @@ mod tests {
     // paths are canonical (macOS temp roots live under symlinked ancestors).
     let large = Fixture::view(&report, DiscoveryKind::LargeFiles);
     let ignored_binary = ignored_binary.canonicalize().unwrap();
-    assert!(Fixture::paths(large)
-      .iter()
-      .any(|path| Path::new(path) == ignored_binary));
+    let ignored_binary = super::display_path(&ignored_binary.to_string_lossy()).into_owned();
+    assert!(large.items.iter().any(|item| item.path == ignored_binary));
   }
 
   #[test]
@@ -508,6 +565,7 @@ mod tests {
     assert!(error.0.contains("does not exist"));
   }
 
+  #[cfg(unix)]
   #[test]
   fn symlinked_root_fails_closed() {
     let fixture = Fixture::new("symlink-root");

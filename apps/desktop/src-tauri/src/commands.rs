@@ -4,11 +4,15 @@
 //! the engine's vocabulary.
 
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use space_lens::local_scan::LocalScanCancellation;
+use space_lens::ScanObserver;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 
@@ -268,14 +272,15 @@ fn session_metadata(session_id: &str, bundle: &SessionBundle) -> Value {
 /// single worker slot — EngineStore rejects a second scan while one is
 /// active or leased; the slot semantics are locked by
 /// `tests/local_scan.rs::protected_prepare_is_nonblocking_and_cancellation_is_terminal`.
-/// `scan.appScan` advertises virtual-root app sessions (`appScanStart`).
+/// `scan.appScan` advertises virtual-root app sessions (`appScanStart`); they
+/// walk with the guarded scanner, so only where it runs.
 /// `memory` is supplied by [`crate::memory::capability`], which mirrors the
 /// running service's own greeting rather than a compile-time guess.
 fn capabilities_json(memory: Value) -> Value {
   json!({
       "apiMajor": API_MAJOR,
       "contractVersion": CONTRACT_VERSION,
-      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true, "appScan": true },
+      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true, "appScan": crate::engine::protected_scan_supported() },
       "cleanup": { "plan": true, "execute": true, "mode": "trash", "appPlan": true, "appExecute": true },
       "host": { "folderPicker": true, "appLocationReveal": true, "pathReveal": true, "platform": crate::reveal::host_platform() },
       "icloud": "unavailable",
@@ -1100,6 +1105,18 @@ pub async fn sl_submit(
         }
         Ok(())
       }
+      // Every other scan (all of them on Windows, where the guarded scanner
+      // is unavailable) walks the filesystem. Same session-first flow: reply
+      // with a live `scanning` session, then walk off the engine lock. The
+      // walk used to run inside this reply under the engine lock, so a large
+      // drive outlived the client's reply timeout ("sl_submit timed out") and
+      // starved every later engine call — including the next scan.
+      SubmitRequest::ScanStart { request } => {
+        if let Some(task) = submit_scan_reply(&bundle, request, &reply) {
+          tauri::async_runtime::spawn_blocking(move || run_scan_task(&bundle, task));
+        }
+        Ok(())
+      }
       SubmitRequest::AppCleanupPlan { .. } | SubmitRequest::AppCleanupExecute { .. } => {
         let roots = state.roots.clone();
         submit_app_cleanup_reply(&bundle, &roots, request, &reply)
@@ -1133,13 +1150,128 @@ pub async fn sl_submit(
       }
       request => {
         let mut engine = bundle.engine.lock().unwrap();
-        submit_engine_reply(&mut engine, &bundle.events, request, &reply)
+        submit_engine_reply(&mut engine, request, &reply)
       }
     }
   });
   handle
     .await
     .map_err(|error| problem_value("InternalError", error))?
+}
+
+/// Prepares a filesystem-walk scan under a short engine lock, publishes its
+/// `scanning` status and replies the session. Returns the walk to run in the
+/// background, or `None` when the request was refused (the refusal already
+/// went out on `reply`) or the reply channel is gone (the scan is closed).
+fn submit_scan_reply(
+  bundle: &SessionBundle,
+  request: crate::engine::ScanStartRequest,
+  reply: &Channel<Value>,
+) -> Option<LocalScanTask> {
+  let prepared = bundle.engine.lock().unwrap().prepare_scan(request);
+  let (session, task) = match prepared {
+    Ok(prepared) => prepared,
+    Err(problem) => {
+      let _ = reply.send(json!({ "ok": false, "problem": problem_to_value(problem) }));
+      return None;
+    }
+  };
+  let status = bundle.engine.lock().unwrap().status(&session.scan_id);
+  if let Ok(status) = status {
+    let _ = bundle
+      .events
+      .publish(json!({ "kind": "scan.updated", "status": status }));
+  }
+  if reply
+    .send(json!({ "ok": true, "result": session }))
+    .is_err()
+  {
+    // No worker was launched: close the scan and release its slot.
+    let mut engine = bundle.engine.lock().unwrap();
+    let _ = engine.cancel_scan(&task.scan_id);
+    let _ = engine.finish_scan(&task.scan_id, Vec::new());
+    return None;
+  }
+  Some(task)
+}
+
+/// How often a running walk publishes its counts and looks for a cancel.
+const WALK_RELAY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// One tick between a walk and its scan record: a cancellation goes to the
+/// walk, otherwise the walk's counts go to the record and the event stream.
+fn relay_walk_state(
+  bundle: &SessionBundle,
+  scan_id: &str,
+  cancellation: &LocalScanCancellation,
+  observer: &ScanObserver,
+) {
+  if cancellation.is_cancelled() {
+    observer.cancelled.store(true, Ordering::Relaxed);
+    return;
+  }
+  // Publish under the engine lock: captured counts must never arrive after
+  // the cancelled event.
+  let mut engine = bundle.engine.lock().unwrap();
+  let updated = engine.update_scan_progress(
+    scan_id,
+    observer.files.load(Ordering::Relaxed),
+    observer.bytes.load(Ordering::Relaxed),
+  );
+  if let Ok(status) = updated {
+    if status.state == "scanning" {
+      let _ = bundle
+        .events
+        .publish(json!({ "kind": "scan.updated", "status": status }));
+    }
+  }
+}
+
+/// Background filesystem walk for a scan prepared by `submit_scan_reply`.
+/// The engine lock is taken only for progress and to land the result, never
+/// for the walk.
+fn run_scan_task(bundle: &SessionBundle, task: LocalScanTask) {
+  let LocalScanTask {
+    scan_id,
+    options,
+    cancellation,
+  } = task;
+  let observer = ScanObserver::default();
+  observer
+    .cancelled
+    .store(cancellation.is_cancelled(), Ordering::Relaxed);
+  let tree = std::thread::scope(|scope| {
+    let (done, finished) = std::sync::mpsc::channel::<()>();
+    let observer = &observer;
+    let walk = scope.spawn(move || {
+      // Dropped when the walk returns or panics, which ends the relay loop.
+      let _done = done;
+      space_lens::scan_directory_observed(options, observer)
+    });
+    while finished.recv_timeout(WALK_RELAY_INTERVAL) == Err(RecvTimeoutError::Timeout) {
+      relay_walk_state(bundle, &scan_id, &cancellation, observer);
+    }
+    // A panicked walk lands as an empty tree, which fails the scan.
+    walk.join().unwrap_or_default()
+  });
+  let mut engine = bundle.engine.lock().unwrap();
+  let was_scanning = engine
+    .status(&scan_id)
+    .is_ok_and(|status| status.state == "scanning");
+  let status = engine.finish_scan(&scan_id, tree);
+  drop(engine);
+  if was_scanning {
+    if let Ok(status) = status {
+      let kind = if status.state == "ready" {
+        "scan.completed"
+      } else {
+        "scan.updated"
+      };
+      let _ = bundle
+        .events
+        .publish(json!({ "kind": kind, "status": status }));
+    }
+  }
 }
 
 fn run_local_scan_task(bundle: &SessionBundle, task: LocalScanTask) {
@@ -1252,6 +1384,9 @@ fn submit_app_cleanup_reply(
     .map_err(|error| problem_value("InternalError", error))
 }
 
+const APP_SCAN_UNSUPPORTED: &str =
+  "Scanning a single app is not available on this platform yet. The app audit still lists app storage.";
+
 /// App-scan dispatch: clones the current audit snapshot under a short
 /// app-audit lock (the single A7 pinning point), prepares the session under a
 /// short engine lock, replies the session FIRST, and walks outside every lock
@@ -1262,6 +1397,13 @@ fn submit_app_scan_reply(
   request: AppScanStartRequest,
   reply: &Channel<Value>,
 ) {
+  if !crate::engine::protected_scan_supported() {
+    let _ = reply.send(json!({
+      "ok": false,
+      "problem": problem_value("UnsupportedOperation", APP_SCAN_UNSUPPORTED),
+    }));
+    return;
+  }
   let snapshot = bundle.app_audit.lock().unwrap().audit.clone();
   let Some(snapshot) = snapshot else {
     let _ = reply.send(json!({ "ok": false, "problem": { "code": "InvalidRequest", "message": "audit is stale; re-run the audit", "retryable": false } }));
@@ -1401,19 +1543,16 @@ fn run_app_scan_task(
 
 fn submit_engine_reply(
   engine: &mut EngineStore,
-  events: &EventSink,
   request: SubmitRequest,
   reply: &Channel<Value>,
 ) -> Result<(), Value> {
   // Engine failures must stay inside this outcome closure so every result
   // travels through Channel, including stale/forbidden cleanup selections.
   let value: Result<Value, Value> = (|| match request {
-    SubmitRequest::ScanStart { request } => {
-      let session = engine.start_scan(request).map_err(problem_to_value)?;
-      let status = engine.status(&session.scan_id).map_err(problem_to_value)?;
-      let _ = events.publish(json!({ "kind": "scan.completed", "status": status }));
-      serde_json::to_value(session).map_err(|error| problem_value("InternalError", error))
-    }
+    SubmitRequest::ScanStart { .. } => Err(problem_value(
+      "InternalError",
+      "scans are dispatched before the engine lock",
+    )),
     SubmitRequest::CleanupPlan { request } => {
       serde_json::to_value(engine.plan(&request).map_err(problem_to_value)?)
         .map_err(|error| problem_value("InternalError", error))
@@ -1867,6 +2006,234 @@ mod tests {
     std::fs::remove_dir_all(path).unwrap();
   }
 
+  /// Regression: on Windows every scan is a filesystem walk, and `sl_submit`
+  /// used to run that walk under the engine lock before replying. A large
+  /// drive outlived the client's 60 s reply timeout ("sl_submit timed out")
+  /// and every later engine call — the next scan included — queued behind
+  /// the lock forever. The reply must now carry a live `scanning` session
+  /// before any walk, with the engine lock free, and the background walk
+  /// lands the scan as ready with a `scan.completed` event.
+  #[test]
+  fn filesystem_scan_replies_scanning_session_before_walking_off_the_engine_lock() {
+    let path = std::env::temp_dir().join(format!("sl-walk-worker-{}", std::process::id()));
+    std::fs::create_dir_all(path.join("proj/node_modules/x")).unwrap();
+    std::fs::write(path.join("proj/node_modules/x/a.bin"), vec![b'x'; 4096]).unwrap();
+    let path = std::fs::canonicalize(path).unwrap();
+    let bundle = super::SessionBundle {
+      window_label: "fixture".into(),
+      device_id: super::LOCAL_DEVICE_ID.to_string(),
+      device_label: "This machine".into(),
+      service_instance_id: super::SERVICE_INSTANCE_ID.into(),
+      backend_label: "Native host".into(),
+      generation: 0,
+      remote: None,
+      engine: std::sync::Mutex::new(crate::engine::EngineStore::new(vec![path.clone()])),
+      events: crate::events::EventSink::new(),
+      discovery: std::sync::Mutex::new(()),
+      app_audit: std::sync::Mutex::new(super::AppAuditState::default()),
+      app_cleanup: std::sync::Mutex::new(crate::app_cleanup::AppCleanupState::default()),
+    };
+    let messages = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let received = messages.clone();
+    let channel = tauri::ipc::Channel::<serde_json::Value>::new(move |body| {
+      let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+        panic!("expected JSON channel reply")
+      };
+      received
+        .lock()
+        .unwrap()
+        .push(serde_json::from_str::<serde_json::Value>(&json).unwrap());
+      Ok(())
+    });
+    // localOnly: false runs the filesystem walk on every platform; on Windows
+    // the page's localOnly request takes this same path.
+    let request = serde_json::from_value(serde_json::json!({
+      "paths": [path], "localOnly": false, "respectGitignore": true,
+      "ignoredMode": "summarize", "ignoreHidden": false,
+    }))
+    .unwrap();
+    let task = super::submit_scan_reply(&bundle, request, &channel)
+      .expect("a valid scan hands back its walk");
+    {
+      let replies = messages.lock().unwrap();
+      assert_eq!(replies.len(), 1, "the session reply precedes the walk");
+      assert_eq!(replies[0]["ok"], true);
+      assert_eq!(replies[0]["result"]["scanId"], task.scan_id.as_str());
+    }
+    let mut engine = bundle
+      .engine
+      .try_lock()
+      .expect("the engine lock is free while the walk is pending");
+    assert_eq!(engine.status(&task.scan_id).unwrap().state, "scanning");
+    drop(engine);
+    // A second scan is refused (one slot) instead of queuing on the lock.
+    let second = serde_json::from_value(serde_json::json!({ "paths": [path] })).unwrap();
+    assert!(super::submit_scan_reply(&bundle, second, &channel).is_none());
+    assert_eq!(
+      messages.lock().unwrap()[1]["problem"]["problem"]["code"],
+      "LimitExceeded"
+    );
+
+    let scan_id = task.scan_id.clone();
+    super::run_scan_task(&bundle, task);
+    let status = bundle.engine.lock().unwrap().status(&scan_id).unwrap();
+    assert_eq!(status.state, "ready");
+    assert_eq!(status.root_ids.len(), 1);
+    assert!(status.bytes_scanned >= 4096);
+    let (_, replay) = bundle.events.subscribe(None);
+    let kinds: Vec<_> = replay
+      .replay
+      .iter()
+      .map(|event| event.payload["kind"].as_str().unwrap().to_string())
+      .collect();
+    assert_eq!(kinds, ["scan.updated", "scan.completed"]);
+    // The slot is released once the walk lands.
+    let again = serde_json::from_value(serde_json::json!({ "paths": [path] })).unwrap();
+    assert!(super::submit_scan_reply(&bundle, again, &channel).is_some());
+    std::fs::remove_dir_all(path).unwrap();
+  }
+
+  /// `fs::canonicalize` gives Windows scans `\?\` paths. The wire must carry
+  /// the plain spelling, which is also what reveal accepts against the plain
+  /// drive roots, while cleanup planning keeps working off the node ids.
+  #[test]
+  fn wire_paths_drop_the_verbatim_prefix_and_remain_revealable() {
+    let raw = std::env::temp_dir().join(format!("sl-wire-path-{}", std::process::id()));
+    std::fs::create_dir_all(raw.join("proj")).unwrap();
+    std::fs::write(raw.join("proj/a.bin"), vec![b'x'; 4096]).unwrap();
+    let canonical = std::fs::canonicalize(&raw).unwrap();
+    let plain = std::path::PathBuf::from(
+      spacelens_discovery::display_path(&canonical.to_string_lossy()).into_owned(),
+    );
+    let mut engine = crate::engine::EngineStore::new(vec![plain.clone()]);
+    let request = serde_json::from_value(serde_json::json!({ "paths": [plain] })).unwrap();
+    let session = engine.start_scan(request).unwrap();
+    let status = engine.status(&session.scan_id).unwrap();
+    let page = engine
+      .children(&crate::engine::ChildrenPageRequest {
+        scan_id: session.scan_id.clone(),
+        node_id: session.root_ids[0].clone(),
+        offset: 0,
+        limit: 10,
+        sort: "size".into(),
+      })
+      .unwrap();
+    let plan = engine
+      .plan(&crate::engine::CleanupPlanRequest {
+        scan_id: session.scan_id.clone(),
+        node_ids: vec![page.items[0].id.clone()],
+      })
+      .unwrap();
+    for wire in [
+      serde_json::to_value(&session).unwrap(),
+      serde_json::to_value(&status).unwrap(),
+      serde_json::to_value(&page).unwrap(),
+      serde_json::to_value(&plan).unwrap(),
+    ] {
+      assert!(!wire.to_string().contains(r"\\?\\"), "{wire}");
+    }
+    let wire = serde_json::to_value(&page).unwrap();
+    let path = wire["items"][0]["path"].as_str().unwrap();
+    assert_eq!(std::path::Path::new(path), plain.join("proj"));
+    crate::reveal::reveal_scan_path(&[plain], path, crate::reveal::RevealAction::Reveal)
+      .expect("the wire path is revealable under the served root");
+    std::fs::remove_dir_all(raw).unwrap();
+  }
+
+  #[test]
+  fn walk_scans_report_the_observer_counts_and_stop_when_cancelled() {
+    use std::sync::atomic::Ordering;
+    let path = std::env::temp_dir().join(format!("sl-walk-cancel-{}", std::process::id()));
+    std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(path.join("file"), vec![b'x'; 4096]).unwrap();
+    let path = std::fs::canonicalize(path).unwrap();
+    let state = super::AppState::new(vec![path.clone()]);
+    let session = super::connect_window_session("main", super::LOCAL_DEVICE_ID, &state);
+    let bundle = state
+      .sessions
+      .lock()
+      .unwrap()
+      .get(session["sessionId"].as_str().unwrap())
+      .unwrap()
+      .clone();
+    let request = || serde_json::from_value(serde_json::json!({ "paths": [path] })).unwrap();
+    let (scan, task) = bundle
+      .engine
+      .lock()
+      .unwrap()
+      .prepare_scan(request())
+      .unwrap();
+
+    let observer = space_lens::ScanObserver::default();
+    observer.files.store(7, Ordering::Relaxed);
+    observer.bytes.store(1234, Ordering::Relaxed);
+    super::relay_walk_state(&bundle, &task.scan_id, &task.cancellation, &observer);
+    let (_, replay) = bundle.events.subscribe(None);
+    let event = &replay.replay.last().unwrap().payload;
+    assert_eq!(event["kind"], "scan.updated");
+    assert_eq!(event["status"]["entriesScanned"], 7);
+    assert_eq!(event["status"]["bytesScanned"], 1234);
+    assert!(!observer.cancelled.load(Ordering::Relaxed));
+
+    bundle
+      .engine
+      .lock()
+      .unwrap()
+      .cancel_scan(&scan.scan_id)
+      .unwrap();
+    super::relay_walk_state(&bundle, &task.scan_id, &task.cancellation, &observer);
+    assert!(observer.cancelled.load(Ordering::Relaxed));
+
+    super::run_scan_task(&bundle, task);
+    let mut engine = bundle.engine.lock().unwrap();
+    assert_eq!(engine.status(&scan.scan_id).unwrap().state, "cancelled");
+    let (_, replay) = bundle.events.subscribe(None);
+    assert!(replay
+      .replay
+      .iter()
+      .all(|event| event.payload["kind"] != "scan.completed"));
+    assert!(engine.prepare_scan(request()).is_ok());
+    drop(engine);
+    std::fs::remove_dir_all(path).unwrap();
+  }
+
+  #[cfg(not(unix))]
+  #[test]
+  fn app_scans_are_refused_with_a_clear_message_without_the_guarded_scanner() {
+    let state = super::AppState::new(Vec::new());
+    let session = super::connect_window_session("main", super::LOCAL_DEVICE_ID, &state);
+    let bundle = state
+      .sessions
+      .lock()
+      .unwrap()
+      .get(session["sessionId"].as_str().unwrap())
+      .unwrap()
+      .clone();
+    let messages = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let received = messages.clone();
+    let channel = tauri::ipc::Channel::<serde_json::Value>::new(move |body| {
+      let tauri::ipc::InvokeResponseBody::Json(json) = body else {
+        panic!("expected JSON channel reply")
+      };
+      received
+        .lock()
+        .unwrap()
+        .push(serde_json::from_str::<serde_json::Value>(&json).unwrap());
+      Ok(())
+    });
+    super::submit_app_scan_reply(
+      bundle,
+      serde_json::from_value(serde_json::json!({ "auditId": "audit_x", "appId": "codex-cli" }))
+        .unwrap(),
+      &channel,
+    );
+    let messages = messages.lock().unwrap();
+    let problem = &messages[0]["problem"];
+    assert_eq!(messages[0]["ok"], false);
+    assert_eq!(problem["problem"]["code"], "UnsupportedOperation");
+    assert_eq!(problem["problem"]["message"], super::APP_SCAN_UNSUPPORTED);
+  }
+
   #[test]
   fn capabilities_declare_only_reachable_operations() {
     let capabilities = super::capabilities_json(serde_json::json!({
@@ -1880,7 +2247,12 @@ mod tests {
     assert_eq!(capabilities["scan"]["cancel"], true);
     assert_eq!(capabilities["scan"]["discovery"], true);
     assert_eq!(capabilities["scan"]["appAudit"], true);
-    assert_eq!(capabilities["scan"]["appScan"], true);
+    // App scans walk with the guarded scanner only; never advertise them
+    // where it cannot run.
+    assert_eq!(
+      capabilities["scan"]["appScan"],
+      crate::engine::protected_scan_supported()
+    );
     assert_eq!(capabilities["scan"]["maxConcurrent"], 1);
     assert_eq!(capabilities["cleanup"]["plan"], true);
     assert_eq!(capabilities["cleanup"]["execute"], true);
@@ -2035,7 +2407,6 @@ mod tests {
     let mut engine = crate::engine::EngineStore::new(Vec::new());
     let result = submit_engine_reply(
       &mut engine,
-      &crate::events::EventSink::new(),
       SubmitRequest::CleanupPlan {
         request: crate::engine::CleanupPlanRequest {
           scan_id: "missing".into(),
@@ -2456,7 +2827,10 @@ mod tests {
     .unwrap();
     let entries = value["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 1, "covered descendant must be pruned");
-    assert_eq!(entries[0]["path"], parent.to_string_lossy().as_ref());
+    assert_eq!(
+      entries[0]["path"],
+      spacelens_discovery::display_path(&parent.to_string_lossy()).as_ref()
+    );
     assert_eq!(entries[0]["reason"], "staged app location");
     assert_eq!(entries[0]["preset"], serde_json::Value::Null);
     assert_eq!(entries[0]["ignored"], false);
@@ -2817,7 +3191,6 @@ mod tests {
     // Engine submits never route to app cleanup and vice versa.
     let result = submit_engine_reply(
       &mut crate::engine::EngineStore::new(Vec::new()),
-      &crate::events::EventSink::new(),
       serde_json::from_value(serde_json::json!({
         "kind": "appScanStart",
         "auditId": "audit_abcdef1234567890abcdef",

@@ -10,6 +10,7 @@ pub mod permissions;
 pub mod remote;
 pub mod reveal;
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 use tauri::Manager;
 
@@ -72,9 +73,16 @@ pub fn run() {
 }
 
 pub(crate) fn dirs_home() -> PathBuf {
-  std::env::var("HOME")
-    .map(PathBuf::from)
-    .unwrap_or_else(|_| PathBuf::from("/"))
+  home_from(|name| std::env::var_os(name))
+}
+
+/// Windows sets USERPROFILE, not HOME: only shells such as Git Bash add HOME,
+/// so an app started from Explorer has none.
+fn home_from(env: impl Fn(&str) -> Option<OsString>) -> PathBuf {
+  let read = |name| env(name).filter(|value| !value.is_empty());
+  read("HOME")
+    .or_else(|| cfg!(windows).then(|| read("USERPROFILE")).flatten())
+    .map_or_else(|| PathBuf::from("/"), PathBuf::from)
 }
 
 /// Desktop roots: the user's home directory plus the platform's mount roots,
@@ -119,6 +127,27 @@ fn default_roots() -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn home_falls_back_to_the_windows_profile_when_home_is_unset() {
+    use std::ffi::OsString;
+    let env = |pairs: &'static [(&str, &str)]| {
+      move |name: &str| {
+        pairs
+          .iter()
+          .find(|(key, _)| *key == name)
+          .map(|(_, value)| OsString::from(value))
+      }
+    };
+    let both = env(&[("HOME", "/h"), ("USERPROFILE", "/p")]);
+    assert_eq!(home_from(both), PathBuf::from("/h"));
+    // A Windows app started from Explorer has USERPROFILE and no HOME; "/"
+    // there is not a folder anyone chose.
+    let profile = env(&[("HOME", ""), ("USERPROFILE", "/p")]);
+    let expected = if cfg!(windows) { "/p" } else { "/" };
+    assert_eq!(home_from(profile), PathBuf::from(expected));
+    assert_eq!(home_from(env(&[])), PathBuf::from("/"));
+  }
 
   #[cfg(target_os = "macos")]
   #[test]

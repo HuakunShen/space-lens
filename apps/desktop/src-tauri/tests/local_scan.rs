@@ -584,3 +584,75 @@ fn legacy_discovery_still_walks_the_filesystem_outside_protected_scans() {
     "scan roots still cannot be cleaned up"
   );
 }
+
+#[test]
+fn filesystem_walk_scans_prepare_without_walking_and_land_through_finish() {
+  // Every Windows scan takes this path. Prepare is a short, walk-free lock
+  // section; the walk runs outside the engine and lands through finish_scan.
+  let fixture = Fixture::new();
+  let mut store = EngineStore::new(vec![fixture.0.clone()]);
+  let request = || -> ScanStartRequest {
+    serde_json::from_value(serde_json::json!({ "paths": [fixture.0], "localOnly": false })).unwrap()
+  };
+  let (session, task) = store.prepare_scan(request()).unwrap();
+  assert!(session.root_ids.is_empty());
+  assert_eq!(store.status(&session.scan_id).unwrap().state, "scanning");
+  assert_eq!(
+    store.prepare_scan(request()).err().unwrap().code,
+    "LimitExceeded"
+  );
+
+  let tree = space_lens::scan_directory(task.options);
+  let status = store.finish_scan(&session.scan_id, tree).unwrap();
+  assert_eq!(status.state, "ready");
+  assert_eq!(status.root_ids.len(), 1);
+  // Unix counts the directories' own blocks on top of the file.
+  assert!(status.bytes_scanned >= 8192);
+  assert_eq!(root_children(&mut store, &session.scan_id).items.len(), 1);
+
+  // Progress lands on the running scan.
+  let (running, task) = store.prepare_scan(request()).unwrap();
+  let progressed = store
+    .update_scan_progress(&running.scan_id, 12, 4096)
+    .unwrap();
+  assert_eq!(progressed.entries_scanned, 12);
+  assert_eq!(progressed.bytes_scanned, 4096);
+
+  // Cancel is terminal and frees the slot at once: the walk is told to stop,
+  // so the next scan need not wait for it to land.
+  assert_eq!(
+    store.cancel_scan(&running.scan_id).unwrap().state,
+    "cancelled"
+  );
+  assert!(task.cancellation.is_cancelled());
+  let (next, _next_task) = store.prepare_scan(request()).unwrap();
+  let late_progress = store
+    .update_scan_progress(&running.scan_id, 99, 9999)
+    .unwrap();
+  assert_eq!(late_progress.entries_scanned, 12);
+  // The cancelled walk landing late neither revives it nor frees the slot the
+  // next scan holds.
+  let late = space_lens::scan_directory(task.options);
+  assert_eq!(
+    store.finish_scan(&running.scan_id, late).unwrap().state,
+    "cancelled"
+  );
+  assert_eq!(store.status(&next.scan_id).unwrap().state, "scanning");
+  assert_eq!(
+    store.prepare_scan(request()).err().unwrap().code,
+    "LimitExceeded"
+  );
+}
+
+#[test]
+fn filesystem_walk_scan_without_a_tree_fails_and_releases_the_slot() {
+  let fixture = Fixture::new();
+  let mut store = EngineStore::new(vec![fixture.0.clone()]);
+  let request = || -> ScanStartRequest {
+    serde_json::from_value(serde_json::json!({ "paths": [fixture.0], "localOnly": false })).unwrap()
+  };
+  let (session, _task) = store.prepare_scan(request()).unwrap();
+  let status = store.finish_scan(&session.scan_id, Vec::new()).unwrap();
+  assert_eq!(status.state, "failed");
+  assert!(store.prepare_scan(request()).is_ok());
+}

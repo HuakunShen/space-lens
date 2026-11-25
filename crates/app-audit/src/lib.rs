@@ -21,7 +21,9 @@ mod catalog;
 mod icon;
 mod macos;
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -39,7 +41,8 @@ pub struct AppAuditOptions {
   pub include_heuristic: bool,
   /// Max apps returned after the size-descending sort. Default 500.
   pub limit: usize,
-  /// Home directory override (tests). `None` reads env HOME.
+  /// Home directory override (tests). `None` reads env HOME (or, on Windows,
+  /// USERPROFILE).
   pub home: Option<PathBuf>,
 }
 
@@ -132,11 +135,20 @@ impl fmt::Display for AppAuditError {
 
 impl std::error::Error for AppAuditError {}
 
+/// Windows sets USERPROFILE, not HOME: only shells such as Git Bash add HOME,
+/// so a desktop app started from Explorer has none.
+fn home_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+  let read = |name| env(name).filter(|value| !value.is_empty());
+  read("HOME")
+    .or_else(|| cfg!(windows).then(|| read("USERPROFILE")).flatten())
+    .map(PathBuf::from)
+}
+
 /// Enumerate installed apps for the current user and audit their storage.
 pub fn audit_installed_apps(options: &AppAuditOptions) -> Result<AppAuditReport, AppAuditError> {
   let home = match &options.home {
     Some(home) => home.clone(),
-    None => std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+    None => home_from(|name| std::env::var_os(name)).ok_or_else(|| {
       AppAuditError("HOME is not set; pass AppAuditOptions.home instead".to_string())
     })?,
   };
@@ -154,6 +166,39 @@ struct PendingEntry {
   app_path: Option<PathBuf>,
   app_canonical: Option<PathBuf>,
   locations: HashMap<PathBuf, LocationMeta>,
+}
+
+/// The spelling of a scanned path that leaves this crate: the Windows verbatim
+/// prefix (`\\?\C:\`, `\\?\UNC\`) that `fs::canonicalize` adds is removed.
+/// It stays when the plain spelling would name a different file (a component
+/// ending in a dot or space, or a DOS device name), because shells hand these
+/// strings back. Other paths pass through.
+pub fn display_path(path: &str) -> Cow<'_, str> {
+  let Some(rest) = path.strip_prefix(r"\\?\") else {
+    return Cow::Borrowed(path);
+  };
+  if rest.split('\\').any(needs_verbatim) {
+    return Cow::Borrowed(path);
+  }
+  if let Some(share) = rest.strip_prefix(r"UNC\") {
+    return Cow::Owned(format!(r"\\{share}"));
+  }
+  match rest.as_bytes() {
+    [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic() => Cow::Borrowed(rest),
+    _ => Cow::Borrowed(path),
+  }
+}
+
+fn needs_verbatim(component: &str) -> bool {
+  if component.ends_with('.') || component.ends_with(' ') {
+    return true;
+  }
+  let stem = component.split('.').next().unwrap_or_default().trim_end();
+  let upper = stem.to_ascii_uppercase();
+  matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+    || (upper.len() == 4
+      && (upper.starts_with("COM") || upper.starts_with("LPT"))
+      && matches!(upper.as_bytes()[3], b'1'..=b'9'))
 }
 
 /// Testability seam: audit an explicit app list against an explicit home.
@@ -342,7 +387,7 @@ pub fn audit_with(
         continue;
       }
       locations.push(AppAuditLocation {
-        path: path.to_string_lossy().into_owned(),
+        path: display_path(&path.to_string_lossy()).into_owned(),
         label: meta.label.clone(),
         classification: meta.classification,
         purgeable: meta.purgeable,
@@ -365,7 +410,7 @@ pub fn audit_with(
       app_path: entry
         .app_path
         .as_ref()
-        .map(|path| path.to_string_lossy().into_owned()),
+        .map(|path| display_path(&path.to_string_lossy()).into_owned()),
       installed_size,
       total_size,
       locations,
@@ -735,8 +780,9 @@ mod tests {
       let _ = std::fs::remove_dir_all(&root);
       std::fs::create_dir_all(&root).unwrap();
       // Canonicalize up front so expected join paths match the canonical
-      // absolute paths the audit reports.
-      let root = root.canonicalize().unwrap();
+      // absolute paths the audit reports (in their wire spelling).
+      let canonical = root.canonicalize().unwrap();
+      let root = PathBuf::from(super::display_path(&canonical.to_string_lossy()).into_owned());
       Fixture { root }
     }
 
@@ -795,12 +841,59 @@ mod tests {
     }
   }
 
+  /// A report path under `home`: native separators on every platform.
+  fn joined(home: &Path, relative: &str) -> String {
+    let path: PathBuf = home.join(relative).components().collect();
+    path.to_string_lossy().into_owned()
+  }
+
   fn location_paths(entry: &AppAuditEntry) -> Vec<String> {
     entry
       .locations
       .iter()
       .map(|item| item.path.clone())
       .collect()
+  }
+
+  #[test]
+  fn display_path_drops_only_safe_verbatim_prefixes() {
+    use super::display_path;
+    assert_eq!(display_path(r"\\?\C:\Users\me\a b"), r"C:\Users\me\a b");
+    assert_eq!(display_path(r"\\?\C:\"), r"C:\");
+    assert_eq!(display_path(r"\\?\UNC\server\share\x"), r"\\server\share\x");
+    for kept in [
+      r"\\?\C:\dir\trailing.",
+      r"\\?\C:\dir\trailing \x",
+      r"\\?\C:\dir\NUL.txt",
+      r"\\?\C:\com1",
+      r"\\?\Volume{0000}\x",
+      r"C:\plain",
+      "/tmp/a",
+    ] {
+      assert_eq!(display_path(kept), kept);
+    }
+  }
+
+  #[test]
+  fn home_falls_back_to_the_windows_profile_when_home_is_unset() {
+    use std::ffi::OsString;
+    let env = |pairs: &'static [(&str, &str)]| {
+      move |name: &str| {
+        pairs
+          .iter()
+          .find(|(key, _)| *key == name)
+          .map(|(_, value)| OsString::from(value))
+      }
+    };
+    let both = env(&[("HOME", "/h"), ("USERPROFILE", "/p")]);
+    assert_eq!(super::home_from(both), Some(PathBuf::from("/h")));
+    // A Windows app started from Explorer has USERPROFILE and no HOME.
+    let profile = env(&[("HOME", ""), ("USERPROFILE", "/p")]);
+    assert_eq!(
+      super::home_from(profile),
+      cfg!(windows).then(|| PathBuf::from("/p"))
+    );
+    assert_eq!(super::home_from(env(&[])), None);
   }
 
   #[test]
@@ -852,7 +945,7 @@ mod tests {
     assert_eq!(entry.source, AuditSource::Heuristic);
     assert_eq!(entry.bundle_id.as_deref(), Some(bundle_id));
     let paths = location_paths(entry);
-    let expect = |relative: &str| home.join(relative).to_string_lossy().into_owned();
+    let expect = |relative: &str| joined(&home, relative);
     for relative in [
       "Library/Application Support/com.example.TestApp",
       "Library/Caches/TestApp",
@@ -900,8 +993,8 @@ mod tests {
       .iter()
       .find(|app| app.id == "codex-cli")
       .expect("codex-cli entry");
-    let sessions = home.join(".codex/sessions").to_string_lossy().into_owned();
-    let root = home.join(".codex").to_string_lossy().into_owned();
+    let sessions = joined(&home, ".codex/sessions");
+    let root = joined(&home, ".codex");
     // Partition semantics: no residual entries are generated; the parent keeps
     // its own catalog label and classification.
     assert!(
@@ -1026,10 +1119,7 @@ mod tests {
       },
     ];
     let report = audit_with(&apps, &home, &options(0, true, 500)).unwrap();
-    let shared = home
-      .join("Library/Application Support/com.raycast.macos")
-      .to_string_lossy()
-      .into_owned();
+    let shared = joined(&home, "Library/Application Support/com.raycast.macos");
     let owners: Vec<&AppAuditEntry> = report
       .apps
       .iter()
@@ -1093,10 +1183,7 @@ mod tests {
       discovered("Visual Studio Code", Some("com.microsoft.VSCode"), &home),
     ];
     let report = audit_with(&apps, &home, &options(0, false, 500)).unwrap();
-    let code = home
-      .join("Library/Application Support/Code")
-      .to_string_lossy()
-      .into_owned();
+    let code = joined(&home, "Library/Application Support/Code");
     let vscode = report
       .apps
       .iter()
@@ -1242,10 +1329,7 @@ mod tests {
       .expect("raycast entry");
     assert_eq!(entry.name, "Raycast");
     assert_eq!(entry.source, AuditSource::Catalog);
-    let root = home
-      .join("Library/Application Support/com.raycast.macos")
-      .to_string_lossy()
-      .into_owned();
+    let root = joined(&home, "Library/Application Support/com.raycast.macos");
     let location = entry
       .locations
       .iter()

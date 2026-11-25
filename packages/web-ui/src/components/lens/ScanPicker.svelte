@@ -404,6 +404,11 @@
               {#if auditError}<p class="mb-2 text-xs text-muted-foreground" role="status">
                   Refresh failed — showing the cached audit. {auditError}
                 </p>{/if}
+              {#if !appScanSupported}
+                <p class="mb-2 text-[11px] text-muted-foreground">
+                  Scanning a single app is not available on this host yet. Sizes come from the audit.
+                </p>
+              {/if}
               {#if filteredApps.length > 0}
                 <ul class="grid gap-2">
                   {#each filteredApps as app (app.id)}
@@ -444,7 +449,7 @@
                           disabled={busy || scanning || !appScanSupported}
                           title={appScanSupported
                             ? `Scan ${app.name}`
-                            : 'App scans need the desktop host'}
+                            : 'Scanning a single app is not available on this host yet'}
                           onclick={() => onScanApp(app.id)}
                           >{scanning ? 'Scanning…' : 'Scan'}</Button
                         >
@@ -498,7 +503,7 @@
               indeterminate={progressFraction === null}
               value={progressFraction === null ? undefined : Math.round(progressFraction * 100)}
             />
-            {#if progressBaseline}
+            {#if progressBaseline && progressFraction !== null}
               <p class="text-xs text-muted-foreground">
                 {progressBaseline.source === 'last-scan'
                   ? 'Estimated from your last scan of this location.'
