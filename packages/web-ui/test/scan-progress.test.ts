@@ -80,3 +80,18 @@ test('durations read naturally', () => {
   assert.equal(formatDuration(3_900_000), '1 h 5 min')
   assert.equal(formatDuration(7_200_000), '2 h')
 })
+
+test('a scan that has measured nothing yet shows activity, not 0%', () => {
+  // Hosts that walk without progress callbacks (Windows desktop) report zero
+  // until they finish. A disk-used baseline must not turn that into "0% ·
+  // Estimating time left" for the whole walk.
+  const estimate = estimateScanProgress({
+    bytesScanned: 0,
+    entriesScanned: 0,
+    elapsedMs: 44 * 60_000,
+    baseline: { bytes: 770 * GiB, entries: null, source: 'disk-used' },
+  })
+  assert.equal(estimate.fraction, null)
+  assert.equal(estimate.etaMs, null)
+  assert.equal(estimate.finishing, false)
+})

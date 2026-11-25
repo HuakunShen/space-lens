@@ -498,7 +498,7 @@
               indeterminate={progressFraction === null}
               value={progressFraction === null ? undefined : Math.round(progressFraction * 100)}
             />
-            {#if progressBaseline}
+            {#if progressBaseline && progressFraction !== null}
               <p class="text-xs text-muted-foreground">
                 {progressBaseline.source === 'last-scan'
                   ? 'Estimated from your last scan of this location.'
