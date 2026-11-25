@@ -15,7 +15,11 @@ impl Fixture {
     ));
     std::fs::create_dir_all(path.join("data")).unwrap();
     std::fs::write(path.join("data/file"), vec![b'x'; 8192]).unwrap();
-    Self(std::fs::canonicalize(path).unwrap())
+    // The plain spelling: guarded scans get paths as the picker writes them.
+    let canonical = std::fs::canonicalize(path).unwrap();
+    Self(PathBuf::from(
+      spacelens_discovery::display_path(&canonical.to_string_lossy()).into_owned(),
+    ))
   }
   fn request(&self) -> ScanStartRequest {
     serde_json::from_value(serde_json::json!({
@@ -74,7 +78,7 @@ fn discover_protected(
   page
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn local_only_scan_reports_coverage_derives_discovery_and_allows_cleanup() {
   let fixture = Fixture::new();
@@ -119,10 +123,51 @@ fn local_only_scan_reports_coverage_derives_discovery_and_allows_cleanup() {
   assert_eq!(page.total, 1);
   assert_eq!(
     page.items[0].node.path,
-    fixture.0.join("data/file").to_string_lossy().to_string()
+    fixture
+      .0
+      .join("data")
+      .join("file")
+      .to_string_lossy()
+      .to_string()
   );
   assert_eq!(page.items[0].category, "Large file");
   assert!(fixture.0.join("data/file").exists());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn a_request_without_flags_is_local_only_and_keeps_cloud_folders_closed() {
+  let fixture = Fixture::new();
+  std::fs::create_dir_all(fixture.0.join("OneDrive")).unwrap();
+  std::fs::write(fixture.0.join("OneDrive/cloud"), vec![b'x'; 8192]).unwrap();
+  let mut store = EngineStore::new(vec![fixture.0.clone()]);
+  let request: ScanStartRequest =
+    serde_json::from_value(serde_json::json!({ "paths": [fixture.0] })).unwrap();
+  assert!(request.local_only);
+  let session = store.start_scan(request).unwrap();
+  let status = serde_json::to_value(store.status(&session.scan_id).unwrap()).unwrap();
+  assert_eq!(status["coverage"]["mode"], "local-only");
+  assert_eq!(status["coverage"]["logicalBytes"], 8192);
+  assert_eq!(status["coverage"]["skippedByReason"]["cloud-root"], 1);
+  let children = root_children(&mut store, &session.scan_id).items;
+  let cloud = children
+    .iter()
+    .find(|node| node.name == "OneDrive")
+    .unwrap();
+  let summary = serde_json::to_value(cloud).unwrap();
+  assert_eq!(summary["scanState"], "skipped");
+  assert_eq!(summary["skipReason"], "cloud-root");
+  assert_eq!(
+    store
+      .plan(&CleanupPlanRequest {
+        scan_id: session.scan_id,
+        node_ids: vec![cloud.id.clone()],
+      })
+      .unwrap_err()
+      .code,
+    "InvalidRequest",
+    "a skipped cloud folder can never be cleaned up"
+  );
 }
 
 #[test]
@@ -312,7 +357,7 @@ fn protected_scan_keeps_skipped_symlinks_and_rejects_cleanup_of_skipped_entries(
   assert_eq!(rejected, "InvalidRequest");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn protected_discovery_classifies_caches_gitignored_and_dedupes_children() {
   let fixture = Fixture::new();
@@ -350,7 +395,7 @@ fn protected_discovery_classifies_caches_gitignored_and_dedupes_children() {
         .strip_prefix(&fixture.0)
         .unwrap()
         .to_string_lossy()
-        .into_owned()
+        .replace('\\', "/")
     })
     .collect();
   assert_eq!(
@@ -387,24 +432,21 @@ fn protected_discovery_classifies_caches_gitignored_and_dedupes_children() {
   assert_eq!(gitignored.items[0].category, "Gitignored");
   let files = discover_protected(&mut store, &session.scan_id, DiscoveryKind::LargeFiles);
   assert!(
-    files
-      .items
-      .iter()
-      .any(|item| item.node.path.ends_with("cache_out/nested/blob") && item.node.ignored),
+    files.items.iter().any(
+      |item| Path::new(&item.node.path).ends_with("cache_out/nested/blob") && item.node.ignored
+    ),
     "ignored files still surface as large files"
   );
   assert!(
     !files
       .items
       .iter()
-      .any(|item| item.node.path.ends_with("/__pycache__")),
+      .any(|item| Path::new(&item.node.path).ends_with("__pycache__")),
     "directories never appear in the large-files view"
   );
 }
 
-// Unix-only like the other guarded-scanner tests: elsewhere a localOnly
-// request runs the regular walker, whose discovery classifies gitignored files.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn protected_scan_without_gitignore_classification_rejects_gitignored_discovery() {
   let fixture = Fixture::new();
@@ -498,7 +540,7 @@ fn protected_cleanup_fails_closed_when_paths_change_between_plan_and_execute() {
   );
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn protected_cleanup_executes_through_trash_or_reports_a_typed_failure() {
   let fixture = Fixture::new();

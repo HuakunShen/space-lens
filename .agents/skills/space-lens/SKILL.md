@@ -63,10 +63,16 @@ spacelens skills update                    # pull the newest version from the re
   `gitignored` (anything matched by .gitignore). No preset = all three.
 - `clean` is **dry-run by default**; deletion needs `--execute`.
 - `--json` on every command for machine-readable output.
-- **Symlinks are not followed by default.** Symlinked external projects
-  (vendored checkouts, `references/*` style dirs) are measured as link nodes.
-  Pass `--follow-symlinks` to descend into them; an inode guard prevents
-  symlink cycles and double counting.
+- **`scan`, `candidates` and `clean` are local-only, with no flag.** Cloud
+  folders (OneDrive, Dropbox, iCloud, Google Drive, any Windows cloud
+  placeholder), online-only files, links, junctions and other volumes are never
+  opened; they are reported as skipped. `scan --json` prints
+  `{nodes, coverage, volumes}`.
+- A folder containing anything unscanned (other than links) is withheld from
+  `candidates`/`clean` and listed on stderr.
+- **Links are never followed** by those commands; `--follow-symlinks` is
+  refused there. `dirty-git` still walks the filesystem directly and has no
+  cloud protection: do not point it at a home folder that holds cloud storage.
 - `clean`/`candidates` skip hidden dirs only with `--ignore-hidden`.
 
 ## Remote SSH hosts
