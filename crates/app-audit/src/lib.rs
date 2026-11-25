@@ -23,6 +23,7 @@ mod macos;
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -40,7 +41,8 @@ pub struct AppAuditOptions {
   pub include_heuristic: bool,
   /// Max apps returned after the size-descending sort. Default 500.
   pub limit: usize,
-  /// Home directory override (tests). `None` reads env HOME.
+  /// Home directory override (tests). `None` reads env HOME (or, on Windows,
+  /// USERPROFILE).
   pub home: Option<PathBuf>,
 }
 
@@ -133,11 +135,20 @@ impl fmt::Display for AppAuditError {
 
 impl std::error::Error for AppAuditError {}
 
+/// Windows sets USERPROFILE, not HOME: only shells such as Git Bash add HOME,
+/// so a desktop app started from Explorer has none.
+fn home_from(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
+  let read = |name| env(name).filter(|value| !value.is_empty());
+  read("HOME")
+    .or_else(|| cfg!(windows).then(|| read("USERPROFILE")).flatten())
+    .map(PathBuf::from)
+}
+
 /// Enumerate installed apps for the current user and audit their storage.
 pub fn audit_installed_apps(options: &AppAuditOptions) -> Result<AppAuditReport, AppAuditError> {
   let home = match &options.home {
     Some(home) => home.clone(),
-    None => std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+    None => home_from(|name| std::env::var_os(name)).ok_or_else(|| {
       AppAuditError("HOME is not set; pass AppAuditOptions.home instead".to_string())
     })?,
   };
@@ -861,6 +872,28 @@ mod tests {
     ] {
       assert_eq!(display_path(kept), kept);
     }
+  }
+
+  #[test]
+  fn home_falls_back_to_the_windows_profile_when_home_is_unset() {
+    use std::ffi::OsString;
+    let env = |pairs: &'static [(&str, &str)]| {
+      move |name: &str| {
+        pairs
+          .iter()
+          .find(|(key, _)| *key == name)
+          .map(|(_, value)| OsString::from(value))
+      }
+    };
+    let both = env(&[("HOME", "/h"), ("USERPROFILE", "/p")]);
+    assert_eq!(super::home_from(both), Some(PathBuf::from("/h")));
+    // A Windows app started from Explorer has USERPROFILE and no HOME.
+    let profile = env(&[("HOME", ""), ("USERPROFILE", "/p")]);
+    assert_eq!(
+      super::home_from(profile),
+      cfg!(windows).then(|| PathBuf::from("/p"))
+    );
+    assert_eq!(super::home_from(env(&[])), None);
   }
 
   #[test]
