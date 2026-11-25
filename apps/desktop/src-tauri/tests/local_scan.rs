@@ -584,3 +584,59 @@ fn legacy_discovery_still_walks_the_filesystem_outside_protected_scans() {
     "scan roots still cannot be cleaned up"
   );
 }
+
+#[test]
+fn filesystem_walk_scans_prepare_without_walking_and_land_through_finish() {
+  // Every Windows scan takes this path. Prepare is a short, walk-free lock
+  // section; the walk runs outside the engine and lands through finish_scan.
+  let fixture = Fixture::new();
+  let mut store = EngineStore::new(vec![fixture.0.clone()]);
+  let request = || -> ScanStartRequest {
+    serde_json::from_value(serde_json::json!({ "paths": [fixture.0], "localOnly": false })).unwrap()
+  };
+  let (session, task) = store.prepare_scan(request()).unwrap();
+  assert!(session.root_ids.is_empty());
+  assert_eq!(store.status(&session.scan_id).unwrap().state, "scanning");
+  assert_eq!(
+    store.prepare_scan(request()).err().unwrap().code,
+    "LimitExceeded"
+  );
+
+  let tree = space_lens::scan_directory(task.options);
+  let status = store.finish_scan(&session.scan_id, tree).unwrap();
+  assert_eq!(status.state, "ready");
+  assert_eq!(status.root_ids.len(), 1);
+  assert_eq!(status.bytes_scanned, 8192);
+  assert_eq!(root_children(&mut store, &session.scan_id).items.len(), 1);
+
+  // Cancel is terminal, but the slot stays held until the walk lands.
+  let (cancelled, task) = store.prepare_scan(request()).unwrap();
+  assert_eq!(
+    store.cancel_scan(&cancelled.scan_id).unwrap().state,
+    "cancelled"
+  );
+  assert!(task.cancellation.is_cancelled());
+  assert_eq!(
+    store.prepare_scan(request()).err().unwrap().code,
+    "LimitExceeded"
+  );
+  let late = space_lens::scan_directory(task.options);
+  assert_eq!(
+    store.finish_scan(&cancelled.scan_id, late).unwrap().state,
+    "cancelled"
+  );
+  assert!(store.prepare_scan(request()).is_ok());
+}
+
+#[test]
+fn filesystem_walk_scan_without_a_tree_fails_and_releases_the_slot() {
+  let fixture = Fixture::new();
+  let mut store = EngineStore::new(vec![fixture.0.clone()]);
+  let request = || -> ScanStartRequest {
+    serde_json::from_value(serde_json::json!({ "paths": [fixture.0], "localOnly": false })).unwrap()
+  };
+  let (session, _task) = store.prepare_scan(request()).unwrap();
+  let status = store.finish_scan(&session.scan_id, Vec::new()).unwrap();
+  assert_eq!(status.state, "failed");
+  assert!(store.prepare_scan(request()).is_ok());
+}

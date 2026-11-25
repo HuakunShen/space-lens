@@ -798,6 +798,36 @@ impl EngineStore {
       }
       return Ok(self.record(&session.scan_id)?.session.clone());
     }
+    let (session, task) = self.prepare_scan(request)?;
+    let tree = scan_directory(task.options);
+    let status = self.finish_scan(&session.scan_id, tree)?;
+    if status.state != "ready" {
+      // The synchronous form keeps its old contract: a failed walk is an
+      // error, never a lingering failed record.
+      self.scans.remove(&session.scan_id);
+      return Err(problem("InvalidRequest", status.message));
+    }
+    Ok(self.record(&session.scan_id)?.session.clone())
+  }
+
+  /// Validates an unprotected (filesystem-walk) scan and registers it as
+  /// `scanning` under a short lock. The walk itself (`scan_directory` over
+  /// `task.options`) runs OUTSIDE the engine lock and lands through
+  /// [`EngineStore::finish_scan`] — the same session-first flow as
+  /// `prepare_local_scan`. This is the path every Windows scan takes (the
+  /// guarded scanner is unix-only), so holding the engine lock for the walk
+  /// would stall the IPC reply past its timeout on a large drive and block
+  /// every later engine call behind it.
+  pub fn prepare_scan(
+    &mut self,
+    request: ScanStartRequest,
+  ) -> EngineResult<(ScanSession, LocalScanTask)> {
+    if request.local_only && protected_scan_supported() {
+      return Err(problem(
+        "InvalidRequest",
+        "protected scans are prepared by prepare_local_scan",
+      ));
+    }
     if self
       .scans
       .values()
@@ -859,12 +889,10 @@ impl EngineStore {
       resolved.push(canonical);
     }
     let scan_id = new_id("scan_");
-    let created_at = now_iso();
     let label = request
       .label
       .clone()
       .or_else(|| resolved.first().map(|p| p.to_string_lossy().to_string()));
-
     let options = ScanOptions {
       directories: resolved,
       ignore_hidden: request.ignore_hidden,
@@ -876,61 +904,44 @@ impl EngineStore {
       },
       follow_symlinks: false,
     };
-    let tree = scan_directory(options);
-    if tree.is_empty() {
-      return Err(problem(
-        "InvalidRequest",
-        "the engine produced no tree for the requested paths",
-      ));
-    }
-
-    let mut index = NodeIndex::default();
-    let mut roots = Vec::new();
-    let mut bytes = 0u64;
-    let mut entries = 0usize;
-    for root in &tree {
-      roots.push(walk_index(root, NONE, None, &mut index));
-      bytes += root.size;
-      entries += count_nodes(root);
-    }
-    index.seal();
-    let root_ids: Vec<String> = roots.iter().map(|root| index.wire_id(*root)).collect();
-
+    let session = ScanSession {
+      scan_id: scan_id.clone(),
+      root_ids: Vec::new(),
+      created_at: now_iso(),
+      label: label.clone(),
+      app: None,
+    };
+    let cancellation = LocalScanCancellation::default();
     let status = ScanStatus {
       scan_id: scan_id.clone(),
-      state: "ready".into(),
-      message: String::new(),
+      state: "scanning".into(),
+      message: "Scanning".into(),
       progress: None,
       current_path: None,
-      bytes_scanned: bytes,
-      entries_scanned: entries,
-      root_ids: root_ids.clone(),
-      label: label.clone(),
+      bytes_scanned: 0,
+      entries_scanned: 0,
+      root_ids: Vec::new(),
+      label,
       updated_at: now_iso(),
       coverage: None,
       volumes: None,
       storage: None,
       app: None,
     };
-    let session = ScanSession {
-      scan_id: scan_id.clone(),
-      root_ids: root_ids.clone(),
-      created_at,
-      label,
-      app: None,
-    };
     self.scans.insert(
-      scan_id,
+      scan_id.clone(),
       ScanRecord {
         session: session.clone(),
         status,
-        index,
-        root_ids,
+        index: NodeIndex::default(),
+        root_ids: Vec::new(),
         ignore_hidden: request.ignore_hidden,
         discovery: HashMap::new(),
         local_only: false,
         gitignore_classified: request.respect_gitignore,
-        active_worker: None,
+        // Holds the single scan slot until finish_scan, even if cancelled:
+        // the walk is still running and must not overlap another one.
+        active_worker: Some(cancellation.clone()),
         app_origin: None,
         app_context: None,
         virtual_root_id: None,
@@ -940,7 +951,62 @@ impl EngineStore {
       },
     );
     self.evict_finished_scans();
-    Ok(session)
+    Ok((
+      session,
+      LocalScanTask {
+        scan_id,
+        options,
+        cancellation,
+      },
+    ))
+  }
+
+  /// Lands a walk prepared by [`EngineStore::prepare_scan`]: indexes the tree
+  /// and marks the scan ready, or failed when the walk produced nothing.
+  /// Always releases the scan slot; a cancelled scan stays cancelled.
+  pub fn finish_scan(&mut self, scan_id: &str, tree: Vec<ScanNode>) -> EngineResult<ScanStatus> {
+    let record = self
+      .scans
+      .get_mut(scan_id)
+      .ok_or_else(|| problem("NotFound", "scan vanished"))?;
+    if record.local_only || record.app_origin.is_some() {
+      return Err(problem("InvalidRequest", "not a filesystem-walk scan"));
+    }
+    record.active_worker = None;
+    if record.status.state != "scanning" {
+      let status = record.status.clone();
+      self.finished(scan_id);
+      return Ok(status);
+    }
+    if tree.is_empty() {
+      record.status.state = "failed".into();
+      record.status.message = "the engine produced no tree for the requested paths".into();
+    } else {
+      let mut index = NodeIndex::default();
+      let mut roots = Vec::new();
+      let mut bytes = 0u64;
+      let mut entries = 0usize;
+      for root in &tree {
+        roots.push(walk_index(root, NONE, None, &mut index));
+        bytes += root.size;
+        entries += count_nodes(root);
+      }
+      index.seal();
+      let root_ids: Vec<String> = roots.iter().map(|root| index.wire_id(*root)).collect();
+      record.status.state = "ready".into();
+      record.status.message = String::new();
+      record.status.bytes_scanned = bytes;
+      record.status.entries_scanned = entries;
+      record.status.root_ids = root_ids.clone();
+      record.session.root_ids = root_ids.clone();
+      record.root_ids = root_ids;
+      record.index = index;
+    }
+    record.status.current_path = None;
+    record.status.updated_at = now_iso();
+    let status = record.status.clone();
+    self.finished(scan_id);
+    Ok(status)
   }
 
   /// Pure lexical validation only; no filesystem probes before protection.
@@ -1642,12 +1708,19 @@ impl EngineStore {
       .scans
       .get_mut(scan_id)
       .ok_or_else(|| problem("NotFound", "scan vanished"))?;
-    if record.local_only && record.status.state == "scanning" {
+    // Only a scan with a running worker can be in `scanning`; that covers
+    // protected scans and filesystem-walk scans prepared by `prepare_scan`.
+    if record.status.state == "scanning" {
       if let Some(cancellation) = &record.active_worker {
         cancellation.cancel();
       }
       record.status.state = "cancelled".into();
-      record.status.message = "Local scan cancelled".into();
+      record.status.message = if record.local_only {
+        "Local scan cancelled"
+      } else {
+        "Scan cancelled"
+      }
+      .into();
       record.status.current_path = None;
       record.status.updated_at = now_iso();
     }
