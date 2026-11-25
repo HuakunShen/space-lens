@@ -82,8 +82,8 @@ test('durations read naturally', () => {
 })
 
 test('a scan that has measured nothing yet shows activity, not 0%', () => {
-  // Hosts that walk without progress callbacks (Windows desktop) report zero
-  // until they finish. A disk-used baseline must not turn that into "0% ·
+  // A host that has not reported counts yet sends zeros. A disk-used baseline
+  // must not turn that into "0% ·
   // Estimating time left" for the whole walk.
   const estimate = estimateScanProgress({
     bytesScanned: 0,

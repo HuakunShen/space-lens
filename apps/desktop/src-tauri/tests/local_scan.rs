@@ -609,23 +609,38 @@ fn filesystem_walk_scans_prepare_without_walking_and_land_through_finish() {
   assert_eq!(status.bytes_scanned, 8192);
   assert_eq!(root_children(&mut store, &session.scan_id).items.len(), 1);
 
-  // Cancel is terminal, but the slot stays held until the walk lands.
-  let (cancelled, task) = store.prepare_scan(request()).unwrap();
+  // Progress lands on the running scan.
+  let (running, task) = store.prepare_scan(request()).unwrap();
+  let progressed = store
+    .update_scan_progress(&running.scan_id, 12, 4096)
+    .unwrap();
+  assert_eq!(progressed.entries_scanned, 12);
+  assert_eq!(progressed.bytes_scanned, 4096);
+
+  // Cancel is terminal and frees the slot at once: the walk is told to stop,
+  // so the next scan need not wait for it to land.
   assert_eq!(
-    store.cancel_scan(&cancelled.scan_id).unwrap().state,
+    store.cancel_scan(&running.scan_id).unwrap().state,
     "cancelled"
   );
   assert!(task.cancellation.is_cancelled());
+  let (next, _next_task) = store.prepare_scan(request()).unwrap();
+  let late_progress = store
+    .update_scan_progress(&running.scan_id, 99, 9999)
+    .unwrap();
+  assert_eq!(late_progress.entries_scanned, 12);
+  // The cancelled walk landing late neither revives it nor frees the slot the
+  // next scan holds.
+  let late = space_lens::scan_directory(task.options);
+  assert_eq!(
+    store.finish_scan(&running.scan_id, late).unwrap().state,
+    "cancelled"
+  );
+  assert_eq!(store.status(&next.scan_id).unwrap().state, "scanning");
   assert_eq!(
     store.prepare_scan(request()).err().unwrap().code,
     "LimitExceeded"
   );
-  let late = space_lens::scan_directory(task.options);
-  assert_eq!(
-    store.finish_scan(&cancelled.scan_id, late).unwrap().state,
-    "cancelled"
-  );
-  assert!(store.prepare_scan(request()).is_ok());
 }
 
 #[test]

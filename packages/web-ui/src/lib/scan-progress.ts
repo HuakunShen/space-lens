@@ -67,8 +67,8 @@ export function estimateScanProgress(input: {
 }): ScanProgressEstimate {
   const { bytesScanned, entriesScanned, elapsedMs, baseline } = input
   const bytesPerSecond = elapsedMs > 0 ? (bytesScanned / elapsedMs) * 1000 : null
-  // Nothing measured yet is "unknown", not 0%: a host whose walk reports no
-  // progress (Windows desktop) would otherwise sit at 0% until it finishes.
+  // Nothing measured yet is "unknown", not 0%: until the first counts arrive
+  // there is no position to show.
   const measured = bytesScanned > 0 || entriesScanned > 0
   if (!measured || baseline === null || baseline.bytes <= 0) {
     return { fraction: null, etaMs: null, finishing: false, bytesPerSecond }

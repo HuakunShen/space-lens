@@ -4,11 +4,15 @@
 //! the engine's vocabulary.
 
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc::RecvTimeoutError;
 use std::sync::{Arc, Mutex};
 
 use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use space_lens::local_scan::LocalScanCancellation;
+use space_lens::ScanObserver;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 
@@ -1191,14 +1195,65 @@ fn submit_scan_reply(
   Some(task)
 }
 
+/// How often a running walk publishes its counts and looks for a cancel.
+const WALK_RELAY_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// One tick between a walk and its scan record: a cancellation goes to the
+/// walk, otherwise the walk's counts go to the record and the event stream.
+fn relay_walk_state(
+  bundle: &SessionBundle,
+  scan_id: &str,
+  cancellation: &LocalScanCancellation,
+  observer: &ScanObserver,
+) {
+  if cancellation.is_cancelled() {
+    observer.cancelled.store(true, Ordering::Relaxed);
+    return;
+  }
+  // Publish under the engine lock: captured counts must never arrive after
+  // the cancelled event.
+  let mut engine = bundle.engine.lock().unwrap();
+  let updated = engine.update_scan_progress(
+    scan_id,
+    observer.files.load(Ordering::Relaxed),
+    observer.bytes.load(Ordering::Relaxed),
+  );
+  if let Ok(status) = updated {
+    if status.state == "scanning" {
+      let _ = bundle
+        .events
+        .publish(json!({ "kind": "scan.updated", "status": status }));
+    }
+  }
+}
+
 /// Background filesystem walk for a scan prepared by `submit_scan_reply`.
-/// The engine lock is taken only to land the result, never for the walk.
+/// The engine lock is taken only for progress and to land the result, never
+/// for the walk.
 fn run_scan_task(bundle: &SessionBundle, task: LocalScanTask) {
-  let scan_id = task.scan_id;
-  let tree = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-    space_lens::scan_directory(task.options)
-  }))
-  .unwrap_or_default();
+  let LocalScanTask {
+    scan_id,
+    options,
+    cancellation,
+  } = task;
+  let observer = ScanObserver::default();
+  observer
+    .cancelled
+    .store(cancellation.is_cancelled(), Ordering::Relaxed);
+  let tree = std::thread::scope(|scope| {
+    let (done, finished) = std::sync::mpsc::channel::<()>();
+    let observer = &observer;
+    let walk = scope.spawn(move || {
+      // Dropped when the walk returns or panics, which ends the relay loop.
+      let _done = done;
+      space_lens::scan_directory_observed(options, observer)
+    });
+    while finished.recv_timeout(WALK_RELAY_INTERVAL) == Err(RecvTimeoutError::Timeout) {
+      relay_walk_state(bundle, &scan_id, &cancellation, observer);
+    }
+    // A panicked walk lands as an empty tree, which fails the scan.
+    walk.join().unwrap_or_default()
+  });
   let mut engine = bundle.engine.lock().unwrap();
   let was_scanning = engine
     .status(&scan_id)
@@ -2083,6 +2138,63 @@ mod tests {
     crate::reveal::reveal_scan_path(&[plain], path, crate::reveal::RevealAction::Reveal)
       .expect("the wire path is revealable under the served root");
     std::fs::remove_dir_all(raw).unwrap();
+  }
+
+  #[test]
+  fn walk_scans_report_the_observer_counts_and_stop_when_cancelled() {
+    use std::sync::atomic::Ordering;
+    let path = std::env::temp_dir().join(format!("sl-walk-cancel-{}", std::process::id()));
+    std::fs::create_dir_all(&path).unwrap();
+    std::fs::write(path.join("file"), vec![b'x'; 4096]).unwrap();
+    let path = std::fs::canonicalize(path).unwrap();
+    let state = super::AppState::new(vec![path.clone()]);
+    let session = super::connect_window_session("main", super::LOCAL_DEVICE_ID, &state);
+    let bundle = state
+      .sessions
+      .lock()
+      .unwrap()
+      .get(session["sessionId"].as_str().unwrap())
+      .unwrap()
+      .clone();
+    let request = || serde_json::from_value(serde_json::json!({ "paths": [path] })).unwrap();
+    let (scan, task) = bundle
+      .engine
+      .lock()
+      .unwrap()
+      .prepare_scan(request())
+      .unwrap();
+
+    let observer = space_lens::ScanObserver::default();
+    observer.files.store(7, Ordering::Relaxed);
+    observer.bytes.store(1234, Ordering::Relaxed);
+    super::relay_walk_state(&bundle, &task.scan_id, &task.cancellation, &observer);
+    let (_, replay) = bundle.events.subscribe(None);
+    let event = &replay.replay.last().unwrap().payload;
+    assert_eq!(event["kind"], "scan.updated");
+    assert_eq!(event["status"]["entriesScanned"], 7);
+    assert_eq!(event["status"]["bytesScanned"], 1234);
+    assert!(!observer.cancelled.load(Ordering::Relaxed));
+
+    bundle
+      .engine
+      .lock()
+      .unwrap()
+      .cancel_scan(&scan.scan_id)
+      .unwrap();
+    super::relay_walk_state(&bundle, &task.scan_id, &task.cancellation, &observer);
+    assert!(observer.cancelled.load(Ordering::Relaxed));
+
+    super::run_scan_task(&bundle, task);
+    let mut engine = bundle.engine.lock().unwrap();
+    assert_eq!(engine.status(&scan.scan_id).unwrap().state, "cancelled");
+    let (_, replay) = bundle.events.subscribe(None);
+    assert!(replay
+      .replay
+      .iter()
+      .all(|event| event.payload["kind"] != "scan.completed"));
+    assert!(engine.prepare_scan(request()).is_ok());
+    drop(engine);
+    std::fs::remove_dir_all(path).unwrap();
   }
 
   #[cfg(not(unix))]

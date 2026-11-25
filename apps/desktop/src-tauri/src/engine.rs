@@ -162,7 +162,7 @@ pub struct AppScanStartRequest {
 /// every pinned call returns `Unsupported`, so a `localOnly` scan would finish
 /// "ready" with empty roots. On those platforms a `localOnly` request runs the
 /// regular walker instead: it reads metadata, plus `.gitignore` files when
-/// asked to respect them, and reports no progress until it finishes.
+/// asked to respect them, and reports file and byte counts as it goes.
 pub fn protected_scan_supported() -> bool {
   cfg!(unix)
 }
@@ -963,8 +963,7 @@ impl EngineStore {
         discovery: HashMap::new(),
         local_only: false,
         gitignore_classified: request.respect_gitignore,
-        // Holds the single scan slot until finish_scan, even if cancelled:
-        // the walk is still running and must not overlap another one.
+        // Holds the single scan slot until finish_scan or cancel_scan.
         active_worker: Some(cancellation.clone()),
         app_origin: None,
         app_context: None,
@@ -987,7 +986,8 @@ impl EngineStore {
 
   /// Lands a walk prepared by [`EngineStore::prepare_scan`]: indexes the tree
   /// and marks the scan ready, or failed when the walk produced nothing.
-  /// Always releases the scan slot; a cancelled scan stays cancelled.
+  /// Always releases this scan's slot; a cancelled scan stays cancelled and its
+  /// partial tree is dropped.
   pub fn finish_scan(&mut self, scan_id: &str, tree: Vec<ScanNode>) -> EngineResult<ScanStatus> {
     let record = self
       .scans
@@ -1180,6 +1180,25 @@ impl EngineStore {
         "{} files · {} folders · {} skipped · {} denied",
         progress.files, progress.directories, progress.skipped_count, progress.denied_count
       );
+      record.status.updated_at = now_iso();
+    }
+    Ok(record.status.clone())
+  }
+
+  /// Counts of a running filesystem walk (see `prepare_scan`).
+  pub fn update_scan_progress(
+    &mut self,
+    scan_id: &str,
+    files: u64,
+    bytes: u64,
+  ) -> EngineResult<ScanStatus> {
+    let record = self
+      .scans
+      .get_mut(scan_id)
+      .ok_or_else(|| problem("NotFound", "scan vanished"))?;
+    if record.status.state == "scanning" && !record.local_only {
+      record.status.entries_scanned = files.try_into().unwrap_or(usize::MAX);
+      record.status.bytes_scanned = bytes;
       record.status.updated_at = now_iso();
     }
     Ok(record.status.clone())
@@ -1747,6 +1766,11 @@ impl EngineStore {
       .into();
       record.status.current_path = None;
       record.status.updated_at = now_iso();
+      // A filesystem walk stops as soon as it sees the cancellation, so its
+      // slot is free now. Guarded and app walks keep theirs until they land.
+      if !record.local_only && record.app_origin.is_none() {
+        record.active_worker = None;
+      }
     }
     Ok(record.status.clone())
   }
