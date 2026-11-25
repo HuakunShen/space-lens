@@ -563,7 +563,8 @@ fn trash(args: RemoteTrashArgs) -> Result<()> {
   let remote = connect(&args.target, policy)?;
   let _guard = StopOnDrop(remote.clone());
 
-  let mut by_parent: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+  let mut by_parent: std::collections::BTreeMap<String, Vec<String>> =
+    std::collections::BTreeMap::new();
   for path in &args.paths {
     let (parent, name) =
       split_parent(path).with_context(|| format!("{path} is not an absolute folder path"))?;
@@ -612,9 +613,8 @@ fn trash(args: RemoteTrashArgs) -> Result<()> {
     // batch that planned everything first would hit the limit and lose the
     // work it had already done.
     if args.execute {
-      let outcome = host(
-        remote.cleanup_execute(plan["planId"].as_str().context("plan returned no planId")?),
-      )?;
+      let outcome =
+        host(remote.cleanup_execute(plan["planId"].as_str().context("plan returned no planId")?))?;
       freed += outcome["bytesFreed"].as_u64().unwrap_or(0);
       trashed += outcome["trashed"].as_array().map(Vec::len).unwrap_or(0);
       failures += outcome["failed"].as_array().map(Vec::len).unwrap_or(0);
@@ -890,7 +890,10 @@ mod trash_tests {
     // A Windows remote sends backslashes; the parent must not become `C:`.
     assert_eq!(
       split_parent(r"C:\Users\shenh\proj\node_modules"),
-      Some((r"C:\Users\shenh\proj".to_string(), "node_modules".to_string()))
+      Some((
+        r"C:\Users\shenh\proj".to_string(),
+        "node_modules".to_string()
+      ))
     );
     // Trailing separators are not part of the name.
     assert_eq!(
@@ -901,8 +904,16 @@ mod trash_tests {
 
   #[test]
   fn relative_and_root_paths_are_refused() {
-    assert_eq!(split_parent("dev/node_modules"), None, "a relative path has no folder to serve");
+    assert_eq!(
+      split_parent("dev/node_modules"),
+      None,
+      "a relative path has no folder to serve"
+    );
     assert_eq!(split_parent("/"), None);
-    assert_eq!(split_parent("/home"), None, "the root itself has no parent to scan");
+    assert_eq!(
+      split_parent("/home"),
+      None,
+      "the root itself has no parent to scan"
+    );
   }
 }
