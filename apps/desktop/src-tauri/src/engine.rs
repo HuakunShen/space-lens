@@ -157,13 +157,16 @@ pub struct AppScanStartRequest {
   pub app_id: String,
 }
 
-/// Whether the guarded scanner (`kuntu_scan::local_scan`) can walk here. It
-/// pins directories by file descriptor, which only exists on Unix; elsewhere
-/// every pinned call returns `Unsupported`, so a `localOnly` scan would finish
-/// "ready" with empty roots. On those platforms a `localOnly` request runs the
-/// regular walker instead: it reads metadata, plus `.gitignore` files when
-/// asked to respect them, and reports file and byte counts as it goes.
+/// Whether the guarded scanner (`kuntu_scan::local_scan`) can walk here: it
+/// pins directories by file descriptor on Unix and by handle on Windows. Where
+/// it can, every path scan the shell submits is local-only.
 pub fn protected_scan_supported() -> bool {
+  cfg!(any(unix, windows))
+}
+
+/// App scans additionally need the app audit and cleanup rules, which only
+/// cover Unix layouts.
+pub fn app_scan_supported() -> bool {
   cfg!(unix)
 }
 
@@ -171,7 +174,9 @@ pub fn protected_scan_supported() -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct ScanStartRequest {
   pub paths: Vec<String>,
-  #[serde(default)]
+  /// Local-only unless a caller says otherwise: cloud and online-only items
+  /// are never entered.
+  #[serde(default = "default_true")]
   pub local_only: bool,
   #[serde(default)]
   pub ignore_hidden: bool,
@@ -838,10 +843,8 @@ impl EngineStore {
   /// `scanning` under a short lock. The walk itself (`scan_directory` over
   /// `task.options`) runs OUTSIDE the engine lock and lands through
   /// [`EngineStore::finish_scan`] — the same session-first flow as
-  /// `prepare_local_scan`. This is the path every Windows scan takes (the
-  /// guarded scanner is unix-only), so holding the engine lock for the walk
-  /// would stall the IPC reply past its timeout on a large drive and block
-  /// every later engine call behind it.
+  /// `prepare_local_scan`, so the engine lock is never held for a walk. The
+  /// shell only comes here where the guarded scanner is unavailable.
   pub fn prepare_scan(
     &mut self,
     request: ScanStartRequest,
@@ -2536,8 +2539,14 @@ fn safe_metadata(path: &Path, roots: &[PathBuf]) -> Option<fs::Metadata> {
   if metadata.file_type().is_symlink() {
     return None;
   }
-  let canonical = fs::canonicalize(path).ok()?;
-  if canonical != path || !roots.iter().any(|root| canonical.starts_with(root)) {
+  // Windows canonical paths carry the `\\?\` prefix, which guarded-scan paths
+  // do not; both sides are compared in the plain spelling.
+  let canonical = policy::normalize_canonical(&fs::canonicalize(path).ok()?);
+  if canonical != policy::normalize_canonical(path)
+    || !roots
+      .iter()
+      .any(|root| canonical.starts_with(policy::normalize_canonical(root)))
+  {
     return None;
   }
   Some(metadata)
@@ -2553,10 +2562,10 @@ fn guard_cleanup_roots(
   {
     return Err(problem("Forbidden", "scan roots cannot be cleaned up"));
   }
-  if configured_roots
-    .iter()
-    .any(|root| fs::canonicalize(root).is_ok_and(|root| path == root))
-  {
+  if configured_roots.iter().any(|root| {
+    fs::canonicalize(root)
+      .is_ok_and(|root| policy::normalize_canonical(path) == policy::normalize_canonical(&root))
+  }) {
     return Err(problem(
       "Forbidden",
       "configured roots cannot be cleaned up",

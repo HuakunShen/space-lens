@@ -1,12 +1,12 @@
 //! Read-only filesystem discovery shared by Space Lens product shells:
 //! large files, disposable developer caches, and gitignored paths. Every
-//! entry is derived from engine scans; nothing here deletes, moves, or
-//! evicts anything.
+//! entry is derived from one protected local-only engine scan; nothing here
+//! deletes, moves, or evicts anything, and cloud items are never entered.
 
 #![deny(clippy::all)]
 
 use serde::Serialize;
-use space_lens::{scan_directory, IgnoredMode, ScanNode, ScanOptions};
+use space_lens::{scan_local_directory, IgnoredMode, LocalScanNode, ScanOptions};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt;
@@ -105,27 +105,24 @@ pub fn run_discovery(options: DiscoveryOptions) -> Result<DiscoveryReport, Disco
   // must be a real path; everything below is then compared canonically.
   let roots = canonical_roots(&options.roots)?;
 
-  let scan_options = |respect_gitignore: bool| ScanOptions {
+  let scan = scan_local_directory(ScanOptions {
     directories: roots.clone(),
     ignore_hidden: options.ignore_hidden,
-    full_path: true,
-    respect_gitignore,
+    full_path: false,
+    respect_gitignore: true,
     ignored_mode: IgnoredMode::Summarize,
     follow_symlinks: false,
-  };
-  // The full tree enumerates files and cache directories; the gitignore view
-  // only classifies rules. Same two-scan split as the desktop workbench.
-  let full = scan_directory(scan_options(false));
-  let summarized = scan_directory(scan_options(true));
+  })
+  .map_err(|error| DiscoveryError(format!("scan failed: {error}")))?;
   let mut ignored_paths: HashSet<PathBuf> = HashSet::new();
-  for root in &summarized {
+  for root in &scan.nodes {
     collect_ignored_paths(root, &mut ignored_paths);
   }
 
   let mut large_files = Vec::new();
   let mut caches = Vec::new();
   let mut gitignored = Vec::new();
-  for root in &full {
+  for root in &scan.nodes {
     walk_classify(
       root,
       0,
@@ -253,7 +250,7 @@ fn finish_view(
 }
 
 fn walk_classify(
-  node: &ScanNode,
+  node: &LocalScanNode,
   depth: u32,
   roots: &[PathBuf],
   ignored_paths: &HashSet<PathBuf>,
@@ -261,6 +258,10 @@ fn walk_classify(
   caches: &mut Vec<DiscoveryEntry>,
   gitignored: &mut Vec<DiscoveryEntry>,
 ) {
+  // Nothing the scan left alone is probed again.
+  if node.scan_state == "skipped" {
+    return;
+  }
   let path = &node.path;
   // Fail closed if a path or any ancestor was replaced by a link after the
   // scan; canonical paths must still lie under an original scan root.
@@ -305,7 +306,7 @@ fn walk_classify(
   }
 }
 
-fn collect_ignored_paths(node: &ScanNode, out: &mut HashSet<PathBuf>) {
+fn collect_ignored_paths(node: &LocalScanNode, out: &mut HashSet<PathBuf>) {
   if node.ignored {
     out.insert(node.path.clone());
   }
@@ -556,6 +557,29 @@ mod tests {
     assert_eq!(large.total, 3);
     assert!(large.truncated);
     assert!(large.items[0].path.ends_with("big.bin"));
+  }
+
+  #[test]
+  fn cloud_folders_appear_in_no_view() {
+    let fixture = Fixture::new("cloud");
+    let project = fixture.dir("project");
+    fixture.file("project/package.json", 2);
+    fixture.file("project/OneDrive/package.json", 2);
+    fixture.file("project/OneDrive/node_modules/big.bin", 1024);
+    fixture.file("project/kept.bin", 1024);
+
+    let report = run_discovery(options(&project, 0, 200)).unwrap();
+    for view in &report.views {
+      assert!(
+        !Fixture::paths(view)
+          .iter()
+          .any(|path| path.contains("OneDrive")),
+        "{} lists a cloud path",
+        view.kind
+      );
+    }
+    let large = Fixture::view(&report, DiscoveryKind::LargeFiles);
+    assert_eq!(large.total, 2);
   }
 
   #[test]

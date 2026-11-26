@@ -27,6 +27,10 @@ npm install space-lens
 
 ## Install the CLI
 
+`scan`, `candidates`, `clean` and desktop folder scans read local files only:
+cloud folders, cloud placeholders, online-only files, links and other volumes
+are skipped and reported, never opened.
+
 The Rust CLI is the crate `spacelens` (scan, candidates, clean, dirty-git,
 icloud). Once published to crates.io:
 

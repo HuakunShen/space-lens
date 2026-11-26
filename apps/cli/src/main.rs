@@ -7,10 +7,10 @@ use space_lens::cloud::{
   NativeICloudBackend, ScanOptions as CloudScanOptions,
 };
 use space_lens::{
-  build_removal_plan, execute_removal_plan, find_candidates, find_dirty_git_repos, scan_directory,
-  scan_local_directory_with_progress, CandidateOptions, CleanupPreset, DirtyGitRepoOptions,
-  IgnoredMode, LocalScanCancellation, LocalScanProgress, LocalScanReport, RemovalPlan, ScanNode,
-  ScanOptions,
+  build_removal_plan, execute_removal_plan, find_dirty_git_repos, find_local_candidates,
+  scan_local_directory_with_progress, CandidateOptions, CleanupCandidate, CleanupPreset,
+  DirtyGitRepoOptions, IgnoredMode, LocalScanCancellation, LocalScanNode, LocalScanProgress,
+  LocalScanReport, RemovalPlan, ScanOptions,
 };
 use spacelens_app_audit::{audit_installed_apps, AppAuditOptions};
 use spacelens_storage_usage::{storage_breakdown, ScannedRoot};
@@ -38,7 +38,10 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+  /// Measure local files. Cloud folders, online-only files, links and other
+  /// volumes are skipped and reported, never opened.
   Scan(ScanArgs),
+  /// List cleanup candidates among local files.
   Candidates(CandidateArgs),
   Clean(CleanArgs),
   #[command(name = "dirty-git")]
@@ -129,16 +132,22 @@ struct ScanArgs {
   respect_gitignore: bool,
   #[arg(long, value_enum, default_value_t = IgnoredModeArg::Summarize)]
   ignored_mode: IgnoredModeArg,
-  #[arg(long, help = "Descend into symlinked directories")]
+  #[arg(long, hide = true)]
   follow_symlinks: bool,
+  /// Accepted for older callers: every scan is local-only.
+  #[arg(long, hide = true)]
+  local_only: bool,
   #[arg(
     long,
-    help = "Protected local scan: skip cloud domains, dataless items, mounts and symlinks"
+    requires = "json",
+    help = "Emit progress and terminal report as NDJSON"
   )]
-  local_only: bool,
-  #[arg(long, requires_all = ["local_only", "json"], help = "Emit progress and terminal report as NDJSON")]
   progress_json: bool,
-  #[arg(long, requires_all = ["local_only", "progress_json"], help = "Emit each node separately before the terminal coverage report")]
+  #[arg(
+    long,
+    requires = "progress_json",
+    help = "Emit each node separately before the terminal coverage report"
+  )]
   stream_nodes: bool,
 }
 
@@ -152,7 +161,7 @@ struct CandidateArgs {
   json: bool,
   #[arg(long)]
   ignore_hidden: bool,
-  #[arg(long, help = "Descend into symlinked directories")]
+  #[arg(long, hide = true)]
   follow_symlinks: bool,
 }
 
@@ -166,7 +175,7 @@ struct CleanArgs {
   json: bool,
   #[arg(long)]
   ignore_hidden: bool,
-  #[arg(long, help = "Descend into symlinked directories")]
+  #[arg(long, hide = true)]
   follow_symlinks: bool,
   #[arg(long)]
   execute: bool,
@@ -378,70 +387,58 @@ fn run_scan(args: ScanArgs) -> Result<()> {
     follow_symlinks: args.follow_symlinks,
   };
 
-  if args.local_only {
-    let cancellation = LocalScanCancellation::default();
-    let writer = std::sync::Mutex::new(io::BufWriter::new(io::stdout()));
-    let output_error = std::sync::Mutex::new(None::<String>);
-    let report = scan_local_directory_with_progress(options, cancellation.clone(), |progress| {
-      if args.progress_json {
-        if let Err(error) = write_ndjson(
-          &mut *writer.lock().unwrap(),
-          &ProgressFrame {
-            kind: "progress",
-            progress,
-          },
-        ) {
-          *output_error.lock().unwrap() = Some(error.to_string());
-          cancellation.cancel();
-        }
-      }
-    });
-    if let Some(error) = output_error.into_inner().unwrap() {
-      anyhow::bail!("progress output failed: {error}");
-    }
-    let mut report = report?;
+  let cancellation = LocalScanCancellation::default();
+  let writer = std::sync::Mutex::new(io::BufWriter::new(io::stdout()));
+  let output_error = std::sync::Mutex::new(None::<String>);
+  let report = scan_local_directory_with_progress(options, cancellation.clone(), |progress| {
     if args.progress_json {
-      if args.stream_nodes {
-        // Move each subtree through an explicit stack: no tree clone or giant JSON frame.
-        let mut pending = std::mem::take(&mut report.nodes);
-        pending.reverse();
-        while let Some(mut node) = pending.pop() {
-          let children = std::mem::take(&mut node.children);
-          write_ndjson_buffered(
-            &mut *writer.lock().unwrap(),
-            &NodeFrame {
-              kind: "node",
-              node: &node,
-            },
-          )?;
-          pending.extend(children.into_iter().rev());
-        }
-      }
-      write_ndjson(
+      if let Err(error) = write_ndjson(
         &mut *writer.lock().unwrap(),
-        &DoneFrame {
-          kind: "done",
-          report: &report,
+        &ProgressFrame {
+          kind: "progress",
+          progress,
         },
-      )?;
-    } else if args.json {
-      print_json(&report)?;
-    } else {
-      for node in report.nodes {
-        print_tree(&ScanNode::from(node), 0);
+      ) {
+        *output_error.lock().unwrap() = Some(error.to_string());
+        cancellation.cancel();
       }
-      eprintln!("Local-only coverage: {} skipped, {} denied, {} issues. Sizes are allocated blocks, not guaranteed reclaimable space.", report.coverage.skipped_count, report.coverage.denied_count, report.coverage.issue_count);
     }
-    return Ok(());
+  });
+  if let Some(error) = output_error.into_inner().unwrap() {
+    anyhow::bail!("progress output failed: {error}");
   }
-  let tree = scan_directory(options);
-
-  if args.json {
-    print_json(&tree)?;
+  let mut report = report?;
+  if args.progress_json {
+    if args.stream_nodes {
+      // Move each subtree through an explicit stack: no tree clone or giant JSON frame.
+      let mut pending = std::mem::take(&mut report.nodes);
+      pending.reverse();
+      while let Some(mut node) = pending.pop() {
+        let children = std::mem::take(&mut node.children);
+        write_ndjson_buffered(
+          &mut *writer.lock().unwrap(),
+          &NodeFrame {
+            kind: "node",
+            node: &node,
+          },
+        )?;
+        pending.extend(children.into_iter().rev());
+      }
+    }
+    write_ndjson(
+      &mut *writer.lock().unwrap(),
+      &DoneFrame {
+        kind: "done",
+        report: &report,
+      },
+    )?;
+  } else if args.json {
+    print_json(&report)?;
   } else {
-    for node in &tree {
+    for node in &report.nodes {
       print_tree(node, 0);
     }
+    eprintln!("Local-only coverage: {} skipped, {} denied, {} issues. Sizes are allocated blocks, not guaranteed reclaimable space.", report.coverage.skipped_count, report.coverage.denied_count, report.coverage.issue_count);
   }
 
   Ok(())
@@ -465,7 +462,7 @@ struct DoneFrame<'a> {
 struct NodeFrame<'a> {
   #[serde(rename = "type")]
   kind: &'static str,
-  node: &'a space_lens::LocalScanNode,
+  node: &'a LocalScanNode,
 }
 
 fn write_ndjson<W: Write, T: serde::Serialize>(writer: &mut W, value: &T) -> Result<()> {
@@ -480,13 +477,51 @@ fn write_ndjson_buffered<W: Write, T: serde::Serialize>(writer: &mut W, value: &
   Ok(())
 }
 
+/// Candidates among local files, with a note on what the search left alone.
+fn local_candidates(
+  paths: Vec<PathBuf>,
+  presets: Vec<PresetArg>,
+  ignore_hidden: bool,
+  follow_symlinks: bool,
+) -> Result<Vec<CleanupCandidate>> {
+  if follow_symlinks {
+    anyhow::bail!("local-only searches never follow symbolic links");
+  }
+  let report = find_local_candidates(CandidateOptions {
+    roots: paths,
+    presets: presets.into_iter().map(CleanupPreset::from).collect(),
+    ignore_hidden,
+    follow_symlinks,
+  })?;
+  if report.coverage.skipped_count > 0 {
+    let reasons = report
+      .coverage
+      .skipped_by_reason
+      .iter()
+      .map(|(reason, count)| format!("{count} {reason}"))
+      .collect::<Vec<_>>()
+      .join(", ");
+    eprintln!("Local-only search: not scanned: {reasons}.");
+  }
+  if !report.withheld.is_empty() {
+    eprintln!(
+      "{} matching folders were withheld because part of them was not scanned:",
+      report.withheld.len()
+    );
+    for path in report.withheld.iter().take(20) {
+      eprintln!("  {}", path.display());
+    }
+  }
+  Ok(report.candidates)
+}
+
 fn run_candidates(args: CandidateArgs) -> Result<()> {
-  let candidates = find_candidates(CandidateOptions {
-    roots: args.paths,
-    presets: args.preset.into_iter().map(CleanupPreset::from).collect(),
-    ignore_hidden: args.ignore_hidden,
-    follow_symlinks: args.follow_symlinks,
-  });
+  let candidates = local_candidates(
+    args.paths,
+    args.preset,
+    args.ignore_hidden,
+    args.follow_symlinks,
+  )?;
 
   if args.json {
     print_json(&candidates)?;
@@ -506,12 +541,12 @@ fn run_candidates(args: CandidateArgs) -> Result<()> {
 }
 
 fn run_clean(args: CleanArgs) -> Result<()> {
-  let candidates = find_candidates(CandidateOptions {
-    roots: args.paths,
-    presets: args.preset.into_iter().map(CleanupPreset::from).collect(),
-    ignore_hidden: args.ignore_hidden,
-    follow_symlinks: args.follow_symlinks,
-  });
+  let candidates = local_candidates(
+    args.paths,
+    args.preset,
+    args.ignore_hidden,
+    args.follow_symlinks,
+  )?;
   let plan = build_removal_plan(candidates);
 
   if args.execute {
@@ -731,9 +766,14 @@ fn run_app_icon(args: AppIconArgs) -> Result<()> {
   Ok(())
 }
 
-fn print_tree(node: &ScanNode, indent: usize) {
+fn print_tree(node: &LocalScanNode, indent: usize) {
   let prefix = "  ".repeat(indent);
-  println!("{prefix}{}\t{}", node.name, format_bytes(node.size));
+  match &node.skip_reason {
+    Some(reason) if node.scan_state == "skipped" => {
+      println!("{prefix}{}\tskipped: {reason}", node.name)
+    }
+    _ => println!("{prefix}{}\t{}", node.name, format_bytes(node.size)),
+  }
   for child in &node.children {
     print_tree(child, indent + 1);
   }
@@ -814,16 +854,15 @@ mod tests {
   use std::path::Path;
 
   #[test]
-  fn parses_protected_scan_protocol_and_rejects_progress_on_legacy_scans() {
-    assert!(Cli::try_parse_from([
-      "spacelens",
-      "scan",
-      "/tmp/local-fixture",
-      "--local-only",
-      "--json",
-      "--progress-json"
-    ])
-    .is_ok());
+  fn progress_needs_json_but_no_local_only_flag() {
+    for flags in [
+      &["--json", "--progress-json"][..],
+      &["--local-only", "--json", "--progress-json"],
+      &["--json", "--progress-json", "--stream-nodes"],
+    ] {
+      let args = ["spacelens", "scan", "/tmp/local-fixture"];
+      assert!(Cli::try_parse_from(args.iter().chain(flags)).is_ok());
+    }
     assert!(
       Cli::try_parse_from(["spacelens", "scan", "/tmp/local-fixture", "--progress-json"]).is_err()
     );

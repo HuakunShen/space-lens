@@ -3,9 +3,9 @@ use space_lens::cloud::{
   build_eviction_plan, NativeICloudBackend, ScanOptions as CloudScanOptions,
 };
 use space_lens::{
-  build_removal_plan, execute_removal_plan, find_candidates, scan_directory, CandidateOptions,
-  CleanupPreset, IgnoredMode, PlatformCapabilities, RemovalEntry, RemovalPlan, ScanNode,
-  ScanOptions, SnapshotEnvelope,
+  build_removal_plan, execute_removal_plan, find_local_candidates, scan_local_directory,
+  CandidateOptions, CleanupPreset, IgnoredMode, PlatformCapabilities, RemovalEntry, RemovalPlan,
+  ScanNode, ScanOptions, SnapshotEnvelope,
 };
 use spacelens_app_audit::{audit_installed_apps, AppAuditOptions};
 use spacelens_discovery::{run_discovery, DiscoveryKind, DiscoveryOptions};
@@ -44,6 +44,7 @@ struct LocalScan {
 enum LocalScanState {
   Scanning,
   Ready(Vec<ScanNode>),
+  Failed(String),
 }
 
 pub fn run(allow_cleanup: bool) -> anyhow::Result<()> {
@@ -347,7 +348,7 @@ fn scan_snapshot(arguments: &Map<String, Value>) -> Value {
     value => return tool_error(format!("invalid ignoredMode: {value}")),
   };
 
-  let tree = scan_directory(ScanOptions {
+  let report = scan_local_directory(ScanOptions {
     directories: vec![path],
     ignore_hidden: arguments
       .get("ignoreHidden")
@@ -363,6 +364,10 @@ fn scan_snapshot(arguments: &Map<String, Value>) -> Value {
     // wander into symlinked external trees from an MCP-initiated snapshot.
     follow_symlinks: false,
   });
+  let tree = match report {
+    Ok(report) => report.measured_tree(),
+    Err(error) => return tool_error(error.to_string()),
+  };
   tool_success(serde_json::to_value(SnapshotEnvelope::from_scan_nodes(
     &tree,
     env!("CARGO_PKG_VERSION"),
@@ -393,7 +398,7 @@ fn cleanup_candidates(arguments: &Map<String, Value>) -> Value {
     Some(_) => return tool_error("presets must be an array"),
   };
 
-  let candidates = find_candidates(CandidateOptions {
+  let report = find_local_candidates(CandidateOptions {
     roots: vec![path],
     presets,
     ignore_hidden: arguments
@@ -404,7 +409,10 @@ fn cleanup_candidates(arguments: &Map<String, Value>) -> Value {
     // external projects from an MCP-initiated cleanup scan.
     follow_symlinks: false,
   });
-  tool_success(serde_json::to_value(build_removal_plan(candidates)))
+  match report {
+    Ok(report) => tool_success(serde_json::to_value(build_removal_plan(report.candidates))),
+    Err(error) => tool_error(error.to_string()),
+  }
 }
 
 fn discovery(arguments: &Map<String, Value>) -> Value {
@@ -601,7 +609,7 @@ fn device_scan(arguments: &Map<String, Value>) -> Value {
         );
       let path_text = path.to_string_lossy().into_owned();
       std::thread::spawn(move || {
-        let trees = scan_directory(ScanOptions {
+        let report = scan_local_directory(ScanOptions {
           directories: vec![PathBuf::from(&path_text)],
           full_path: true,
           respect_gitignore: true,
@@ -609,7 +617,10 @@ fn device_scan(arguments: &Map<String, Value>) -> Value {
           ignore_hidden: false,
           follow_symlinks: false,
         });
-        *state.lock().unwrap() = LocalScanState::Ready(trees);
+        *state.lock().unwrap() = match report {
+          Ok(report) => LocalScanState::Ready(report.measured_tree()),
+          Err(error) => LocalScanState::Failed(error.to_string()),
+        };
       });
       tool_success(Ok(json!({
         "scanId": scan_id,
@@ -662,6 +673,7 @@ fn device_scan_status(arguments: &Map<String, Value>) -> Value {
           "state": "scanning",
           "elapsedSeconds": elapsed,
         }))),
+        LocalScanState::Failed(message) => tool_error(format!("scan failed: {message}")),
         LocalScanState::Ready(trees) => tool_success(Ok(json!({
           "scanId": scan_id,
           "device": "local",
@@ -727,8 +739,12 @@ fn device_ls(arguments: &Map<String, Value>) -> Value {
         return tool_error(format!("unknown scan {scan_id}"));
       };
       let state = scan.state.lock().unwrap();
-      let LocalScanState::Ready(trees) = &*state else {
-        return tool_success(Ok(json!({ "scanId": scan_id, "state": "scanning" })));
+      let trees = match &*state {
+        LocalScanState::Ready(trees) => trees,
+        LocalScanState::Failed(message) => return tool_error(format!("scan failed: {message}")),
+        LocalScanState::Scanning => {
+          return tool_success(Ok(json!({ "scanId": scan_id, "state": "scanning" })))
+        }
       };
       let roots: Vec<&ScanNode> = trees.iter().collect();
       let listing = match path {

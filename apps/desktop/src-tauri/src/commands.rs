@@ -280,7 +280,7 @@ fn capabilities_json(memory: Value) -> Value {
   json!({
       "apiMajor": API_MAJOR,
       "contractVersion": CONTRACT_VERSION,
-      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true, "appScan": crate::engine::protected_scan_supported() },
+      "scan": { "start": true, "cancel": true, "maxConcurrent": 1, "discovery": true, "appAudit": true, "appScan": crate::engine::app_scan_supported() },
       "cleanup": { "plan": true, "execute": true, "mode": "trash", "appPlan": true, "appExecute": true },
       "host": { "folderPicker": true, "appLocationReveal": true, "pathReveal": true, "platform": crate::reveal::host_platform() },
       "icloud": "unavailable",
@@ -1065,11 +1065,10 @@ pub async fn sl_submit(
       return Ok(());
     }
     match request {
-      // Where the guarded scanner cannot walk (Windows), a localOnly request
-      // falls through to the regular scan below rather than finishing empty.
-      SubmitRequest::ScanStart { request }
-        if request.local_only && crate::engine::protected_scan_supported() =>
-      {
+      // Every path scan is local-only wherever the guarded scanner walks,
+      // whatever the request says: cloud inspection is not offered yet.
+      SubmitRequest::ScanStart { mut request } if crate::engine::protected_scan_supported() => {
+        request.local_only = true;
         let prepared = bundle.engine.lock().unwrap().prepare_local_scan(request);
         match prepared {
           Ok((session, task)) => {
@@ -1105,9 +1104,9 @@ pub async fn sl_submit(
         }
         Ok(())
       }
-      // Every other scan (all of them on Windows, where the guarded scanner
-      // is unavailable) walks the filesystem. Same session-first flow: reply
-      // with a live `scanning` session, then walk off the engine lock. The
+      // Platforms without the guarded scanner walk the filesystem. Same
+      // session-first flow: reply with a live `scanning` session, then walk
+      // off the engine lock. The
       // walk used to run inside this reply under the engine lock, so a large
       // drive outlived the client's reply timeout ("sl_submit timed out") and
       // starved every later engine call — including the next scan.
@@ -1397,7 +1396,7 @@ fn submit_app_scan_reply(
   request: AppScanStartRequest,
   reply: &Channel<Value>,
 ) {
-  if !crate::engine::protected_scan_supported() {
+  if !crate::engine::app_scan_supported() {
     let _ = reply.send(json!({
       "ok": false,
       "problem": problem_value("UnsupportedOperation", APP_SCAN_UNSUPPORTED),
@@ -1942,13 +1941,22 @@ mod tests {
     assert_eq!(state.sessions.lock().unwrap().len(), 1);
   }
 
-  #[cfg(unix)]
+  /// The canonical spelling without the Windows verbatim prefix, which is how
+  /// picker paths arrive.
+  fn plain_canonical(path: &std::path::Path) -> std::path::PathBuf {
+    let canonical = std::fs::canonicalize(path).unwrap();
+    spacelens_discovery::display_path(&canonical.to_string_lossy())
+      .into_owned()
+      .into()
+  }
+
+  #[cfg(any(unix, windows))]
   #[test]
   fn protected_native_worker_finishes_a_local_fixture_and_derives_discovery_from_the_report() {
     let path = std::env::temp_dir().join(format!("sl-native-worker-{}", std::process::id()));
     std::fs::create_dir_all(&path).unwrap();
     std::fs::write(path.join("file"), vec![b'x'; 8192]).unwrap();
-    let path = std::fs::canonicalize(path).unwrap();
+    let path = plain_canonical(&path);
     let mut engine = crate::engine::EngineStore::new(vec![path.clone()]);
     let request =
       serde_json::from_value(serde_json::json!({ "paths": [path], "localOnly": true })).unwrap();
@@ -1992,7 +2000,7 @@ mod tests {
     )
     .unwrap();
     assert_eq!(page.total, 1);
-    assert!(page.items[0].node.path.ends_with("/file"));
+    assert!(std::path::Path::new(&page.items[0].node.path).ends_with("file"));
     assert_eq!(page.items[0].category, "Large file");
     let (_, replay) = bundle.events.subscribe(None);
     assert_eq!(
@@ -2045,8 +2053,8 @@ mod tests {
         .push(serde_json::from_str::<serde_json::Value>(&json).unwrap());
       Ok(())
     });
-    // localOnly: false runs the filesystem walk on every platform; on Windows
-    // the page's localOnly request takes this same path.
+    // localOnly: false is the filesystem walk the shell keeps for platforms
+    // without the guarded scanner.
     let request = serde_json::from_value(serde_json::json!({
       "paths": [path], "localOnly": false, "respectGitignore": true,
       "ignoredMode": "summarize", "ignoreHidden": false,
@@ -2067,7 +2075,8 @@ mod tests {
     assert_eq!(engine.status(&task.scan_id).unwrap().state, "scanning");
     drop(engine);
     // A second scan is refused (one slot) instead of queuing on the lock.
-    let second = serde_json::from_value(serde_json::json!({ "paths": [path] })).unwrap();
+    let second =
+      serde_json::from_value(serde_json::json!({ "paths": [path], "localOnly": false })).unwrap();
     assert!(super::submit_scan_reply(&bundle, second, &channel).is_none());
     assert_eq!(
       messages.lock().unwrap()[1]["problem"]["problem"]["code"],
@@ -2088,7 +2097,8 @@ mod tests {
       .collect();
     assert_eq!(kinds, ["scan.updated", "scan.completed"]);
     // The slot is released once the walk lands.
-    let again = serde_json::from_value(serde_json::json!({ "paths": [path] })).unwrap();
+    let again =
+      serde_json::from_value(serde_json::json!({ "paths": [path], "localOnly": false })).unwrap();
     assert!(super::submit_scan_reply(&bundle, again, &channel).is_some());
     std::fs::remove_dir_all(path).unwrap();
   }
@@ -2156,7 +2166,9 @@ mod tests {
       .get(session["sessionId"].as_str().unwrap())
       .unwrap()
       .clone();
-    let request = || serde_json::from_value(serde_json::json!({ "paths": [path] })).unwrap();
+    let request = || {
+      serde_json::from_value(serde_json::json!({ "paths": [path], "localOnly": false })).unwrap()
+    };
     let (scan, task) = bundle
       .engine
       .lock()
@@ -2251,7 +2263,7 @@ mod tests {
     // where it cannot run.
     assert_eq!(
       capabilities["scan"]["appScan"],
-      crate::engine::protected_scan_supported()
+      crate::engine::app_scan_supported()
     );
     assert_eq!(capabilities["scan"]["maxConcurrent"], 1);
     assert_eq!(capabilities["cleanup"]["plan"], true);

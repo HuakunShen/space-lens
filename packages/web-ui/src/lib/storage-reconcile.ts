@@ -122,12 +122,13 @@ const SKIP_REASONS: Record<string, { label: string; detail: string }> = {
     detail: 'The same folder reached by a second path, such as a firmlink; measured once.',
   },
   dataless: {
-    label: 'Online-only iCloud files',
+    label: 'Online-only cloud files',
     detail: 'Not downloaded, so they use no local space. Downloads stay disabled during scans.',
   },
   'cloud-root': { label: 'Cloud storage folders', detail: 'Left to cloud inspection; their local size is unknown.' },
   'special-file': { label: 'Sockets and devices', detail: 'Not regular files; they hold no measurable data.' },
   'non-local-volume': { label: 'Network volumes', detail: 'Only local disks are scanned.' },
+  'reparse-point': { label: 'Unrecognised reparse points', detail: 'A Windows entry of unknown kind; left alone.' },
   'materialization-blocked': {
     label: 'Download blocked',
     detail: 'Reading would have downloaded the file, so it was left alone.',
